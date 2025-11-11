@@ -41,7 +41,7 @@ const normaliseState = (state: string | undefined | null): string | null => {
 };
 
 const formatCurrency = (value: number) =>
-  value > 0 ? `$${value.toLocaleString('en-AU', { maximumFractionDigits: 0 })}` : 'N/A';
+  value > 0 ? value.toLocaleString('en-AU', { maximumFractionDigits: 0 }) : 'N/A';
 
 const formatNumber = (value: number) =>
   value > 0 ? value.toLocaleString('en-AU', { maximumFractionDigits: 0 }) : 'N/A';
