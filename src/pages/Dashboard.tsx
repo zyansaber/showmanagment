@@ -161,7 +161,7 @@ export default function Dashboard() {
         <TabsList className="bg-white">
           <TabsTrigger value="employees">Employee Performance</TabsTrigger>
           <TabsTrigger value="shows">Show Analytics</TabsTrigger>
-          <TabsTrigger value="vehicles">Vehicle Distribution</TabsTrigger>
+          <TabsTrigger value="vehicles">Caravan Distribution</TabsTrigger>
         </TabsList>
 
         {/* Employee Performance Tab */}
@@ -331,11 +331,11 @@ export default function Dashboard() {
         </TabsContent>
 
         {/* Vehicle Distribution Tab */}
-        <TabsContent value="vehicles" className="space-y-6">
+        <TabsContent value="Caravan" className="space-y-6">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <Card>
               <CardHeader>
-                <CardTitle>Sales by Vehicle Type</CardTitle>
+                <CardTitle>Sales by Caravan Type</CardTitle>
                 <CardDescription>Distribution based on chassis number prefix</CardDescription>
               </CardHeader>
               <CardContent className="flex justify-center">
@@ -367,7 +367,7 @@ export default function Dashboard() {
 
             <Card>
               <CardHeader>
-                <CardTitle>Vehicle Type Details</CardTitle>
+                <CardTitle>Caravan Type Details</CardTitle>
               </CardHeader>
               <CardContent>
                 {vehicleTypeData.length > 0 ? (
@@ -389,7 +389,7 @@ export default function Dashboard() {
                     ))}
                   </div>
                 ) : (
-                  <div className="text-center py-8 text-gray-500">No vehicle data available</div>
+                  <div className="text-center py-8 text-gray-500">No caravan data available</div>
                 )}
               </CardContent>
             </Card>
