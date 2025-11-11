@@ -76,6 +76,22 @@ export interface ShowTask {
   notes: string;
 }
 
+export interface ProcessTemplateTask {
+  id: string;
+  taskName: string;
+  stage: ShowTask['stage'];
+  durationDays: number;
+  leadTimeDays: number;
+  notes?: string;
+}
+
+export interface ProcessTemplate {
+  id: string;
+  name: string;
+  description?: string;
+  tasks: ProcessTemplateTask[];
+}
+
 export interface DashboardStats {
   totalShows: number;
   completedShows: number;
