@@ -129,48 +129,6 @@ export default function ShowManagement() {
     );
   }, [validShows, selectedState]);
 
-  const totals = useMemo(() => {
-    let totalSales = 0;
-    let totalDuration = 0;
-    let showsWithDuration = 0;
-
-    validShows.forEach((show) => {
-      const sales = parseMetric(show.sales2025);
-      if (sales > 0) {
-        totalSales += sales;
-      }
-
-      const duration = parseMetric(show.showDuration);
-      if (duration > 0) {
-        totalDuration += duration;
-        showsWithDuration += 1;
-      }
-    });
-
-    return {
-      totalShows: validShows.length,
-      totalSales,
-      averageDuration: showsWithDuration > 0 ? totalDuration / showsWithDuration : 0,
-      activeStates: Object.keys(stateStats).length,
-    };
-  }, [validShows, stateStats]);
-
-  const statusCounts = useMemo(() => {
-    return validShows.reduce((acc, show) => {
-      const status = show.status || 'Unknown';
-      acc[status] = (acc[status] || 0) + 1;
-      return acc;
-    }, {} as Record<string, number>);
-  }, [validShows]);
-
-  const stateFilters = useMemo(() => {
-    const states = new Set(Object.keys(stateStats));
-    if (selectedState !== 'All' && selectedState) {
-      states.add(selectedState);
-    }
-    return ['All', ...Array.from(states).sort()];
-  }, [stateStats, selectedState]);
-
   const handleStateSelect = (state: string) => {
     setSelectedState(state);
   };
@@ -201,52 +159,6 @@ export default function ShowManagement() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Show Portfolio Overview</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid gap-6 sm:grid-cols-2 xl:grid-cols-4">
-            <div>
-              <p className="text-sm font-medium text-gray-500">Active Shows</p>
-              <p className="mt-2 text-3xl font-semibold text-gray-900">
-                {totals.totalShows}
-              </p>
-            </div>
-            <div>
-              <p className="text-sm font-medium text-gray-500">Total Sales 2025</p>
-              <p className="mt-2 text-3xl font-semibold text-gray-900">
-                {formatCurrency(totals.totalSales)}
-              </p>
-            </div>
-            <div>
-              <p className="text-sm font-medium text-gray-500">Average Duration</p>
-              <p className="mt-2 text-3xl font-semibold text-gray-900">
-                {totals.averageDuration > 0
-                  ? `${totals.averageDuration.toFixed(1)} days`
-                  : 'N/A'}
-              </p>
-            </div>
-            <div>
-              <p className="text-sm font-medium text-gray-500">States Tracked</p>
-              <p className="mt-2 text-3xl font-semibold text-gray-900">
-                {totals.activeStates}
-              </p>
-            </div>
-          </div>
-
-          {Object.keys(statusCounts).length > 0 && (
-            <div className="mt-6 flex flex-wrap gap-2">
-              {Object.entries(statusCounts).map(([status, count]) => (
-                <Badge key={status} variant="outline" className="rounded-full px-3 py-1 text-xs">
-                  {status}: {count}
-                </Badge>
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
           <div className="flex flex-wrap items-end justify-between gap-4">
             <div>
               <CardTitle>Show Distribution</CardTitle>
@@ -261,33 +173,12 @@ export default function ShowManagement() {
             )}
           </div>
         </CardHeader>
-        <CardContent className="space-y-4">
+        <CardContent>
           <AustraliaMap
             stateStats={stateStats}
             onStateClick={handleStateSelect}
             selectedState={selectedState}
           />
-
-          <div className="flex flex-wrap gap-2">
-            {stateFilters.map((state) => {
-              const isActive = selectedState === state;
-              const stats = stateStats[state];
-              return (
-                <Button
-                  key={state}
-                  size="sm"
-                  variant={isActive ? 'default' : 'outline'}
-                  onClick={() => handleStateSelect(state)}
-                  className="flex items-center gap-2"
-                >
-                  <span>{state}</span>
-                  {state !== 'All' && stats && (
-                    <span className="text-xs opacity-80">({stats.shows})</span>
-                  )}
-                </Button>
-              );
-            })}
-          </div>
         </CardContent>
       </Card>
 
