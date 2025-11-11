@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -12,9 +12,17 @@ import { Progress } from '@/components/ui/progress';
 import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Plus, CheckCircle, XCircle, Clock, Edit2, Save, X, Users } from 'lucide-react';
+import { ArrowLeft, Plus, CheckCircle, XCircle, Clock, Edit2, Save, X, Users, Sparkles } from 'lucide-react';
 import { dbGet, dbPush, dbUpdate, dbRemove } from '@/lib/firebase';
-import type { Show, ShowOrder, ShowTask, TeamMember, SiteLocation } from '@/types';
+import type {
+  Show,
+  ShowOrder,
+  ShowTask,
+  TeamMember,
+  SiteLocation,
+  ProcessTemplate,
+  ProcessTemplateTask,
+} from '@/types';
 import { toast } from 'sonner';
 
 export default function ShowDetail() {
@@ -31,6 +39,10 @@ export default function ShowDetail() {
   const [isManagingTeam, setIsManagingTeam] = useState(false);
   const [editedShow, setEditedShow] = useState<Partial<Show>>({});
   const [selectedTeamMembers, setSelectedTeamMembers] = useState<string[]>([]);
+  const [processTemplates, setProcessTemplates] = useState<ProcessTemplate[]>([]);
+  const [isUsingTemplate, setIsUsingTemplate] = useState(false);
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string>('');
+  const [templatePreviewTasks, setTemplatePreviewTasks] = useState<ProcessTemplateTask[]>([]);
 
   const [newOrder, setNewOrder] = useState<Partial<ShowOrder>>({
     chassisNumber: '',
@@ -56,13 +68,38 @@ export default function ShowDetail() {
     loadShowData();
   }, [id]);
 
+  const normaliseTemplate = (template: ProcessTemplate): ProcessTemplate => {
+    const timestamp = Date.now();
+    const rawTasks = Array.isArray(template.tasks)
+      ? template.tasks
+      : template.tasks && typeof template.tasks === 'object'
+        ? Object.values(template.tasks as unknown as Record<string, ProcessTemplateTask>)
+        : [];
+    return {
+      ...template,
+      tasks: rawTasks.map((task, index) => ({
+        ...task,
+        id: task.id || `tpl-task-${template.id || timestamp}-${index}`,
+        durationDays:
+          Number.isFinite(task.durationDays) && task.durationDays > 0
+            ? Math.round(task.durationDays)
+            : 1,
+        leadTimeDays:
+          Number.isFinite(task.leadTimeDays) && task.leadTimeDays >= 0
+            ? Math.round(task.leadTimeDays)
+            : 0,
+      })),
+    };
+  };
+
   const loadShowData = async () => {
     try {
-      const [showsData, ordersData, tasksData, teamData] = await Promise.all([
+      const [showsData, ordersData, tasksData, teamData, templatesData] = await Promise.all([
         dbGet('shows'),
         dbGet('showOrders'),
         dbGet('showTasks'),
-        dbGet('teamMembers')
+        dbGet('teamMembers'),
+        dbGet('processTemplates')
       ]);
 
       const allShows: Show[] = showsData ? Object.values(showsData) : [];
@@ -79,6 +116,16 @@ export default function ShowDetail() {
 
       const allTeamMembers: TeamMember[] = teamData ? Object.values(teamData) : [];
       setTeamMembers(allTeamMembers.filter(m => m.activeFlag === 1));
+
+      if (templatesData) {
+        const entries = Object.entries(templatesData as Record<string, ProcessTemplate>).map(([templateId, value]) => ({
+          id: templateId,
+          ...value,
+        }));
+        setProcessTemplates(entries.map((template) => normaliseTemplate(template)));
+      } else {
+        setProcessTemplates([]);
+      }
     } catch (error) {
       console.error('Error loading show data:', error);
       toast.error('Failed to load show data');
@@ -86,6 +133,36 @@ export default function ShowDetail() {
       setLoading(false);
     }
   };
+
+  const startDateInfo = useMemo(() => {
+    if (show?.startDate) {
+      const parsed = new Date(show.startDate);
+      if (!Number.isNaN(parsed.getTime())) {
+        return { date: parsed, hasStartDate: true } as const;
+      }
+    }
+    return { date: new Date(), hasStartDate: false } as const;
+  }, [show?.startDate]);
+
+  useEffect(() => {
+    if (!selectedTemplateId) {
+      setTemplatePreviewTasks([]);
+      return;
+    }
+
+    const template = processTemplates.find((tpl) => tpl.id === selectedTemplateId);
+    if (template) {
+      const timestamp = Date.now();
+      setTemplatePreviewTasks(
+        template.tasks.map((task, index) => ({
+          ...task,
+          id: task.id || `tpl-task-preview-${timestamp}-${index}`,
+        }))
+      );
+    } else {
+      setTemplatePreviewTasks([]);
+    }
+  }, [selectedTemplateId, processTemplates]);
 
   const parseValue = (value: string | number | undefined): number => {
     if (value === undefined || value === null) return 0;
@@ -225,6 +302,87 @@ export default function ShowDetail() {
     } catch (error) {
       console.error('Error adding task:', error);
       toast.error('Failed to add task');
+    }
+  };
+
+  const formatDateForInput = (date: Date) => date.toISOString().split('T')[0];
+
+  const formatDateForPreview = (date: Date) =>
+    date.toLocaleDateString('en-AU', { day: '2-digit', month: 'short', year: 'numeric' });
+
+  const updatePreviewTask = (taskId: string, updates: Partial<ProcessTemplateTask>) => {
+    setTemplatePreviewTasks((prev) =>
+      prev.map((task) =>
+        task.id === taskId
+          ? {
+              ...task,
+              ...updates,
+            }
+          : task
+      )
+    );
+  };
+
+  const calculateTaskDates = (task: ProcessTemplateTask) => {
+    const baseDate = new Date(startDateInfo.date);
+    const lead = Number.isFinite(task.leadTimeDays) ? task.leadTimeDays : 0;
+    const duration = Number.isFinite(task.durationDays) ? Math.max(1, task.durationDays) : 1;
+    const due = new Date(baseDate);
+    due.setDate(due.getDate() - lead);
+    const start = new Date(due);
+    start.setDate(start.getDate() - (duration - 1));
+    return { start, due };
+  };
+
+  const handleApplyTemplate = async () => {
+    if (!id) return;
+
+    if (!selectedTemplateId) {
+      toast.error('Select a template to use.');
+      return;
+    }
+
+    const validTasks = templatePreviewTasks.filter((task) => task.taskName.trim().length > 0);
+    if (validTasks.length === 0) {
+      toast.error('The selected template does not contain any tasks.');
+      return;
+    }
+
+    try {
+      if (!startDateInfo.hasStartDate) {
+        toast.info('Show start date is missing, using today to schedule template tasks.');
+      }
+
+      const timestamp = Date.now();
+      const tasksToCreate = validTasks.map((task, index) => {
+        const { start, due } = calculateTaskDates(task);
+        const payload: ShowTask = {
+          taskId: `TSK-${timestamp + index}`,
+          eventId: id,
+          taskName: task.taskName,
+          responsiblePeople: [],
+          stage: task.stage,
+          status: 'Not Started',
+          startDate: formatDateForInput(start),
+          dueDate: formatDateForInput(due),
+          percentComplete: 0,
+          costBudget: 0,
+          costActual: 0,
+          attachmentUrl: '',
+          notes: task.notes ?? '',
+        };
+        return payload;
+      });
+
+      await Promise.all(tasksToCreate.map((task) => dbPush('showTasks', task)));
+      setTasks((prev) => [...prev, ...tasksToCreate]);
+      setIsUsingTemplate(false);
+      setSelectedTemplateId('');
+      setTemplatePreviewTasks([]);
+      toast.success('Template tasks added to this show.');
+    } catch (error) {
+      console.error('Error applying template:', error);
+      toast.error('Failed to apply template. Please try again.');
     }
   };
 
@@ -758,7 +916,7 @@ export default function ShowDetail() {
                           <label
                             htmlFor={member.memberId}
                             className="flex-1 cursor-pointer"
-                          >
+                      >
                             <div className="font-medium">{member.memberName}</div>
                             <div className="text-sm text-gray-500">{member.role} • {member.email}</div>
                           </label>
@@ -783,10 +941,10 @@ export default function ShowDetail() {
                         Save Team
                       </Button>
                     </div>
-                  </DialogContent>
-                </Dialog>
-              </div>
-            </CardHeader>
+                    </DialogContent>
+                    </Dialog>
+                  </div>
+                </CardHeader>
             <CardContent>
               {showTeamMembers.length > 0 ? (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -822,118 +980,288 @@ export default function ShowDetail() {
         <TabsContent value="tasks">
           <Card>
             <CardHeader>
-              <div className="flex justify-between items-center">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                 <div>
                   <CardTitle>Tasks & Project Management</CardTitle>
                   <CardDescription>Track project tasks, deadlines, and responsibilities</CardDescription>
                 </div>
-                <Dialog open={isAddingTask} onOpenChange={setIsAddingTask}>
-                  <DialogTrigger asChild>
-                    <Button>
-                      <Plus className="h-4 w-4 mr-2" />
-                      Add Task
-                    </Button>
-                  </DialogTrigger>
-                  <DialogContent className="max-w-2xl">
-                    <DialogHeader>
-                      <DialogTitle>Add New Task</DialogTitle>
-                      <DialogDescription>Create a new project management task</DialogDescription>
-                    </DialogHeader>
-                    <div className="space-y-4 py-4">
-                      <div>
-                        <Label>Task Name *</Label>
-                        <Input
-                          value={newTask.taskName}
-                          onChange={(e) => setNewTask({ ...newTask, taskName: e.target.value })}
-                          placeholder="Enter task name"
-                        />
-                      </div>
-                      <div className="grid grid-cols-2 gap-4">
-                        <div>
-                          <Label>Stage</Label>
-                          <Select
-                            value={newTask.stage}
-                            onValueChange={(value) => setNewTask({ ...newTask, stage: value as ShowTask['stage'] })}
-                          >
-                            <SelectTrigger>
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="Design">Design</SelectItem>
-                              <SelectItem value="Booking">Booking</SelectItem>
-                              <SelectItem value="Logistics">Logistics</SelectItem>
-                              <SelectItem value="Marketing">Marketing</SelectItem>
-                            </SelectContent>
-                          </Select>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Dialog
+                    open={isUsingTemplate}
+                    onOpenChange={(open) => {
+                      setIsUsingTemplate(open);
+                      if (!open) {
+                        setSelectedTemplateId('');
+                        setTemplatePreviewTasks([]);
+                      }
+                    }}
+                  >
+                    <DialogTrigger asChild>
+                      <Button variant="secondary">
+                        <Sparkles className="mr-2 h-4 w-4" />
+                        Use Template
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent className="max-w-3xl">
+                      <DialogHeader>
+                        <DialogTitle>Use Process Template</DialogTitle>
+                        <DialogDescription>
+                          Select a saved process to instantly load tasks with calculated start and due dates.
+                        </DialogDescription>
+                      </DialogHeader>
+                      <div className="space-y-6">
+                        <div className="rounded-lg bg-slate-50 p-4 text-sm text-slate-700">
+                          {startDateInfo.hasStartDate ? (
+                            <span>
+                              Tasks will be scheduled backwards from the show start date of{' '}
+                              <span className="font-semibold">{formatDateForPreview(startDateInfo.date)}</span>.
+                            </span>
+                          ) : (
+                            <span>
+                              The show is missing a start date, so tasks will be scheduled using today as the reference
+                              point.
+                            </span>
+                          )}
                         </div>
-                        <div>
-                          <Label>Cost Budget</Label>
-                          <Input
-                            value={newTask.costBudget}
-                            onChange={(e) => setNewTask({ ...newTask, costBudget: e.target.value as unknown as number })}
-                            placeholder="Budget or N/A"
-                          />
-                        </div>
-                      </div>
-                      <div className="grid grid-cols-2 gap-4">
-                        <div>
-                          <Label>Start Date *</Label>
-                          <Input
-                            type="date"
-                            value={newTask.startDate}
-                            onChange={(e) => setNewTask({ ...newTask, startDate: e.target.value })}
-                          />
-                        </div>
-                        <div>
-                          <Label>Due Date *</Label>
-                          <Input
-                            type="date"
-                            value={newTask.dueDate}
-                            onChange={(e) => setNewTask({ ...newTask, dueDate: e.target.value })}
-                          />
-                        </div>
-                      </div>
-                      <div>
-                        <Label>Responsible People</Label>
-                        <div className="space-y-2 mt-2 max-h-40 overflow-y-auto border rounded-lg p-2">
-                          {showTeamMembers.map((member) => (
-                            <div key={member.memberId} className="flex items-center space-x-2">
-                              <Checkbox
-                                id={`task-${member.memberId}`}
-                                checked={newTask.responsiblePeople?.includes(member.memberName)}
-                                onCheckedChange={(checked) => {
-                                  const current = newTask.responsiblePeople || [];
-                                  if (checked) {
-                                    setNewTask({ ...newTask, responsiblePeople: [...current, member.memberName] });
-                                  } else {
-                                    setNewTask({ ...newTask, responsiblePeople: current.filter(n => n !== member.memberName) });
-                                  }
-                                }}
-                              />
-                              <label htmlFor={`task-${member.memberId}`} className="text-sm cursor-pointer">
-                                {member.memberName}
-                              </label>
+
+                        {processTemplates.length > 0 ? (
+                          <div className="space-y-4">
+                            <div>
+                              <Label>Select template</Label>
+                              <Select value={selectedTemplateId} onValueChange={setSelectedTemplateId}>
+                                <SelectTrigger>
+                                  <SelectValue placeholder="Choose a template" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {processTemplates.map((template) => (
+                                    <SelectItem key={template.id} value={template.id}>
+                                      {template.name}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
                             </div>
-                          ))}
+
+                            {selectedTemplateId && templatePreviewTasks.length > 0 ? (
+                              <div className="space-y-4">
+                                {templatePreviewTasks.map((task) => {
+                                  const { start, due } = calculateTaskDates(task);
+                                  return (
+                                    <div key={task.id} className="rounded-lg border p-4">
+                                      <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+                                        <div>
+                                          <h4 className="text-base font-semibold text-gray-900">{task.taskName}</h4>
+                                          <p className="text-xs uppercase tracking-wide text-gray-500">Stage: {task.stage}</p>
+                                        </div>
+                                        <div className="text-xs text-gray-500">
+                                          <p>
+                                            Starts:{' '}
+                                            <span className="font-medium text-gray-900">
+                                              {formatDateForPreview(start)}
+                                            </span>
+                                          </p>
+                                          <p>
+                                            Due:{' '}
+                                            <span className="font-medium text-gray-900">
+                                              {formatDateForPreview(due)}
+                                            </span>
+                                          </p>
+                                        </div>
+                                      </div>
+                                      <div className="mt-4 grid gap-4 md:grid-cols-3">
+                                        <div>
+                                          <Label className="text-xs uppercase text-gray-500">Duration (days)</Label>
+                                          <Input
+                                            type="number"
+                                            min={1}
+                                            value={task.durationDays}
+                                            onChange={(event) =>
+                                              updatePreviewTask(task.id, {
+                                                durationDays: Math.max(1, Number(event.target.value) || 1),
+                                              })
+                                            }
+                                          />
+                                        </div>
+                                        <div>
+                                          <Label className="text-xs uppercase text-gray-500">
+                                            Lead time before show (days)
+                                          </Label>
+                                          <Input
+                                            type="number"
+                                            min={0}
+                                            value={task.leadTimeDays}
+                                            onChange={(event) =>
+                                              updatePreviewTask(task.id, {
+                                                leadTimeDays: Math.max(0, Number(event.target.value) || 0),
+                                              })
+                                            }
+                                          />
+                                        </div>
+                                        <div>
+                                          <Label className="text-xs uppercase text-gray-500">Notes</Label>
+                                          <Textarea
+                                            value={task.notes ?? ''}
+                                            onChange={(event) => updatePreviewTask(task.id, { notes: event.target.value })}
+                                            placeholder="Notes for this show"
+                                            rows={2}
+                                          />
+                                        </div>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            ) : (
+                              selectedTemplateId && (
+                                <p className="text-sm text-gray-500">
+                                  This template has no tasks yet. Edit it from the Process Templates page.
+                                </p>
+                              )
+                            )}
+                          </div>
+                        ) : (
+                          <div className="space-y-3">
+                            <p className="text-sm text-gray-500">
+                              No process templates found. Create one from the Process Templates page to get started.
+                            </p>
+                            <Button variant="outline" onClick={() => navigate('/process-templates')}>
+                              Manage Templates
+                            </Button>
+                          </div>
+                        )}
+
+                        <div className="flex justify-end gap-2">
+                          <Button
+                            variant="outline"
+                            onClick={() => {
+                              setIsUsingTemplate(false);
+                              setSelectedTemplateId('');
+                              setTemplatePreviewTasks([]);
+                            }}
+                          >
+                            Cancel
+                          </Button>
+                          <Button
+                            onClick={handleApplyTemplate}
+                            disabled={!selectedTemplateId || templatePreviewTasks.length === 0}
+                          >
+                            Apply Template
+                          </Button>
                         </div>
                       </div>
-                      <div>
-                        <Label>Notes</Label>
-                        <Textarea
-                          value={newTask.notes}
-                          onChange={(e) => setNewTask({ ...newTask, notes: e.target.value })}
-                          placeholder="Enter task notes"
-                        />
+                    </DialogContent>
+                  </Dialog>
+                  <Dialog open={isAddingTask} onOpenChange={setIsAddingTask}>
+                    <DialogTrigger asChild>
+                      <Button>
+                        <Plus className="h-4 w-4 mr-2" />
+                        Add Task
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent className="max-w-2xl">
+                      <DialogHeader>
+                        <DialogTitle>Add New Task</DialogTitle>
+                        <DialogDescription>Create a new project management task</DialogDescription>
+                      </DialogHeader>
+                      <div className="space-y-4 py-4">
+                        <div>
+                          <Label>Task Name *</Label>
+                          <Input
+                            value={newTask.taskName}
+                            onChange={(e) => setNewTask({ ...newTask, taskName: e.target.value })}
+                            placeholder="Enter task name"
+                          />
+                        </div>
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <Label>Stage</Label>
+                            <Select
+                              value={newTask.stage}
+                              onValueChange={(value) => setNewTask({ ...newTask, stage: value as ShowTask['stage'] })}
+                            >
+                              <SelectTrigger>
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="Design">Design</SelectItem>
+                                <SelectItem value="Booking">Booking</SelectItem>
+                                <SelectItem value="Logistics">Logistics</SelectItem>
+                                <SelectItem value="Marketing">Marketing</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div>
+                            <Label>Cost Budget</Label>
+                            <Input
+                              value={newTask.costBudget}
+                              onChange={(e) => setNewTask({ ...newTask, costBudget: e.target.value as unknown as number })}
+                              placeholder="Budget or N/A"
+                            />
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <Label>Start Date *</Label>
+                            <Input
+                              type="date"
+                              value={newTask.startDate}
+                              onChange={(e) => setNewTask({ ...newTask, startDate: e.target.value })}
+                            />
+                          </div>
+                          <div>
+                            <Label>Due Date *</Label>
+                            <Input
+                              type="date"
+                              value={newTask.dueDate}
+                              onChange={(e) => setNewTask({ ...newTask, dueDate: e.target.value })}
+                            />
+                          </div>
+                        </div>
+                        <div>
+                          <Label>Responsible People</Label>
+                          <div className="space-y-2 mt-2 max-h-40 overflow-y-auto border rounded-lg p-2">
+                            {showTeamMembers.map((member) => (
+                              <div key={member.memberId} className="flex items-center space-x-2">
+                                <Checkbox
+                                  id={`task-${member.memberId}`}
+                                  checked={newTask.responsiblePeople?.includes(member.memberName)}
+                                  onCheckedChange={(checked) => {
+                                    const current = newTask.responsiblePeople || [];
+                                    if (checked) {
+                                      setNewTask({ ...newTask, responsiblePeople: [...current, member.memberName] });
+                                    } else {
+                                      setNewTask({
+                                        ...newTask,
+                                        responsiblePeople: current.filter((name) => name !== member.memberName),
+                                      });
+                                    }
+                                  }}
+                                />
+                                <label htmlFor={`task-${member.memberId}`} className="text-sm cursor-pointer">
+                                  {member.memberName}
+                                </label>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                        <div>
+                          <Label>Notes</Label>
+                          <Textarea
+                            value={newTask.notes}
+                            onChange={(e) => setNewTask({ ...newTask, notes: e.target.value })}
+                            placeholder="Enter task notes"
+                          />
+                        </div>
+                        <div className="flex justify-end gap-2 pt-4">
+                          <Button variant="outline" onClick={() => setIsAddingTask(false)}>
+                            Cancel
+                          </Button>
+                          <Button onClick={handleAddTask}>Add Task</Button>
+                        </div>
                       </div>
-                      <div className="flex justify-end gap-2 pt-4">
-                        <Button variant="outline" onClick={() => setIsAddingTask(false)}>
-                          Cancel
-                        </Button>
-                        <Button onClick={handleAddTask}>Add Task</Button>
-                      </div>
-                    </div>
-                  </DialogContent>
-                </Dialog>
+                    </DialogContent>
+                  </Dialog>
+                </div>
               </div>
             </CardHeader>
             <CardContent>
