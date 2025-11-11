@@ -13,7 +13,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, Plus, CheckCircle, XCircle, Clock, Edit2, Save, X, Users, Sparkles } from 'lucide-react';
-import { dbGet, dbPush, dbUpdate, dbRemove } from '@/lib/firebase';
+import { dbGet, dbSet, dbUpdate, dbRemove, schedulingDbGet } from '@/lib/firebase';
 import type {
   Show,
   ShowOrder,
@@ -22,6 +22,8 @@ import type {
   SiteLocation,
   ProcessTemplate,
   ProcessTemplateTask,
+  ShowCaravanPick,
+  ScheduleOrder,
 } from '@/types';
 import { toast } from 'sonner';
 
@@ -43,6 +45,9 @@ export default function ShowDetail() {
   const [isUsingTemplate, setIsUsingTemplate] = useState(false);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>('');
   const [templatePreviewTasks, setTemplatePreviewTasks] = useState<ProcessTemplateTask[]>([]);
+  const [caravanPicks, setCaravanPicks] = useState<ShowCaravanPick[]>([]);
+  const [availableCaravans, setAvailableCaravans] = useState<ScheduleOrder[]>([]);
+  const [loadingCaravans, setLoadingCaravans] = useState<boolean>(false);
 
   const [newOrder, setNewOrder] = useState<Partial<ShowOrder>>({
     chassisNumber: '',
@@ -94,12 +99,20 @@ export default function ShowDetail() {
 
   const loadShowData = async () => {
     try {
-      const [showsData, ordersData, tasksData, teamData, templatesData] = await Promise.all([
+      const [
+        showsData,
+        ordersData,
+        tasksData,
+        teamData,
+        templatesData,
+        caravanPickData,
+      ] = await Promise.all([
         dbGet('shows'),
         dbGet('showOrders'),
         dbGet('showTasks'),
         dbGet('teamMembers'),
-        dbGet('processTemplates')
+        dbGet('processTemplates'),
+        dbGet('showCaravanPicks'),
       ]);
 
       const allShows: Show[] = showsData ? Object.values(showsData) : [];
@@ -126,12 +139,108 @@ export default function ShowDetail() {
       } else {
         setProcessTemplates([]);
       }
+
+      if (caravanPickData && id) {
+        const picks = Object.entries(caravanPickData as Record<string, ShowCaravanPick | null | undefined>).reduce<
+          ShowCaravanPick[]
+        >((acc, [pickId, value]) => {
+          if (!value || value.showId !== id) return acc;
+          acc.push({ ...value, id: pickId });
+          return acc;
+        }, []);
+        setCaravanPicks(picks);
+      } else {
+        setCaravanPicks([]);
+      }
     } catch (error) {
       console.error('Error loading show data:', error);
       toast.error('Failed to load show data');
     } finally {
       setLoading(false);
     }
+  };
+
+  useEffect(() => {
+    const loadSchedule = async () => {
+      try {
+        setLoadingCaravans(true);
+        const scheduleData = await schedulingDbGet('schedule');
+        if (scheduleData) {
+          const values = Object.values(scheduleData as Record<string, ScheduleOrder>);
+          const filtered = values.filter((order) => {
+            const dealer = order.Dealer?.trim();
+            const production = order['Regent Production']?.trim();
+            return dealer === 'Snowy Stock' && production !== 'Finished';
+          });
+          setAvailableCaravans(filtered);
+        } else {
+          setAvailableCaravans([]);
+        }
+      } catch (error) {
+        console.error('Error loading caravan schedule:', error);
+        toast.error('Failed to load caravan schedule');
+      } finally {
+        setLoadingCaravans(false);
+      }
+    };
+
+    loadSchedule();
+  }, []);
+
+  const sanitiseKey = (value: string) =>
+    value
+      .replace(/[.#$[\]]/g, '-')
+      .replace(/\//g, '-');
+
+  const createCaravanPickId = (showId: string, chassis: string) =>
+    `pick-${sanitiseKey(showId)}-${sanitiseKey(chassis.toUpperCase())}`;
+
+  const handleAddCaravanToShow = async (order: ScheduleOrder) => {
+    if (!id) return;
+    const chassis = order.Chassis?.trim();
+    if (!chassis) {
+      toast.error('This caravan is missing a chassis number.');
+      return;
+    }
+
+    const pickId = createCaravanPickId(id, chassis);
+    const payload: ShowCaravanPick = {
+      id: pickId,
+      showId: id,
+      chassis,
+      model: order.Model?.trim() || 'Unknown',
+      dealer: order.Dealer?.trim() || 'Unknown',
+      productionStatus: order['Regent Production']?.trim() || 'Unknown',
+      requestDeliveryDate: order['Request Delivery Date']?.trim() || '',
+    };
+
+    try {
+      await dbSet(`showCaravanPicks/${pickId}`, payload as unknown as Record<string, unknown>);
+      setCaravanPicks((prev) => {
+        const others = prev.filter((pick) => pick.id !== pickId);
+        return [...others, payload];
+      });
+      toast.success('Caravan added to show picks.');
+    } catch (error) {
+      console.error('Error adding caravan to show:', error);
+      toast.error('Failed to add caravan to this show.');
+    }
+  };
+
+  const handleRemoveCaravanPick = async (pickId: string) => {
+    try {
+      await dbRemove(`showCaravanPicks/${pickId}`);
+      setCaravanPicks((prev) => prev.filter((pick) => pick.id !== pickId));
+      toast.success('Caravan removed from show picks.');
+    } catch (error) {
+      console.error('Error removing caravan from show:', error);
+      toast.error('Failed to remove caravan from this show.');
+    }
+  };
+
+  const pickExists = (chassis: string | undefined) => {
+    if (!chassis) return false;
+    return caravanPicks.some((pick) => pick.chassis.toUpperCase() === chassis.trim().toUpperCase());
   };
 
   const startDateInfo = useMemo(() => {
@@ -244,7 +353,7 @@ export default function ShowDetail() {
         status: 'Pending',
       };
       
-      await dbPush('showOrders', order);
+      await dbSet(`showOrders/${order.id}`, order as unknown as Record<string, unknown>);
       setOrders([...orders, order]);
       setIsAddingOrder(false);
       setNewOrder({
@@ -283,7 +392,7 @@ export default function ShowDetail() {
         notes: newTask.notes || '',
       };
       
-      await dbPush('showTasks', task);
+      await dbSet(`showTasks/${task.taskId}`, task as unknown as Record<string, unknown>);
       setTasks([...tasks, task]);
       setIsAddingTask(false);
       setNewTask({
@@ -302,6 +411,96 @@ export default function ShowDetail() {
     } catch (error) {
       console.error('Error adding task:', error);
       toast.error('Failed to add task');
+    }
+  };
+
+    const formatDateForInput = (date: Date) => date.toISOString().split('T')[0];
+
+  const formatDateForPreview = (date: Date) =>
+    date.toLocaleDateString('en-AU', { day: '2-digit', month: 'short', year: 'numeric' });
+
+  const formatScheduleDate = (value: string) => {
+    if (!value) return 'TBD';
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return value;
+    return parsed.toLocaleDateString('en-AU', { day: '2-digit', month: 'short', year: 'numeric' });
+  };
+
+  const updatePreviewTask = (taskId: string, updates: Partial<ProcessTemplateTask>) => {
+    setTemplatePreviewTasks((prev) =>
+      prev.map((task) =>
+        task.id === taskId
+          ? {
+              ...task,
+              ...updates,
+            }
+          : task
+      )
+    );
+  };
+
+  const calculateTaskDates = (task: ProcessTemplateTask) => {
+    const baseDate = new Date(startDateInfo.date);
+    const lead = Number.isFinite(task.leadTimeDays) ? task.leadTimeDays : 0;
+    const duration = Number.isFinite(task.durationDays) ? Math.max(1, task.durationDays) : 1;
+    const due = new Date(baseDate);
+    due.setDate(due.getDate() - lead);
+    const start = new Date(due);
+    start.setDate(start.getDate() - (duration - 1));
+    return { start, due };
+  };
+
+  const handleApplyTemplate = async () => {
+    if (!id) return;
+
+    if (!selectedTemplateId) {
+      toast.error('Select a template to use.');
+      return;
+    }
+
+    const validTasks = templatePreviewTasks.filter((task) => task.taskName.trim().length > 0);
+    if (validTasks.length === 0) {
+      toast.error('The selected template does not contain any tasks.');
+      return;
+    }
+
+    try {
+      if (!startDateInfo.hasStartDate) {
+        toast.info('Show start date is missing, using today to schedule template tasks.');
+      }
+
+      const timestamp = Date.now();
+      const tasksToCreate = validTasks.map((task, index) => {
+        const { start, due } = calculateTaskDates(task);
+        const payload: ShowTask = {
+          taskId: `TSK-${timestamp + index}`,
+          eventId: id,
+          taskName: task.taskName,
+          responsiblePeople: [],
+          stage: task.stage,
+          status: 'Not Started',
+          startDate: formatDateForInput(start),
+          dueDate: formatDateForInput(due),
+          percentComplete: 0,
+          costBudget: 0,
+          costActual: 0,
+          attachmentUrl: '',
+          notes: task.notes ?? '',
+        };
+        return payload;
+      });
+
+      await Promise.all(
+        tasksToCreate.map((task) => dbSet(`showTasks/${task.taskId}`, task as unknown as Record<string, unknown>))
+      );
+      setTasks((prev) => [...prev, ...tasksToCreate]);
+      setIsUsingTemplate(false);
+      setSelectedTemplateId('');
+      setTemplatePreviewTasks([]);
+      toast.success('Template tasks added to this show.');
+    } catch (error) {
+      console.error('Error applying template:', error);
+      toast.error('Failed to apply template. Please try again.');
     }
   };
 
@@ -556,11 +755,22 @@ export default function ShowDetail() {
 
       {/* Main Content Tabs */}
       <Tabs defaultValue="info" className="space-y-6">
-        <TabsList className="bg-white">
-          <TabsTrigger value="info">Show Information</TabsTrigger>
-          <TabsTrigger value="team">Team Members</TabsTrigger>
-          <TabsTrigger value="tasks">Tasks & Project Management</TabsTrigger>
-          <TabsTrigger value="orders">Orders & Sales</TabsTrigger>
+        <TabsList className="flex flex-wrap gap-2 rounded-xl bg-white p-1 shadow-sm">
+          <TabsTrigger value="info" className="px-6 py-3 text-base">
+            Show Information
+          </TabsTrigger>
+          <TabsTrigger value="team" className="px-6 py-3 text-base">
+            Team Members
+          </TabsTrigger>
+          <TabsTrigger value="tasks" className="px-6 py-3 text-base">
+            Tasks & Project Management
+          </TabsTrigger>
+          <TabsTrigger value="orders" className="px-6 py-3 text-base">
+            Orders & Sales
+          </TabsTrigger>
+          <TabsTrigger value="caravan" className="px-6 py-3 text-base">
+            Caravan Pick
+          </TabsTrigger>
         </TabsList>
 
         {/* Show Info Tab */}
@@ -1485,6 +1695,129 @@ export default function ShowDetail() {
                   </Button>
                 </div>
               )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+        
+        {/* Caravan Pick Tab */}
+        <TabsContent value="caravan">
+          <Card>
+            <CardHeader>
+              <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+                <div>
+                  <CardTitle>Caravan Pick</CardTitle>
+                  <CardDescription>
+                    Assign caravans from the Snowy Stock schedule to this show and keep track of their readiness.
+                  </CardDescription>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-lg font-semibold text-gray-900">Show Pick Vans</h3>
+                    <Badge variant="outline">{caravanPicks.length}</Badge>
+                  </div>
+                  {caravanPicks.length > 0 ? (
+                    <div className="space-y-3">
+                      {caravanPicks
+                        .slice()
+                        .sort((a, b) => a.chassis.localeCompare(b.chassis))
+                        .map((pick) => (
+                          <div key={pick.id} className="rounded-lg border p-4 shadow-sm">
+                            <div className="flex items-start justify-between gap-2">
+                              <div>
+                                <p className="text-base font-semibold text-gray-900">{pick.model}</p>
+                                <p className="text-sm text-gray-500">Chassis: {pick.chassis}</p>
+                              </div>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => handleRemoveCaravanPick(pick.id)}
+                                aria-label={`Remove ${pick.chassis} from show picks`}
+                              >
+                                <X className="h-4 w-4" />
+                              </Button>
+                            </div>
+                            <dl className="mt-4 grid grid-cols-1 gap-2 text-sm text-gray-600 sm:grid-cols-2">
+                              <div>
+                                <dt className="text-xs uppercase text-gray-500">Dealer</dt>
+                                <dd className="font-medium text-gray-900">{pick.dealer}</dd>
+                              </div>
+                              <div>
+                                <dt className="text-xs uppercase text-gray-500">Production</dt>
+                                <dd className="font-medium text-gray-900">{pick.productionStatus}</dd>
+                              </div>
+                              <div className="sm:col-span-2">
+                                <dt className="text-xs uppercase text-gray-500">Delivery Target</dt>
+                                <dd className="font-medium text-gray-900">
+                                  {pick.requestDeliveryDate
+                                    ? formatScheduleDate(pick.requestDeliveryDate)
+                                    : 'TBD'}
+                                </dd>
+                              </div>
+                            </dl>
+                          </div>
+                        ))}
+                    </div>
+                  ) : (
+                    <div className="rounded-lg border border-dashed p-6 text-center text-sm text-gray-500">
+                      No caravans selected yet. Choose from the list on the right to build this show's display.
+                    </div>
+                  )}
+                </div>
+
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-lg font-semibold text-gray-900">Available Caravans</h3>
+                    <Badge variant="outline">{availableCaravans.length}</Badge>
+                  </div>
+                  <div className="rounded-xl border">
+                    {loadingCaravans ? (
+                      <div className="flex h-48 items-center justify-center text-gray-500">
+                        Loading caravan schedule...
+                      </div>
+                    ) : availableCaravans.length > 0 ? (
+                      <div className="max-h-[520px] divide-y overflow-y-auto">
+                        {availableCaravans.map((order) => {
+                          const chassis = order.Chassis || `${order.Model}-${order.Index1}`;
+                          const alreadyAdded = pickExists(order.Chassis);
+                          return (
+                            <div
+                              key={chassis}
+                              className="flex flex-col gap-3 p-4 md:flex-row md:items-center md:justify-between"
+                            >
+                              <div>
+                                <p className="font-semibold text-gray-900">{order.Model || 'Unknown model'}</p>
+                                <p className="text-sm text-gray-500">Chassis: {order.Chassis || 'N/A'}</p>
+                                <p className="text-xs text-gray-500">
+                                  Regent Production: {order['Regent Production'] || 'N/A'}
+                                </p>
+                                <p className="text-xs text-gray-500">
+                                  Request Delivery: {formatScheduleDate(order['Request Delivery Date'] || '')}
+                                </p>
+                              </div>
+                              <Button
+                                size="sm"
+                                variant={alreadyAdded ? 'outline' : 'default'}
+                                disabled={alreadyAdded}
+                                onClick={() => handleAddCaravanToShow(order)}
+                              >
+                                {alreadyAdded ? 'Added' : 'Add to show'}
+                              </Button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div className="flex h-48 items-center justify-center text-gray-500">
+                        No caravans currently available for Snowy Stock.
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
             </CardContent>
           </Card>
         </TabsContent>
