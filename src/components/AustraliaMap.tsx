@@ -32,13 +32,13 @@ const MARKERS: Array<{
 }> = [
   { code: 'WA', label: 'Western Australia', lat: -24.5, lon: 123.0 },
   { code: 'NT', label: 'Northern Territory', lat: -19.5, lon: 135.5 },
-  { code: 'SA', label: 'South Australia', lat: -29.8, lon: 135.5 },
+  { code: 'SA', label: 'South Australia', lat: -28.8, lon: 133.5 },
   { code: 'QLD', label: 'Queensland', lat: -21.0, lon: 146.5 },
-  { code: 'NSW', label: 'New South Wales', lat: -31.0, lon: 147.0 },
+  { code: 'NSW', label: 'New South Wales', lat: -30.5, lon: 147.0 },
   { code: 'VIC', label: 'Victoria', lat: -36.0, lon: 144.0 },
-  { code: 'TAS', label: 'Tasmania', lat: -40.5, lon: 147.0 },
-  { code: 'ACT', label: 'ACT', lat: -35.0, lon: 149.0 },
-  { code: 'NZ', label: 'New Zealand', lat: -41.5, lon: 170.0 },
+  { code: 'TAS', label: 'Tasmania', lat: -39.5, lon: 147.0 },
+  { code: 'ACT', label: 'ACT', lat: -32.0, lon: 149.0 },
+  { code: 'NZ', label: 'New Zealand', lat: -41.5, lon: 168.0 },
 ];
 
 const projectToPercentages = (lat: number, lon: number) => {
