@@ -189,7 +189,7 @@ export default function ShowDetail() {
 
   const sanitiseKey = (value: string) =>
     value
-      .replace(/[.#$[\]]/g, '-')
+      .replace(/[.#$\[\]]/g, '-')
       .replace(/\//g, '-');
 
   const createCaravanPickId = (showId: string, chassis: string) =>
@@ -277,7 +277,7 @@ export default function ShowDetail() {
     if (value === undefined || value === null) return 0;
     if (typeof value === 'number') return value;
     const trimmed = value.trim().toLowerCase();
-    if (trimmed === 'na' || trimmed === 'n/a' || trimmed === '') return 0;
+       if (trimmed === 'na' || trimmed === 'n/a' || trimmed === '') return 0;
     const parsed = Number(value);
     return isNaN(parsed) ? 0 : parsed;
   };
@@ -298,7 +298,7 @@ export default function ShowDetail() {
         if (!start || !end) return 0;
         const startDate = new Date(start);
         const endDate = new Date(end);
-        const diffTime = Math.abs(endDate.getTime() - startDate.getTime());
+               const diffTime = Math.abs(endDate.getTime() - startDate.getTime());
         return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
       };
 
@@ -352,7 +352,7 @@ export default function ShowDetail() {
         date: new Date().toISOString().split('T')[0],
         status: 'Pending',
       };
-      
+
       await dbSet(`showOrders/${order.id}`, order as unknown as Record<string, unknown>);
       setOrders([...orders, order]);
       setIsAddingOrder(false);
@@ -391,7 +391,7 @@ export default function ShowDetail() {
         attachmentUrl: '',
         notes: newTask.notes || '',
       };
-      
+
       await dbSet(`showTasks/${task.taskId}`, task as unknown as Record<string, unknown>);
       setTasks([...tasks, task]);
       setIsAddingTask(false);
@@ -414,7 +414,7 @@ export default function ShowDetail() {
     }
   };
 
-    const formatDateForInput = (date: Date) => date.toISOString().split('T')[0];
+  const formatDateForInput = (date: Date) => date.toISOString().split('T')[0];
 
   const formatDateForPreview = (date: Date) =>
     date.toLocaleDateString('en-AU', { day: '2-digit', month: 'short', year: 'numeric' });
@@ -504,91 +504,10 @@ export default function ShowDetail() {
     }
   };
 
-  const formatDateForInput = (date: Date) => date.toISOString().split('T')[0];
-
-  const formatDateForPreview = (date: Date) =>
-    date.toLocaleDateString('en-AU', { day: '2-digit', month: 'short', year: 'numeric' });
-
-  const updatePreviewTask = (taskId: string, updates: Partial<ProcessTemplateTask>) => {
-    setTemplatePreviewTasks((prev) =>
-      prev.map((task) =>
-        task.id === taskId
-          ? {
-              ...task,
-              ...updates,
-            }
-          : task
-      )
-    );
-  };
-
-  const calculateTaskDates = (task: ProcessTemplateTask) => {
-    const baseDate = new Date(startDateInfo.date);
-    const lead = Number.isFinite(task.leadTimeDays) ? task.leadTimeDays : 0;
-    const duration = Number.isFinite(task.durationDays) ? Math.max(1, task.durationDays) : 1;
-    const due = new Date(baseDate);
-    due.setDate(due.getDate() - lead);
-    const start = new Date(due);
-    start.setDate(start.getDate() - (duration - 1));
-    return { start, due };
-  };
-
-  const handleApplyTemplate = async () => {
-    if (!id) return;
-
-    if (!selectedTemplateId) {
-      toast.error('Select a template to use.');
-      return;
-    }
-
-    const validTasks = templatePreviewTasks.filter((task) => task.taskName.trim().length > 0);
-    if (validTasks.length === 0) {
-      toast.error('The selected template does not contain any tasks.');
-      return;
-    }
-
-    try {
-      if (!startDateInfo.hasStartDate) {
-        toast.info('Show start date is missing, using today to schedule template tasks.');
-      }
-
-      const timestamp = Date.now();
-      const tasksToCreate = validTasks.map((task, index) => {
-        const { start, due } = calculateTaskDates(task);
-        const payload: ShowTask = {
-          taskId: `TSK-${timestamp + index}`,
-          eventId: id,
-          taskName: task.taskName,
-          responsiblePeople: [],
-          stage: task.stage,
-          status: 'Not Started',
-          startDate: formatDateForInput(start),
-          dueDate: formatDateForInput(due),
-          percentComplete: 0,
-          costBudget: 0,
-          costActual: 0,
-          attachmentUrl: '',
-          notes: task.notes ?? '',
-        };
-        return payload;
-      });
-
-      await Promise.all(tasksToCreate.map((task) => dbPush('showTasks', task)));
-      setTasks((prev) => [...prev, ...tasksToCreate]);
-      setIsUsingTemplate(false);
-      setSelectedTemplateId('');
-      setTemplatePreviewTasks([]);
-      toast.success('Template tasks added to this show.');
-    } catch (error) {
-      console.error('Error applying template:', error);
-      toast.error('Failed to apply template. Please try again.');
-    }
-  };
-
   const handleUpdateTaskStatus = async (taskId: string, status: string, percentComplete: number) => {
     try {
       await dbUpdate(`showTasks/${taskId}`, { status, percentComplete });
-      setTasks(tasks.map(t => 
+      setTasks(tasks.map(t =>
         t.taskId === taskId ? { ...t, status: status as ShowTask['status'], percentComplete } : t
       ));
       toast.success('Task updated successfully');
@@ -604,7 +523,7 @@ export default function ShowDetail() {
         status: 'Approved',
         approvedBy: 'Current User'
       });
-      setOrders(orders.map(o => 
+      setOrders(orders.map(o =>
         o.id === orderId ? { ...o, status: 'Approved' as const, approvedBy: 'Current User' } : o
       ));
       toast.success('Order approved successfully');
@@ -905,8 +824,8 @@ export default function ShowDetail() {
                         <Label>Number</Label>
                         <Input
                           value={editedShow.siteLocation?.number}
-                          onChange={(e) => setEditedShow({ 
-                            ...editedShow, 
+                          onChange={(e) => setEditedShow({
+                            ...editedShow,
                             siteLocation: { ...editedShow.siteLocation!, number: e.target.value }
                           })}
                         />
@@ -915,8 +834,8 @@ export default function ShowDetail() {
                         <Label>Street</Label>
                         <Input
                           value={editedShow.siteLocation?.street}
-                          onChange={(e) => setEditedShow({ 
-                            ...editedShow, 
+                          onChange={(e) => setEditedShow({
+                            ...editedShow,
                             siteLocation: { ...editedShow.siteLocation!, street: e.target.value }
                           })}
                         />
@@ -925,8 +844,8 @@ export default function ShowDetail() {
                         <Label>Suburb</Label>
                         <Input
                           value={editedShow.siteLocation?.suburb}
-                          onChange={(e) => setEditedShow({ 
-                            ...editedShow, 
+                          onChange={(e) => setEditedShow({
+                            ...editedShow,
                             siteLocation: { ...editedShow.siteLocation!, suburb: e.target.value }
                           })}
                         />
@@ -935,8 +854,8 @@ export default function ShowDetail() {
                         <Label>Postcode</Label>
                         <Input
                           value={editedShow.siteLocation?.postcode}
-                          onChange={(e) => setEditedShow({ 
-                            ...editedShow, 
+                          onChange={(e) => setEditedShow({
+                            ...editedShow,
                             siteLocation: { ...editedShow.siteLocation!, postcode: e.target.value }
                           })}
                         />
@@ -945,8 +864,8 @@ export default function ShowDetail() {
                         <Label>State</Label>
                         <Select
                           value={editedShow.siteLocation?.state}
-                          onValueChange={(value) => setEditedShow({ 
-                            ...editedShow, 
+                          onValueChange={(value) => setEditedShow({
+                            ...editedShow,
                             siteLocation: { ...editedShow.siteLocation!, state: value }
                           })}
                         >
@@ -970,8 +889,8 @@ export default function ShowDetail() {
                         <Label>Country</Label>
                         <Input
                           value={editedShow.siteLocation?.country}
-                          onChange={(e) => setEditedShow({ 
-                            ...editedShow, 
+                          onChange={(e) => setEditedShow({
+                            ...editedShow,
                             siteLocation: { ...editedShow.siteLocation!, country: e.target.value }
                           })}
                         />
@@ -1126,7 +1045,7 @@ export default function ShowDetail() {
                           <label
                             htmlFor={member.memberId}
                             className="flex-1 cursor-pointer"
-                      >
+                          >
                             <div className="font-medium">{member.memberName}</div>
                             <div className="text-sm text-gray-500">{member.role} • {member.email}</div>
                           </label>
@@ -1151,10 +1070,10 @@ export default function ShowDetail() {
                         Save Team
                       </Button>
                     </div>
-                    </DialogContent>
-                    </Dialog>
-                  </div>
-                </CardHeader>
+                  </DialogContent>
+                </Dialog>
+              </div>
+            </CardHeader>
             <CardContent>
               {showTeamMembers.length > 0 ? (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1265,13 +1184,13 @@ export default function ShowDetail() {
                                         </div>
                                         <div className="text-xs text-gray-500">
                                           <p>
-                                            Starts:{' '}
+                                            Starts{' '}
                                             <span className="font-medium text-gray-900">
                                               {formatDateForPreview(start)}
                                             </span>
                                           </p>
                                           <p>
-                                            Due:{' '}
+                                            Due{' '}
                                             <span className="font-medium text-gray-900">
                                               {formatDateForPreview(due)}
                                             </span>
@@ -1666,8 +1585,8 @@ export default function ShowDetail() {
                         <TableCell>
                           <div className="flex gap-2">
                             {order.status === 'Pending' && (
-                              <Button 
-                                size="sm" 
+                              <Button
+                                size="sm"
                                 onClick={() => handleApproveOrder(order.id)}
                               >
                                 Approve
@@ -1698,7 +1617,7 @@ export default function ShowDetail() {
             </CardContent>
           </Card>
         </TabsContent>
-        
+
         {/* Caravan Pick Tab */}
         <TabsContent value="caravan">
           <Card>
