@@ -8,16 +8,113 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Eye, Trash2 } from 'lucide-react';
-import { dbGet, dbPush, dbRemove } from '@/lib/firebase';
+import { Plus, Eye, Trash2, Loader2 } from 'lucide-react';
+import { dbGet, dbPush, dbRemove, schedulingDbGet } from '@/lib/firebase';
 import type { Show, SiteLocation } from '@/types';
 import { toast } from 'sonner';
+
+interface VanMatch {
+  chassis: string;
+  model: string;
+  regentProduction: string;
+  path: string;
+  status?: string;
+}
+
+const CHASSIS_KEYS = ['chassis', 'chassisnumber', 'vin', 'vinnumber'];
+const MODEL_KEYS = ['model', 'vanmodel', 'productmodel'];
+const REGENT_KEYS = ['regentproduction', 'regentprod', 'production', 'regentproductiondate'];
+const STATUS_KEYS = ['status', 'buildstatus', 'state', 'stage', 'progress'];
+
+const normalizeKey = (key: string) => key.replace(/[_\s-]/g, '').toLowerCase();
+
+const findValueByKeys = (node: unknown, keys: string[]): string | undefined => {
+  if (!node || typeof node !== 'object') return undefined;
+
+  for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
+    const normalizedKey = normalizeKey(key);
+    if (keys.includes(normalizedKey) && value !== null && value !== undefined && typeof value !== 'object') {
+      return String(value);
+    }
+  }
+
+  for (const value of Object.values(node as Record<string, unknown>)) {
+    if (value && typeof value === 'object') {
+      const nested = findValueByKeys(value, keys);
+      if (nested !== undefined) return nested;
+    }
+  }
+
+  return undefined;
+};
+
+const matchObjectForChassis = (obj: Record<string, unknown>, target: string, path: string[]): VanMatch | null => {
+  let hasMatch = false;
+
+  for (const [key, value] of Object.entries(obj)) {
+    const normalizedKey = normalizeKey(key);
+    if (CHASSIS_KEYS.includes(normalizedKey) && value !== null && value !== undefined && value !== '') {
+      const candidate = String(value).trim().toUpperCase();
+      if (candidate === target) {
+        hasMatch = true;
+        break;
+      }
+    }
+  }
+
+  if (!hasMatch) {
+    return null;
+  }
+
+  const model = findValueByKeys(obj, MODEL_KEYS) ?? 'Unknown';
+  const regentProduction = findValueByKeys(obj, REGENT_KEYS) ?? 'Unknown';
+  const status = findValueByKeys(obj, STATUS_KEYS);
+  const locationPath = path.length > 0 ? path.join(' / ') : 'schedule';
+
+  return {
+    chassis: target,
+    model,
+    regentProduction,
+    path: locationPath,
+    status: status?.toString(),
+  };
+};
+
+const searchScheduleForChassis = (node: unknown, target: string, path: string[] = []): VanMatch | null => {
+  if (!node || typeof node !== 'object') return null;
+
+  if (!Array.isArray(node)) {
+    const directMatch = matchObjectForChassis(node as Record<string, unknown>, target, path);
+    if (directMatch) {
+      return directMatch;
+    }
+  }
+
+  const entries = Array.isArray(node)
+    ? (node as unknown[]).map((value, index) => [String(index), value] as const)
+    : Object.entries(node as Record<string, unknown>);
+
+  for (const [key, value] of entries) {
+    if (!value || typeof value !== 'object') continue;
+    const childPath = [...path, key];
+    const result = searchScheduleForChassis(value, target, childPath);
+    if (result) {
+      return result;
+    }
+  }
+
+  return null;
+};
 
 export default function ShowManagement() {
   const navigate = useNavigate();
   const [shows, setShows] = useState<Show[]>([]);
   const [loading, setLoading] = useState(true);
   const [isAddingShow, setIsAddingShow] = useState(false);
+  const [chassisNumber, setChassisNumber] = useState('');
+  const [vanResult, setVanResult] = useState<VanMatch | null>(null);
+  const [vanLoading, setVanLoading] = useState(false);
+  const [vanError, setVanError] = useState<string | null>(null);
 
   const [newShow, setNewShow] = useState<Partial<Show>>({
     name: '',
@@ -165,6 +262,41 @@ export default function ShowManagement() {
         console.error('Error deleting show:', error);
         toast.error('Failed to delete show');
       }
+    }
+  };
+
+  const handleSearchVan = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    const normalizedChassis = chassisNumber.trim().toUpperCase();
+    if (!normalizedChassis) {
+      setVanError('Please enter a chassis number to search');
+      return;
+    }
+
+    setVanLoading(true);
+    setVanError(null);
+    setVanResult(null);
+
+    try {
+      const scheduleData = await schedulingDbGet('schedule');
+      if (!scheduleData) {
+        setVanError('No scheduling data available');
+        return;
+      }
+
+      const match = searchScheduleForChassis(scheduleData, normalizedChassis, ['schedule']);
+      if (match) {
+        setVanResult(match);
+      } else {
+        setVanError(`No scheduling entry found for ${normalizedChassis}`);
+      }
+    } catch (error) {
+      console.error('Error searching scheduling database:', error);
+      setVanError('Failed to search the scheduling database');
+      toast.error('Failed to search the scheduling database');
+    } finally {
+      setVanLoading(false);
     }
   };
 
@@ -507,6 +639,7 @@ export default function ShowManagement() {
                               size="sm"
                               onClick={() => handleDeleteShow(show.id)}
                             >
+                            >
                               <Trash2 className="h-4 w-4" />
                             </Button>
                           </div>
@@ -528,6 +661,78 @@ export default function ShowManagement() {
                 Add Your First Show
               </Button>
             </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Van Pick</CardTitle>
+          <CardDescription>
+            Enter a chassis number and we will surface the linked van model, Regent production info, and current
+            scheduling status.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          <form onSubmit={handleSearchVan} className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+            <div className="space-y-2">
+              <Label htmlFor="chassis-search">Chassis Number</Label>
+              <Input
+                id="chassis-search"
+                placeholder="e.g., SR12345"
+                value={chassisNumber}
+                onChange={(event) => setChassisNumber(event.target.value)}
+              />
+            </div>
+            <Button type="submit" disabled={vanLoading} className="w-full sm:w-auto">
+              {vanLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              {vanLoading ? 'Searching…' : 'Search'}
+            </Button>
+          </form>
+
+          {vanLoading && (
+            <p className="text-sm text-slate-500">Searching scheduling database…</p>
+          )}
+
+          {vanError && (
+            <p className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-4 py-2">{vanError}</p>
+          )}
+
+          {vanResult && (
+            <div className="rounded-3xl border border-slate-200/80 bg-gradient-to-br from-white via-white to-slate-50 px-6 py-6 shadow-lg">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-500">Chassis</p>
+                  <p className="mt-1 text-2xl font-bold text-slate-900">{vanResult.chassis}</p>
+                </div>
+                {vanResult.status && (
+                  <Badge className="w-fit rounded-full bg-slate-900 px-4 py-1 text-xs uppercase tracking-wide text-white">
+                    {vanResult.status}
+                  </Badge>
+                )}
+              </div>
+
+              <div className="mt-6 grid gap-4 sm:grid-cols-3">
+                <div className="rounded-2xl border border-slate-200 bg-white/90 p-4">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.25em] text-slate-500">Model</p>
+                  <p className="mt-2 text-lg font-semibold text-slate-900">{vanResult.model}</p>
+                </div>
+                <div className="rounded-2xl border border-slate-200 bg-white/90 p-4">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.25em] text-slate-500">Regent Production</p>
+                  <p className="mt-2 text-lg font-semibold text-slate-900">{vanResult.regentProduction}</p>
+                </div>
+                <div className="rounded-2xl border border-slate-200 bg-slate-900/90 p-4 text-white">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.25em] text-slate-200">Data Path</p>
+                  <p className="mt-2 text-sm font-semibold tracking-wide">{vanResult.path}</p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {!vanResult && !vanError && !vanLoading && (
+            <p className="text-sm text-slate-500">
+              Use Van Pick to instantly connect a chassis to its scheduling record without trawling the entire list.
+            </p>
           )}
         </CardContent>
       </Card>
