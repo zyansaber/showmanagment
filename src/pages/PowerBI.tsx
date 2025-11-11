@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { Loader2, RefreshCcw, ExternalLink } from 'lucide-react';
@@ -25,16 +25,6 @@ export default function PowerBI() {
 
     loadBiUrl();
   }, []);
-
-  const domain = useMemo(() => {
-    if (!biUrl) return '';
-    try {
-      const url = new URL(biUrl);
-      return url.hostname.replace(/^www\./, '');
-    } catch {
-      return '';
-    }
-  }, [biUrl]);
 
   const handleRefresh = () => setRefreshKey((value) => value + 1);
 
@@ -76,13 +66,8 @@ export default function PowerBI() {
       <div className="absolute inset-0 bg-gradient-to-br from-slate-900/90 via-slate-950 to-slate-900/95" />
       <div className="absolute inset-0 opacity-30 blur-3xl" style={{ background: 'conic-gradient(from 90deg at 20% 20%, #22d3ee33, #6366f133, transparent 65%)' }} />
 
-      <div className="relative space-y-8 p-8 sm:p-12">
-        <div className="flex flex-col gap-6 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.4em] text-slate-400">Power BI</p>
-            <h1 className="mt-3 text-4xl font-semibold tracking-tight text-white">Report Portal</h1>
-            {domain && <p className="mt-2 text-sm uppercase tracking-[0.3em] text-slate-500">{domain}</p>}
-          </div>
+      <div className="relative space-y-6 p-6 sm:p-10">
+        <div className="flex flex-col items-start gap-4 sm:flex-row sm:items-center sm:justify-end">
           <div className="flex flex-wrap gap-3">
             <Button
               variant="outline"
@@ -114,7 +99,7 @@ export default function PowerBI() {
               title="Power BI Report"
               allowFullScreen
               loading="lazy"
-              className="relative z-10 h-[820px] w-full border-0"
+              className="relative z-10 h-[860px] w-full border-0"
             />
           </div>
         </motion.div>
