@@ -17,22 +17,35 @@ interface AustraliaMapProps {
 const MAP_EMBED_URL =
   'https://www.openstreetmap.org/export/embed.html?bbox=110.0%2C-48.0%2C180.0%2C-10.0&layer=mapnik';
 
+const MAP_BOUNDS = {
+  minLon: 110,
+  maxLon: 180,
+  minLat: -48,
+  maxLat: -10,
+};
+
 const MARKERS: Array<{
   code: string;
   label: string;
-  top: string;
-  left: string;
+  lat: number;
+  lon: number;
 }> = [
-  { code: 'WA', label: 'Western Australia', top: '58%', left: '20%' },
-  { code: 'NT', label: 'Northern Territory', top: '30%', left: '38%' },
-  { code: 'SA', label: 'South Australia', top: '60%', left: '40%' },
-  { code: 'QLD', label: 'Queensland', top: '34%', left: '58%' },
-  { code: 'NSW', label: 'New South Wales', top: '55%', left: '65%' },
-  { code: 'VIC', label: 'Victoria', top: '68%', left: '63%' },
-  { code: 'TAS', label: 'Tasmania', top: '83%', left: '68%' },
-  { code: 'ACT', label: 'ACT', top: '58%', left: '62%' },
-  { code: 'NZ', label: 'New Zealand', top: '65%', left: '88%' },
+  { code: 'WA', label: 'Western Australia', lat: -24.5, lon: 121.0 },
+  { code: 'NT', label: 'Northern Territory', lat: -19.5, lon: 133.5 },
+  { code: 'SA', label: 'South Australia', lat: -30.5, lon: 135.5 },
+  { code: 'QLD', label: 'Queensland', lat: -21.0, lon: 146.5 },
+  { code: 'NSW', label: 'New South Wales', lat: -32.0, lon: 147.0 },
+  { code: 'VIC', label: 'Victoria', lat: -37.0, lon: 144.0 },
+  { code: 'TAS', label: 'Tasmania', lat: -42.0, lon: 147.0 },
+  { code: 'ACT', label: 'ACT', lat: -35.47, lon: 149.0 },
+  { code: 'NZ', label: 'New Zealand', lat: -41.5, lon: 172.0 },
 ];
+
+const projectToPercentages = (lat: number, lon: number) => {
+  const x = ((lon - MAP_BOUNDS.minLon) / (MAP_BOUNDS.maxLon - MAP_BOUNDS.minLon)) * 100;
+  const y = ((MAP_BOUNDS.maxLat - lat) / (MAP_BOUNDS.maxLat - MAP_BOUNDS.minLat)) * 100;
+  return { left: `${x}%`, top: `${y}%` };
+};
 
 const DEFAULT_STATS: StateData = {
   shows: 0,
@@ -67,10 +80,10 @@ export default function AustraliaMap({ stateStats, onStateClick, selectedState }
 
   return (
     <div className="space-y-6">
-      <div className="relative overflow-hidden rounded-3xl border border-slate-200 bg-slate-900 shadow-xl">
+      <div className="relative mx-auto max-w-5xl overflow-hidden rounded-3xl border border-slate-200 bg-slate-900 shadow-xl">
         <div className="absolute inset-0 bg-gradient-to-br from-slate-900 via-slate-950 to-slate-900" />
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(56,189,248,0.18),transparent_65%)]" />
-        <div className="relative aspect-[1200/720]">
+        <div className="relative aspect-[5/3]">
           <iframe
             src={MAP_EMBED_URL}
             title="Australia and New Zealand map"
@@ -100,18 +113,19 @@ export default function AustraliaMap({ stateStats, onStateClick, selectedState }
             const stats = stateStats[marker.code] ?? DEFAULT_STATS;
             const isActive = selectedState === marker.code;
             const hasShows = stats.shows > 0;
+            const position = projectToPercentages(marker.lat, marker.lon);
 
             return (
               <button
                 key={marker.code}
                 type="button"
                 onClick={() => onStateClick(marker.code)}
-                style={{ top: marker.top, left: marker.left }}
+                style={position}
                 className={cn(
-                  'absolute -translate-x-1/2 -translate-y-1/2 rounded-full border px-4 py-2 text-xs font-semibold uppercase tracking-[0.3em] shadow-lg transition focus:outline-none focus:ring-2 focus:ring-blue-400 focus:ring-offset-2 focus:ring-offset-slate-900',
+                  'absolute -translate-x-1/2 -translate-y-1/2 rounded-full border px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.28em] shadow-lg transition focus:outline-none focus:ring-2 focus:ring-blue-400 focus:ring-offset-2 focus:ring-offset-slate-900',
                   isActive
                     ? 'border-blue-400 bg-blue-500 text-white'
-                    : 'border-white/30 bg-white/80 text-slate-800 hover:bg-white'
+                    : 'border-white/40 bg-white/80 text-slate-800 hover:bg-white'
                 )}
               >
                 <span>{marker.code}</span>
