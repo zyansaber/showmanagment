@@ -32,9 +32,9 @@ const MARKERS: Array<{
 }> = [
   { code: 'WA', label: 'Western Australia', lat: -24.5, lon: 123.0 },
   { code: 'NT', label: 'Northern Territory', lat: -19.5, lon: 135.5 },
-  { code: 'SA', label: 'South Australia', lat: -28.8, lon: 133.5 },
+  { code: 'SA', label: 'South Australia', lat: -28.8, lon: 136.5 },
   { code: 'QLD', label: 'Queensland', lat: -21.0, lon: 146.5 },
-  { code: 'NSW', label: 'New South Wales', lat: -29.5, lon: 147.0 },
+  { code: 'NSW', label: 'New South Wales', lat: -27.5, lon: 147.0 },
   { code: 'VIC', label: 'Victoria', lat: -36.0, lon: 144.0 },
   { code: 'TAS', label: 'Tasmania', lat: -39.5, lon: 147.0 },
   { code: 'ACT', label: 'ACT', lat: -32.0, lon: 149.0 },
