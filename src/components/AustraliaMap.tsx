@@ -87,8 +87,9 @@ export default function AustraliaMap({ stateStats, onStateClick, selectedState }
           <iframe
             src={MAP_EMBED_URL}
             title="Australia and New Zealand map"
-            className="absolute inset-0 h-full w-full border-0 opacity-90"
+            className="pointer-events-none absolute inset-0 h-full w-full border-0 opacity-90"
             loading="lazy"
+            aria-hidden
           />
           <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-sky-500/10 via-slate-950/10 to-blue-900/20 mix-blend-screen" />
           <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_bottom,_rgba(15,23,42,0.55),transparent_70%)]" />
