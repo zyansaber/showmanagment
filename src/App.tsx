@@ -5,16 +5,17 @@ import { Toaster } from '@/components/ui/sonner';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
 import { 
-  LayoutDashboard, 
-  Calendar, 
-  Users, 
-  BarChart3, 
-  Menu, 
+  LayoutDashboard,
+  Calendar,
+  Users,
+  BarChart3,
+  Menu,
   X,
   ChevronLeft,
   ChevronRight,
   Briefcase,
-  Building2
+  Building2,
+  ClipboardList
 } from 'lucide-react';
 import Dashboard from './pages/Dashboard';
 import ShowCalendar from './pages/ShowCalendar';
@@ -23,6 +24,7 @@ import ShowManagement from './pages/ShowManagement';
 import TeamManagement from './pages/TeamManagement';
 import PowerBI from './pages/PowerBI';
 import DealershipManagement from './pages/DealershipManagement';
+import ProcessTemplates from './pages/ProcessTemplates';
 
 const queryClient = new QueryClient();
 
@@ -34,6 +36,7 @@ function Sidebar({ isOpen, setIsOpen }: { isOpen: boolean; setIsOpen: (open: boo
     { icon: LayoutDashboard, label: 'Dashboard', path: '/' },
     { icon: Calendar, label: 'Show Calendar', path: '/calendar' },
     { icon: Briefcase, label: 'Show Management', path: '/shows' },
+    { icon: ClipboardList, label: 'Process Templates', path: '/process-templates' },
     { icon: Building2, label: 'Dealership Management', path: '/dealerships' },
     { icon: Users, label: 'Team Management', path: '/team' },
     { icon: BarChart3, label: 'Power BI Reports', path: '/powerbi' },
@@ -162,6 +165,7 @@ function AppLayout() {
             <Route path="/shows" element={<ShowManagement />} />
             <Route path="/show/:id" element={<ShowDetail />} />
             <Route path="/dealerships" element={<DealershipManagement />} />
+            <Route path="/process-templates" element={<ProcessTemplates />} />
             <Route path="/team" element={<TeamManagement />} />
             <Route path="/powerbi" element={<PowerBI />} />
           </Routes>
