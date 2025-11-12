@@ -8,12 +8,12 @@ import {
 } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from '@/components/ui/sheet';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
@@ -63,7 +63,7 @@ const sanitizeTemplate = (template: ProcessTemplate): ProcessTemplate => ({
 export default function ProcessTemplates() {
   const [templates, setTemplates] = useState<ProcessTemplate[]>([]);
   const [loading, setLoading] = useState(true);
-  const [dialogOpen, setDialogOpen] = useState(false);
+  const [editorOpen, setEditorOpen] = useState(false);
   const [workingTemplate, setWorkingTemplate] = useState<ProcessTemplate | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -99,7 +99,7 @@ export default function ProcessTemplates() {
 
   const openCreateDialog = () => {
     setWorkingTemplate(createEmptyTemplate());
-    setDialogOpen(true);
+    setEditorOpen(true);
   };
 
   const openEditDialog = (template: ProcessTemplate) => {
@@ -107,11 +107,11 @@ export default function ProcessTemplates() {
       ...template,
       tasks: template.tasks.length > 0 ? template.tasks.map((task) => ({ ...task })) : [createEmptyTask()],
     });
-    setDialogOpen(true);
+    setEditorOpen(true);
   };
 
   const closeDialog = () => {
-    setDialogOpen(false);
+    setEditorOpen(false);
     setWorkingTemplate(null);
   };
 
@@ -310,18 +310,18 @@ export default function ProcessTemplates() {
         </div>
       )}
 
-      <Dialog open={dialogOpen} onOpenChange={(open) => (open ? setDialogOpen(true) : closeDialog())}>
-        <DialogContent className="max-w-3xl">
-          <DialogHeader>
-            <DialogTitle>{workingTemplate?.id ? 'Edit Template' : 'Create Template'}</DialogTitle>
-            <DialogDescription>
+      <Sheet open={editorOpen} onOpenChange={(open) => (open ? setEditorOpen(true) : closeDialog())}>
+        <SheetContent side="right" className="w-full sm:max-w-2xl overflow-y-auto">
+          <SheetHeader>
+            <SheetTitle>{workingTemplate?.id ? 'Edit Template' : 'Create Template'}</SheetTitle>
+            <SheetDescription>
               Define the standard workflow for your shows. Lead time is how many days before the show start the task must be
               complete, while duration controls how long the task should run.
-            </DialogDescription>
-          </DialogHeader>
+            </SheetDescription>
+          </SheetHeader>
 
           {workingTemplate && (
-            <div className="space-y-6">
+            <div className="space-y-6 py-4">
               <div className="grid gap-4 md:grid-cols-2">
                 <div>
                   <Label htmlFor="template-name">Template name</Label>
@@ -449,8 +449,8 @@ export default function ProcessTemplates() {
               </div>
             </div>
           )}
-        </DialogContent>
-      </Dialog>
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }
