@@ -11,8 +11,17 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { Progress } from '@/components/ui/progress';
 import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from '@/components/ui/command';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Plus, CheckCircle, XCircle, Clock, Edit2, Save, X, Users, Sparkles } from 'lucide-react';
+import { ArrowLeft, Plus, CheckCircle, XCircle, Clock, Edit2, Save, X, Users, Sparkles, Check } from 'lucide-react';
 import { dbGet, dbSet, dbUpdate, dbRemove, schedulingDbGet } from '@/lib/firebase';
 import type {
   Show,
@@ -26,6 +35,7 @@ import type {
   ScheduleOrder,
 } from '@/types';
 import { toast } from 'sonner';
+import { cn } from '@/lib/utils';
 
 export default function ShowDetail() {
   const navigate = useNavigate();
@@ -69,6 +79,10 @@ export default function ShowDetail() {
     startDate: '',
     dueDate: '',
   });
+  const [isEditingTask, setIsEditingTask] = useState(false);
+  const [editingTask, setEditingTask] = useState<ShowTask | null>(null);
+  const [editingTaskForm, setEditingTaskForm] = useState<Partial<ShowTask>>({});
+  const [isSalespersonPickerOpen, setIsSalespersonPickerOpen] = useState(false);
 
   useEffect(() => {
     loadShowData();
@@ -386,7 +400,7 @@ export default function ShowDetail() {
       };
 
       await dbSet(`showOrders/${order.id}`, order as unknown as Record<string, unknown>);
-      setOrders([...orders, order]);
+      setOrders((prev) => [...prev, order]);
       setIsAddingOrder(false);
       setNewOrder({
         chassisNumber: '',
@@ -425,7 +439,7 @@ export default function ShowDetail() {
       };
 
       await dbSet(`showTasks/${task.taskId}`, task as unknown as Record<string, unknown>);
-      setTasks([...tasks, task]);
+      setTasks((prev) => [...prev, task]);
       setIsAddingTask(false);
       setNewTask({
         taskName: '',
@@ -539,9 +553,11 @@ export default function ShowDetail() {
   const handleUpdateTaskStatus = async (taskId: string, status: string, percentComplete: number) => {
     try {
       await dbUpdate(`showTasks/${taskId}`, { status, percentComplete });
-      setTasks(tasks.map(t =>
-        t.taskId === taskId ? { ...t, status: status as ShowTask['status'], percentComplete } : t
-      ));
+      setTasks((prev) =>
+        prev.map((t) =>
+          t.taskId === taskId ? { ...t, status: status as ShowTask['status'], percentComplete } : t
+        )
+      );
       toast.success('Task updated successfully');
     } catch (error) {
       console.error('Error updating task:', error);
@@ -555,9 +571,11 @@ export default function ShowDetail() {
         status: 'Approved',
         approvedBy: 'Current User'
       });
-      setOrders(orders.map(o =>
-        o.id === orderId ? { ...o, status: 'Approved' as const, approvedBy: 'Current User' } : o
-      ));
+      setOrders((prev) =>
+        prev.map((o) =>
+          o.id === orderId ? { ...o, status: 'Approved' as const, approvedBy: 'Current User' } : o
+        )
+      );
       toast.success('Order approved successfully');
     } catch (error) {
       console.error('Error approving order:', error);
@@ -569,7 +587,7 @@ export default function ShowDetail() {
     if (window.confirm('Are you sure you want to delete this order?')) {
       try {
         await dbRemove(`showOrders/${orderId}`);
-        setOrders(orders.filter(o => o.id !== orderId));
+        setOrders((prev) => prev.filter((o) => o.id !== orderId));
         toast.success('Order deleted successfully');
       } catch (error) {
         console.error('Error deleting order:', error);
@@ -582,12 +600,99 @@ export default function ShowDetail() {
     if (window.confirm('Are you sure you want to delete this task?')) {
       try {
         await dbRemove(`showTasks/${taskId}`);
-        setTasks(tasks.filter(t => t.taskId !== taskId));
+        setTasks((prev) => prev.filter((t) => t.taskId !== taskId));
         toast.success('Task deleted successfully');
       } catch (error) {
         console.error('Error deleting task:', error);
         toast.error('Failed to delete task');
       }
+    }
+  };
+
+  const statusProgressMap: Record<ShowTask['status'], number> = {
+    'Not Started': 0,
+    'In Progress': 50,
+    Blocked: 50,
+    Done: 100,
+  };
+
+  const openTaskEditor = (task: ShowTask) => {
+    setEditingTask(task);
+    setEditingTaskForm({
+      ...task,
+      responsiblePeople: [...(task.responsiblePeople || [])],
+      notes: task.notes ?? '',
+    });
+    setIsEditingTask(true);
+  };
+
+  const closeTaskEditor = () => {
+    setIsEditingTask(false);
+    setEditingTask(null);
+    setEditingTaskForm({});
+  };
+
+  const clampPercent = (value: number) => {
+    if (Number.isNaN(value)) return 0;
+    return Math.min(100, Math.max(0, Math.round(value)));
+  };
+
+  const handleSaveTaskEdits = async () => {
+    if (!editingTask) return;
+
+    const name = editingTaskForm.taskName?.trim();
+    if (!name) {
+      toast.error('Task name is required.');
+      return;
+    }
+
+    if (!editingTaskForm.startDate || !editingTaskForm.dueDate) {
+      toast.error('Start and due dates are required.');
+      return;
+    }
+
+    const percent = clampPercent(
+      editingTaskForm.percentComplete ?? statusProgressMap[editingTaskForm.status as ShowTask['status']] ?? editingTask.percentComplete
+    );
+
+    const responsible = Array.isArray(editingTaskForm.responsiblePeople)
+      ? editingTaskForm.responsiblePeople
+      : [];
+
+    const payload: ShowTask = {
+      ...editingTask,
+      taskName: name,
+      stage: (editingTaskForm.stage || editingTask.stage) as ShowTask['stage'],
+      status: (editingTaskForm.status || editingTask.status) as ShowTask['status'],
+      startDate: editingTaskForm.startDate,
+      dueDate: editingTaskForm.dueDate,
+      responsiblePeople: responsible,
+      notes: editingTaskForm.notes ?? '',
+      percentComplete: percent,
+      costBudget: parseValue(editingTaskForm.costBudget ?? editingTask.costBudget),
+      costActual: parseValue(editingTaskForm.costActual ?? editingTask.costActual),
+    };
+
+    try {
+      await dbUpdate(`showTasks/${editingTask.taskId}`, {
+        taskName: payload.taskName,
+        stage: payload.stage,
+        status: payload.status,
+        startDate: payload.startDate,
+        dueDate: payload.dueDate,
+        responsiblePeople: payload.responsiblePeople,
+        notes: payload.notes,
+        percentComplete: payload.percentComplete,
+        costBudget: payload.costBudget,
+        costActual: payload.costActual,
+      });
+
+      setTasks((prev) => prev.map((task) => (task.taskId === payload.taskId ? payload : task)));
+      toast.success('Task updated successfully');
+      closeTaskEditor();
+    } catch (error) {
+      console.error('Error updating task:', error);
+      toast.error('Failed to update task');
     }
   };
 
@@ -1320,10 +1425,11 @@ export default function ShowDetail() {
                       </Button>
                     </DialogTrigger>
                     <DialogContent className="max-w-2xl">
-                      <DialogHeader>
-                        <DialogTitle>Add New Task</DialogTitle>
-                        <DialogDescription>Create a new project management task</DialogDescription>
-                      </DialogHeader>
+                  <DialogContent className="max-w-2xl">
+                    <DialogHeader>
+                      <DialogTitle>Add New Task</DialogTitle>
+                      <DialogDescription>Create a new project management task</DialogDescription>
+                    </DialogHeader>
                       <div className="space-y-4 py-4">
                         <div>
                           <Label>Task Name *</Label>
@@ -1422,6 +1528,213 @@ export default function ShowDetail() {
                       </div>
                     </DialogContent>
                   </Dialog>
+                  <Dialog open={isEditingTask} onOpenChange={(open) => (open ? setIsEditingTask(true) : closeTaskEditor())}>
+                    <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+                      <DialogHeader>
+                        <DialogTitle>Edit Task</DialogTitle>
+                        <DialogDescription>Update task details and progress</DialogDescription>
+                      </DialogHeader>
+                      {editingTask && (
+                        <div className="space-y-4 py-4">
+                          <div>
+                            <Label>Task Name *</Label>
+                            <Input
+                              value={editingTaskForm.taskName ?? ''}
+                              onChange={(e) =>
+                                setEditingTaskForm((prev) => ({ ...prev, taskName: e.target.value }))
+                              }
+                              placeholder="Enter task name"
+                            />
+                          </div>
+                          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                            <div>
+                              <Label>Stage</Label>
+                              <Select
+                                value={(editingTaskForm.stage ?? editingTask.stage) as ShowTask['stage']}
+                                onValueChange={(value) =>
+                                  setEditingTaskForm((prev) => ({
+                                    ...prev,
+                                    stage: value as ShowTask['stage'],
+                                  }))
+                                }
+                              >
+                                <SelectTrigger>
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="Design">Design</SelectItem>
+                                  <SelectItem value="Booking">Booking</SelectItem>
+                                  <SelectItem value="Logistics">Logistics</SelectItem>
+                                  <SelectItem value="Marketing">Marketing</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            <div>
+                              <Label>Status</Label>
+                              <Select
+                                value={(editingTaskForm.status ?? editingTask.status) as ShowTask['status']}
+                                onValueChange={(value) => {
+                                  const mapped = statusProgressMap[value as ShowTask['status']];
+                                  setEditingTaskForm((prev) => ({
+                                    ...prev,
+                                    status: value as ShowTask['status'],
+                                    percentComplete: mapped,
+                                  }));
+                                }}
+                              >
+                                <SelectTrigger>
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="Not Started">Not Started</SelectItem>
+                                  <SelectItem value="In Progress">In Progress</SelectItem>
+                                  <SelectItem value="Blocked">Blocked</SelectItem>
+                                  <SelectItem value="Done">Done</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          </div>
+                          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                            <div>
+                              <Label>Start Date *</Label>
+                              <Input
+                                type="date"
+                                value={editingTaskForm.startDate ?? editingTask.startDate}
+                                onChange={(e) =>
+                                  setEditingTaskForm((prev) => ({ ...prev, startDate: e.target.value }))
+                                }
+                              />
+                            </div>
+                            <div>
+                              <Label>Due Date *</Label>
+                              <Input
+                                type="date"
+                                value={editingTaskForm.dueDate ?? editingTask.dueDate}
+                                onChange={(e) =>
+                                  setEditingTaskForm((prev) => ({ ...prev, dueDate: e.target.value }))
+                                }
+                              />
+                            </div>
+                          </div>
+                          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                            <div>
+                              <Label>Progress (%)</Label>
+                              <Input
+                                type="number"
+                                min={0}
+                                max={100}
+                                value={editingTaskForm.percentComplete ?? editingTask.percentComplete}
+                                onChange={(e) =>
+                                  setEditingTaskForm((prev) => ({
+                                    ...prev,
+                                    percentComplete: clampPercent(Number(e.target.value)),
+                                  }))
+                                }
+                              />
+                            </div>
+                            <div>
+                              <Label>Cost Budget</Label>
+                              <Input
+                                value={(
+                                  editingTaskForm.costBudget ?? editingTask.costBudget ?? ''
+                                ).toString()}
+                                onChange={(e) =>
+                                  setEditingTaskForm((prev) => {
+                                    if (e.target.value === '') {
+                                      return { ...prev, costBudget: undefined };
+                                    }
+                                    const parsed = Number(e.target.value);
+                                    return {
+                                      ...prev,
+                                      costBudget: Number.isNaN(parsed) ? prev.costBudget : parsed,
+                                    };
+                                  })
+                                }
+                              />
+                            </div>
+                            <div>
+                              <Label>Cost Actual</Label>
+                              <Input
+                                value={(
+                                  editingTaskForm.costActual ?? editingTask.costActual ?? ''
+                                ).toString()}
+                                onChange={(e) =>
+                                  setEditingTaskForm((prev) => {
+                                    if (e.target.value === '') {
+                                      return { ...prev, costActual: undefined };
+                                    }
+                                    const parsed = Number(e.target.value);
+                                    return {
+                                      ...prev,
+                                      costActual: Number.isNaN(parsed) ? prev.costActual : parsed,
+                                    };
+                                  })
+                                }
+                              />
+                            </div>
+                          </div>
+                          <div>
+                            <Label>Responsible People</Label>
+                            <div className="mt-2 max-h-48 space-y-2 overflow-y-auto rounded-lg border p-2">
+                              {showTeamMembers.map((member) => {
+                                const responsible = Array.isArray(editingTaskForm.responsiblePeople)
+                                  ? editingTaskForm.responsiblePeople
+                                  : editingTask.responsiblePeople;
+                                const isChecked = responsible?.includes(member.memberName);
+                                return (
+                                  <div key={member.memberId} className="flex items-center space-x-2">
+                                    <Checkbox
+                                      id={`edit-task-${member.memberId}`}
+                                      checked={Boolean(isChecked)}
+                                      onCheckedChange={(checked) => {
+                                        setEditingTaskForm((prev) => {
+                                          const current = Array.isArray(prev.responsiblePeople)
+                                            ? prev.responsiblePeople
+                                            : [...(editingTask.responsiblePeople || [])];
+                                          if (checked) {
+                                            if (current.includes(member.memberName)) {
+                                              return prev;
+                                            }
+                                            return {
+                                              ...prev,
+                                              responsiblePeople: [...current, member.memberName],
+                                            };
+                                          }
+                                          return {
+                                            ...prev,
+                                            responsiblePeople: current.filter((name) => name !== member.memberName),
+                                          };
+                                        });
+                                      }}
+                                    />
+                                    <label htmlFor={`edit-task-${member.memberId}`} className="text-sm">
+                                      {member.memberName}
+                                    </label>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                          <div>
+                            <Label>Notes</Label>
+                            <Textarea
+                              value={editingTaskForm.notes ?? ''}
+                              onChange={(e) =>
+                                setEditingTaskForm((prev) => ({ ...prev, notes: e.target.value }))
+                              }
+                              placeholder="Enter task notes"
+                            />
+                          </div>
+                          <div className="flex justify-end gap-2 pt-4">
+                            <Button variant="outline" onClick={closeTaskEditor}>
+                              Cancel
+                            </Button>
+                            <Button onClick={handleSaveTaskEdits}>Save Changes</Button>
+                          </div>
+                        </div>
+                      )}
+                    </DialogContent>
+                  </Dialog>
                 </div>
               </div>
             </CardHeader>
@@ -1438,7 +1751,7 @@ export default function ShowDetail() {
                       <TableHead>Status</TableHead>
                       <TableHead>Progress</TableHead>
                       <TableHead>Budget</TableHead>
-                      <TableHead>Actions</TableHead>
+                      <TableHead className="w-32 text-right">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -1459,13 +1772,12 @@ export default function ShowDetail() {
                           <Select
                             value={task.status}
                             onValueChange={(value) => {
-                              const percentMap: Record<string, number> = {
-                                'Not Started': 0,
-                                'In Progress': 50,
-                                'Blocked': 50,
-                                'Done': 100
-                              };
-                              handleUpdateTaskStatus(task.taskId, value, percentMap[value] || task.percentComplete);
+                              const mapped = statusProgressMap[value as ShowTask['status']];
+                              handleUpdateTaskStatus(
+                                task.taskId,
+                                value,
+                                mapped !== undefined ? mapped : task.percentComplete
+                              );
                             }}
                           >
                             <SelectTrigger className="w-32">
@@ -1486,14 +1798,23 @@ export default function ShowDetail() {
                           </div>
                         </TableCell>
                         <TableCell>{formatValue(task.costBudget)}</TableCell>
-                        <TableCell>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleDeleteTask(task.taskId)}
-                          >
-                            <X className="h-4 w-4" />
-                          </Button>
+                        <TableCell className="text-right">
+                          <div className="flex justify-end gap-1">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => openTaskEditor(task)}
+                            >
+                              <Edit2 className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleDeleteTask(task.taskId)}
+                            >
+                              <X className="h-4 w-4" />
+                            </Button>
+                          </div>
                         </TableCell>
                       </TableRow>
                     ))}
@@ -1558,22 +1879,66 @@ export default function ShowDetail() {
                         </Select>
                       </div>
                       <div>
-                        <Label>Salesperson *</Label>
-                        <Select
-                          value={newOrder.salesperson}
-                          onValueChange={(value) => setNewOrder({ ...newOrder, salesperson: value })}
+                        <Popover
+                          open={isSalespersonPickerOpen}
+                          onOpenChange={setIsSalespersonPickerOpen}
                         >
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select salesperson" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {showTeamMembers.map((member) => (
-                              <SelectItem key={member.memberId} value={member.memberName}>
-                                {member.memberName}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                          <PopoverTrigger asChild>
+                            <Button
+                              variant="outline"
+                              role="combobox"
+                              aria-expanded={isSalespersonPickerOpen}
+                              className="w-full justify-between"
+                            >
+                              {newOrder.salesperson
+                                ? newOrder.salesperson
+                                : 'Select salesperson'}
+                            </Button>
+                          </PopoverTrigger>
+                          <PopoverContent className="w-[280px] p-0">
+                            <Command>
+                              <CommandInput placeholder="Search team member..." />
+                              <CommandList>
+                                <CommandEmpty>No team member found.</CommandEmpty>
+                                <CommandGroup heading="Active Team Members">
+                                  {showTeamMembers.map((member) => (
+                                    <CommandItem
+                                      key={member.memberId}
+                                      value={member.memberName}
+                                      onSelect={(value) => {
+                                        setNewOrder({ ...newOrder, salesperson: value });
+                                        setIsSalespersonPickerOpen(false);
+                                      }}
+                                    >
+                                      <Check
+                                        className={cn(
+                                          'mr-2 h-4 w-4',
+                                          newOrder.salesperson === member.memberName
+                                            ? 'opacity-100'
+                                            : 'opacity-0'
+                                        )}
+                                      />
+                                      <div className="flex flex-col">
+                                        <span>{member.memberName}</span>
+                                        <span className="text-xs text-muted-foreground">{member.role}</span>
+                                      </div>
+                                    </CommandItem>
+                                  ))}
+                                </CommandGroup>
+                              </CommandList>
+                            </Command>
+                          </PopoverContent>
+                        </Popover>
+                        {newOrder.salesperson && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="mt-2"
+                            onClick={() => setNewOrder({ ...newOrder, salesperson: '' })}
+                          >
+                            Clear selection
+                          </Button>
+                        )}
                       </div>
                       <div className="flex justify-end gap-2 pt-4">
                         <Button variant="outline" onClick={() => setIsAddingOrder(false)}>
