@@ -48,6 +48,7 @@ export default function ShowDetail() {
   const [caravanPicks, setCaravanPicks] = useState<ShowCaravanPick[]>([]);
   const [availableCaravans, setAvailableCaravans] = useState<ScheduleOrder[]>([]);
   const [loadingCaravans, setLoadingCaravans] = useState<boolean>(false);
+  const [caravanSearch, setCaravanSearch] = useState('');
 
   const [newOrder, setNewOrder] = useState<Partial<ShowOrder>>({
     chassisNumber: '',
@@ -187,10 +188,10 @@ export default function ShowDetail() {
     loadSchedule();
   }, []);
 
-  const sanitiseKey = (value: string) =>
-    value
-      .replace(/[.#$\[\]]/g, '-')
-      .replace(/\//g, '-');
+  const sanitiseKey = (value: string) => {
+    const invalidChars = ['.', '#', '$', '[', ']', '/'];
+    return invalidChars.reduce((result, char) => result.split(char).join('-'), value);
+  };
 
   const createCaravanPickId = (showId: string, chassis: string) =>
     `pick-${sanitiseKey(showId)}-${sanitiseKey(chassis.toUpperCase())}`;
@@ -242,6 +243,37 @@ export default function ShowDetail() {
     if (!chassis) return false;
     return caravanPicks.some((pick) => pick.chassis.toUpperCase() === chassis.trim().toUpperCase());
   };
+
+  const filteredAvailableCaravans = useMemo(() => {
+    const query = caravanSearch.trim().toLowerCase();
+    if (!query) return availableCaravans;
+    return availableCaravans.filter((order) => order.Model?.toLowerCase().includes(query));
+  }, [availableCaravans, caravanSearch]);
+
+  const caravanPickRangeStats = useMemo(() => {
+    const summary = new Map<string, { count: number; models: Set<string> }>();
+
+    caravanPicks.forEach((pick) => {
+      const prefix = (pick.model || '').slice(0, 3).toUpperCase() || 'N/A';
+      const existing = summary.get(prefix) ?? { count: 0, models: new Set<string>() };
+      existing.count += 1;
+      if (pick.model) {
+        existing.models.add(pick.model);
+      }
+      summary.set(prefix, existing);
+    });
+
+    return Array.from(summary.entries())
+      .map(([range, value]) => ({
+        range,
+        count: value.count,
+        models: Array.from(value.models).sort(),
+      }))
+      .sort((a, b) => {
+        if (b.count !== a.count) return b.count - a.count;
+        return a.range.localeCompare(b.range);
+      });
+  }, [caravanPicks]);
 
   const startDateInfo = useMemo(() => {
     if (show?.startDate) {
@@ -1638,6 +1670,32 @@ export default function ShowDetail() {
                     <h3 className="text-lg font-semibold text-gray-900">Show Pick Vans</h3>
                     <Badge variant="outline">{caravanPicks.length}</Badge>
                   </div>
+                  {caravanPickRangeStats.length > 0 && (
+                    <div className="rounded-lg border bg-slate-50 p-4">
+                      <div className="flex items-center justify-between gap-2">
+                        <h4 className="text-sm font-semibold uppercase tracking-wide text-gray-600">
+                          Model Range Dashboard
+                        </h4>
+                        <span className="text-xs font-medium text-gray-500">
+                          Showing grouped totals by first three characters
+                        </span>
+                      </div>
+                      <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                        {caravanPickRangeStats.map((stat) => (
+                          <div key={stat.range} className="rounded-md border bg-white p-3 shadow-sm">
+                            <div className="flex items-center justify-between text-sm text-gray-500">
+                              <span>Range</span>
+                              <span className="font-semibold text-blue-600">{stat.range}</span>
+                            </div>
+                            <div className="mt-2 text-2xl font-bold text-gray-900">{stat.count}</div>
+                            <p className="mt-2 text-xs text-gray-500">
+                              {stat.models.length > 0 ? stat.models.join(', ') : 'No model names available'}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                   {caravanPicks.length > 0 ? (
                     <div className="space-y-3">
                       {caravanPicks
@@ -1688,18 +1746,26 @@ export default function ShowDetail() {
                 </div>
 
                 <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-lg font-semibold text-gray-900">Available Caravans</h3>
-                    <Badge variant="outline">{availableCaravans.length}</Badge>
+                  <div className="flex flex-col gap-3">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-lg font-semibold text-gray-900">Available Caravans</h3>
+                      <Badge variant="outline">{filteredAvailableCaravans.length}</Badge>
+                    </div>
+                    <Input
+                      value={caravanSearch}
+                      onChange={(event) => setCaravanSearch(event.target.value)}
+                      placeholder="Search by model name..."
+                      className="w-full"
+                    />
                   </div>
                   <div className="rounded-xl border">
                     {loadingCaravans ? (
                       <div className="flex h-48 items-center justify-center text-gray-500">
                         Loading caravan schedule...
                       </div>
-                    ) : availableCaravans.length > 0 ? (
+                    ) : filteredAvailableCaravans.length > 0 ? (
                       <div className="max-h-[520px] divide-y overflow-y-auto">
-                        {availableCaravans.map((order) => {
+                        {filteredAvailableCaravans.map((order) => {
                           const chassis = order.Chassis || `${order.Model}-${order.Index1}`;
                           const alreadyAdded = pickExists(order.Chassis);
                           return (
@@ -1731,7 +1797,9 @@ export default function ShowDetail() {
                       </div>
                     ) : (
                       <div className="flex h-48 items-center justify-center text-gray-500">
-                        No caravans currently available for Snowy Stock.
+                        {caravanSearch.trim()
+                          ? 'No caravans match your search.'
+                          : 'No caravans currently available for Snowy Stock.'}
                       </div>
                     )}
                   </div>
