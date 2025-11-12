@@ -1424,7 +1424,6 @@ export default function ShowDetail() {
                         Add Task
                       </Button>
                     </DialogTrigger>
-                    <DialogContent className="max-w-2xl">
                   <DialogContent className="max-w-2xl">
                     <DialogHeader>
                       <DialogTitle>Add New Task</DialogTitle>
@@ -1879,6 +1878,7 @@ export default function ShowDetail() {
                         </Select>
                       </div>
                       <div>
+                        <Label>Salesperson *</Label>
                         <Popover
                           open={isSalespersonPickerOpen}
                           onOpenChange={setIsSalespersonPickerOpen}
