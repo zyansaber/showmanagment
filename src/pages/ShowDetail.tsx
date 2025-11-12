@@ -37,6 +37,87 @@ import type {
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 
+const TASK_STATUSES: ShowTask['status'][] = ['Not Started', 'In Progress', 'Blocked', 'Done'];
+const TASK_STAGES: ShowTask['stage'][] = ['Design', 'Booking', 'Logistics', 'Marketing'];
+
+const normalisePercentComplete = (value: unknown): number => {
+  const numeric =
+    typeof value === 'number'
+      ? value
+      : typeof value === 'string'
+        ? Number.parseFloat(value)
+        : Number.NaN;
+
+  if (!Number.isFinite(numeric)) return 0;
+  if (numeric <= 0) return 0;
+  if (numeric >= 100) return 100;
+  return Math.round(numeric);
+};
+
+const toSafeNumber = (value: unknown): number => {
+  const numeric =
+    typeof value === 'number'
+      ? value
+      : typeof value === 'string'
+        ? Number.parseFloat(value)
+        : Number.NaN;
+
+  return Number.isFinite(numeric) && numeric >= 0 ? numeric : 0;
+};
+
+const normaliseTaskRecord = (
+  task: Partial<ShowTask> | undefined,
+  fallbackEventId?: string,
+  fallbackTaskId?: string
+): ShowTask => {
+  const safeTask = task ?? {};
+  const rawTaskId =
+    typeof safeTask.taskId === 'string' && safeTask.taskId.trim().length > 0
+      ? safeTask.taskId.trim()
+      : fallbackTaskId || `task-${fallbackEventId || 'unknown'}-${Date.now()}`;
+  const rawEventId =
+    typeof safeTask.eventId === 'string' && safeTask.eventId.trim().length > 0
+      ? safeTask.eventId.trim()
+      : fallbackEventId || '';
+  const trimmedName =
+    typeof safeTask.taskName === 'string' && safeTask.taskName.trim().length > 0
+      ? safeTask.taskName.trim()
+      : 'Untitled Task';
+  const stageCandidate = typeof safeTask.stage === 'string' ? safeTask.stage : undefined;
+  const statusCandidate = typeof safeTask.status === 'string' ? safeTask.status : undefined;
+
+  const responsiblePeople = Array.isArray(safeTask.responsiblePeople)
+    ? Array.from(
+        new Set(
+          safeTask.responsiblePeople.filter((name): name is string =>
+            typeof name === 'string' && name.trim().length > 0
+          )
+        )
+      )
+    : [];
+
+  return {
+    taskId: rawTaskId,
+    eventId: rawEventId,
+    taskName: trimmedName,
+    responsiblePeople,
+    stage: TASK_STAGES.includes(stageCandidate as ShowTask['stage'])
+      ? (stageCandidate as ShowTask['stage'])
+      : 'Design',
+    status: TASK_STATUSES.includes(statusCandidate as ShowTask['status'])
+      ? (statusCandidate as ShowTask['status'])
+      : 'Not Started',
+    startDate: typeof safeTask.startDate === 'string' ? safeTask.startDate : '',
+    dueDate: typeof safeTask.dueDate === 'string' ? safeTask.dueDate : '',
+    percentComplete: normalisePercentComplete(safeTask.percentComplete),
+    costBudget: toSafeNumber(safeTask.costBudget),
+    costActual: toSafeNumber(safeTask.costActual),
+    attachmentUrl:
+      typeof safeTask.attachmentUrl === 'string' ? safeTask.attachmentUrl : '',
+    notes: typeof safeTask.notes === 'string' ? safeTask.notes : '',
+  };
+};
+
 export default function ShowDetail() {
   const navigate = useNavigate();
   const { id } = useParams();
@@ -139,8 +220,13 @@ export default function ShowDetail() {
       const allOrders: ShowOrder[] = ordersData ? Object.values(ordersData) : [];
       setOrders(allOrders.filter(o => o.showId === id));
 
-      const allTasks: ShowTask[] = tasksData ? Object.values(tasksData) : [];
-      setTasks(allTasks.filter(t => t.eventId === id));
+      const allTasks = tasksData
+        ? Object.values(tasksData as Record<string, Partial<ShowTask>>)
+        : [];
+      const tasksForShow = allTasks
+        .filter((task) => task?.eventId === id)
+        .map((task, index) => normaliseTaskRecord(task, id, task?.taskId || `task-${index}`));
+      setTasks(tasksForShow);
 
       const allTeamMembers: TeamMember[] = teamData ? Object.values(teamData) : [];
       setTeamMembers(allTeamMembers.filter(m => m.activeFlag === 1));
@@ -439,7 +525,7 @@ export default function ShowDetail() {
       };
 
       await dbSet(`showTasks/${task.taskId}`, task as unknown as Record<string, unknown>);
-      setTasks((prev) => [...prev, task]);
+      setTasks((prev) => [...prev, normaliseTaskRecord(task, id, task.taskId)]);
       setIsAddingTask(false);
       setNewTask({
         taskName: '',
@@ -539,7 +625,10 @@ export default function ShowDetail() {
       await Promise.all(
         tasksToCreate.map((task) => dbSet(`showTasks/${task.taskId}`, task as unknown as Record<string, unknown>))
       );
-      setTasks((prev) => [...prev, ...tasksToCreate]);
+      setTasks((prev) => [
+        ...prev,
+        ...tasksToCreate.map((task) => normaliseTaskRecord(task, id, task.taskId)),
+      ]);
       setIsUsingTemplate(false);
       setSelectedTemplateId('');
       setTemplatePreviewTasks([]);
@@ -687,7 +776,13 @@ export default function ShowDetail() {
         costActual: payload.costActual,
       });
 
-      setTasks((prev) => prev.map((task) => (task.taskId === payload.taskId ? payload : task)));
+      setTasks((prev) =>
+        prev.map((task) =>
+          task.taskId === payload.taskId
+            ? normaliseTaskRecord(payload, id, payload.taskId)
+            : task
+        )
+      );
       toast.success('Task updated successfully');
       closeTaskEditor();
     } catch (error) {
