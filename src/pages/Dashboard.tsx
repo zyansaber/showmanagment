@@ -65,7 +65,10 @@ export default function Dashboard() {
 
   // Calculate show statistics by state (skip N/A values)
   const stateStats = shows.reduce((acc, show) => {
-    const state = show.siteLocation.state;
+    const state = show.siteLocation?.state?.trim();
+    if (!state) {
+      return acc;
+    }
     if (!acc[state]) {
       acc[state] = { shows: 0, totalSales: 0, totalDays: 0 };
     }
