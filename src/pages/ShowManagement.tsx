@@ -5,9 +5,10 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { MapPin } from 'lucide-react';
-import { dbGet } from '@/lib/firebase';
+import { MapPin, Trash2 } from 'lucide-react';
+import { dbGet, dbRemove } from '@/lib/firebase';
 import type { Show } from '@/types';
+import { toast } from 'sonner';
 
 type StateStats = {
   shows: number;
@@ -139,6 +140,26 @@ export default function ShowManagement() {
     }
   };
 
+  const handleDeleteShow = async (id: string | undefined, name?: string) => {
+    if (!id) return;
+
+    const confirmed = window.confirm(
+      `Are you sure you want to delete the show "${name || 'Unnamed Show'}"? This action cannot be undone.`
+    );
+
+    if (!confirmed) return;
+
+    try {
+      await dbRemove(`shows/${id}`);
+      setShows((prev) => prev.filter((show) => show.id !== id));
+      toast.success('Show deleted successfully');
+    } catch (err) {
+      console.error('Error deleting show:', err);
+      toast.error('Failed to delete show. Please try again.');
+    }
+  };
+
+  
   if (loading) {
     return (
       <div className="flex h-96 items-center justify-center text-gray-600">
@@ -205,6 +226,7 @@ export default function ShowManagement() {
                   <TableHead>Dates</TableHead>
                   <TableHead>Sales 2025</TableHead>
                   <TableHead>Status</TableHead>
+                  <TableHead className="w-24 text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -259,6 +281,18 @@ export default function ShowManagement() {
                       </TableCell>
                       <TableCell>
                         <Badge variant={statusVariant}>{show.status || 'Unknown'}</Badge>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            handleDeleteShow(show.id, show.name);
+                          }}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
                       </TableCell>
                     </TableRow>
                   );
