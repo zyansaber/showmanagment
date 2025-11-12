@@ -121,6 +121,8 @@ export default function ShowCalendar() {
     }
   }) : [];
 
+  const displayedShows = selectedDate ? showsOnDate : filteredShows;
+
   const stateStats = validShows.reduce((acc, show) => {
     try {
       const state = show.siteLocation?.state;
@@ -270,11 +272,16 @@ export default function ShowCalendar() {
               </div>
             </div>
 
-            {showsOnDate.length > 0 && selectedDate && (
-              <div className="mt-4 p-3 bg-blue-50 rounded-lg border border-blue-200">
-                <p className="text-sm font-semibold text-blue-900">
-                  {showsOnDate.length} show{showsOnDate.length > 1 ? 's' : ''} on {format(selectedDate, 'MMM dd, yyyy')}
-                </p>
+            {selectedDate && (
+              <div className="mt-4 space-y-2">
+                <div className="rounded-lg border border-blue-200 bg-blue-50 p-3">
+                  <p className="text-sm font-semibold text-blue-900">
+                    {showsOnDate.length} show{showsOnDate.length === 1 ? '' : 's'} on {format(selectedDate, 'MMM dd, yyyy')}
+                  </p>
+                </div>
+                <Button variant="outline" size="sm" className="w-full" onClick={() => setSelectedDate(null)}>
+                  Clear date filter
+                </Button>
               </div>
             )}
           </CardContent>
@@ -282,14 +289,25 @@ export default function ShowCalendar() {
 
         <Card className="lg:col-span-2">
           <CardHeader>
-            <CardTitle>
-              {selectedState === 'All' ? 'All Shows' : `Shows in ${selectedState}`}
-            </CardTitle>
+            <div className="flex items-center justify-between gap-2">
+              <CardTitle>
+                {selectedDate
+                  ? `Shows on ${format(selectedDate, 'MMM dd, yyyy')}${selectedState === 'All' ? '' : ` in ${selectedState}`}`
+                  : selectedState === 'All'
+                    ? 'All Shows'
+                    : `Shows in ${selectedState}`}
+              </CardTitle>
+              {selectedDate && (
+                <Badge variant="secondary" className="whitespace-nowrap">
+                  {showsOnDate.length} selected
+                </Badge>
+              )}
+            </div>
           </CardHeader>
           <CardContent>
-            {filteredShows.length > 0 ? (
+            {displayedShows.length > 0 ? (
               <div className="space-y-4 max-h-[600px] overflow-y-auto">
-                {filteredShows.map((show) => {
+                {displayedShows.map((show) => {
                   try {
                     return (
                       <div
@@ -343,8 +361,10 @@ export default function ShowCalendar() {
                 })}
               </div>
             ) : (
-              <div className="text-center py-8 text-gray-500">
-                No shows found for {selectedState === 'All' ? 'any state' : selectedState}
+              <div className="py-8 text-center text-gray-500">
+                {selectedDate
+                  ? `No shows found on ${format(selectedDate, 'MMM dd, yyyy')} ${selectedState === 'All' ? '' : `in ${selectedState}`}`
+                  : `No shows found for ${selectedState === 'All' ? 'any state' : selectedState}`}
               </div>
             )}
           </CardContent>
