@@ -56,8 +56,8 @@ const DEFAULT_STATS: StateData = {
 const formatNumber = (value: number) =>
   value > 0 ? value.toLocaleString('en-AU', { maximumFractionDigits: 0 }) : 'N/A';
 
-const formatCurrency = (value: number) =>
-  value > 0 ? `$${value.toLocaleString('en-AU', { maximumFractionDigits: 0 })}` : 'N/A';
+const formatUnits = (value: number) =>
+  value > 0 ? value.toLocaleString('en-AU', { maximumFractionDigits: 0 }) : 'N/A';
 
 export default function AustraliaMap({ stateStats, onStateClick, selectedState }: AustraliaMapProps) {
   const aggregate = useMemo(() => {
@@ -148,8 +148,8 @@ export default function AustraliaMap({ stateStats, onStateClick, selectedState }
                   <span className="ml-1 text-slate-300">shows</span>
                 </span>
                 <span>
-                  <strong className="text-base font-semibold text-white">{formatCurrency(selectedStats.totalSales)}</strong>
-                  <span className="ml-1 text-slate-300">sales</span>
+                  <strong className="text-base font-semibold text-white">{formatUnits(selectedStats.totalSales)}</strong>
+                  <span className="ml-1 text-slate-300">units</span>
                 </span>
                 <span>
                   <strong className="text-base font-semibold text-white">{formatNumber(selectedStats.totalDays)}</strong>
@@ -182,7 +182,7 @@ export default function AustraliaMap({ stateStats, onStateClick, selectedState }
               </div>
               <div className="mt-4 space-y-1 text-sm text-slate-600">
                 <p>
-                  Sales: <span className="font-semibold text-slate-900">{formatCurrency(stats.totalSales)}</span>
+                  Sales: <span className="font-semibold text-slate-900">{formatUnits(stats.totalSales)}</span>
                 </p>
                 <p>
                   Days on show: <span className="font-semibold text-slate-900">{formatNumber(stats.totalDays)}</span>
