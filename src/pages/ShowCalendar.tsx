@@ -127,22 +127,48 @@ export default function ShowCalendar() {
     try {
       const state = show.siteLocation?.state;
       if (!isValidState(state)) return acc;
-      
+
       if (!acc[state]) {
         acc[state] = { shows: 0, totalSales: 0, totalDays: 0 };
       }
       acc[state].shows += 1;
-      
+
       if (isValidNumber(show.sales2025)) {
         acc[state].totalSales += Number(show.sales2025);
       }
-      
+
       if (show.showDuration && isValidNumber(show.showDuration)) {
         acc[state].totalDays += Number(show.showDuration);
       }
     } catch (error) {
       console.error('Error processing show stats:', error);
     }
+    return acc;
+  }, {} as Record<string, { shows: number; totalSales: number; totalDays: number }>);
+
+  const mapStateStats = shows.reduce((acc, show) => {
+    try {
+      if (!isValidLocation(show.siteLocation)) return acc;
+      const state = show.siteLocation?.state;
+      if (!isValidState(state)) return acc;
+
+      if (!acc[state]) {
+        acc[state] = { shows: 0, totalSales: 0, totalDays: 0 };
+      }
+
+      acc[state].shows += 1;
+
+      if (isValidNumber(show.sales2025)) {
+        acc[state].totalSales += Number(show.sales2025);
+      }
+
+      if (show.showDuration && isValidNumber(show.showDuration)) {
+        acc[state].totalDays += Number(show.showDuration);
+      }
+    } catch (error) {
+      console.error('Error building map stats:', error);
+    }
+
     return acc;
   }, {} as Record<string, { shows: number; totalSales: number; totalDays: number }>);
 
@@ -171,7 +197,6 @@ export default function ShowCalendar() {
         <div className="text-lg text-gray-600">Loading show calendar...</div>
       </div>
     );
-  }
 
   return (
     <div className="space-y-6">
@@ -383,7 +408,7 @@ export default function ShowCalendar() {
         </CardHeader>
         <CardContent>
           <AustraliaMap
-            stateStats={stateStats}
+            stateStats={mapStateStats}
             onStateClick={(state) => setSelectedState(state)}
             selectedState={selectedState}
           />
