@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Toaster } from '@/components/ui/sonner';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
-import { 
+import {
   LayoutDashboard,
   Calendar,
   Users,
@@ -15,7 +15,8 @@ import {
   ChevronRight,
   Briefcase,
   Building2,
-  ClipboardList
+  ClipboardList,
+  FileSpreadsheet,
 } from 'lucide-react';
 import Dashboard from './pages/Dashboard';
 import ShowCalendar from './pages/ShowCalendar';
@@ -25,6 +26,7 @@ import TeamManagement from './pages/TeamManagement';
 import PowerBI from './pages/PowerBI';
 import DealershipManagement from './pages/DealershipManagement';
 import ProcessTemplates from './pages/ProcessTemplates';
+import OrdersAndSales from './pages/OrdersAndSales';
 
 const queryClient = new QueryClient();
 
@@ -36,6 +38,7 @@ function Sidebar({ isOpen, setIsOpen }: { isOpen: boolean; setIsOpen: (open: boo
     { icon: LayoutDashboard, label: 'Dashboard', path: '/' },
     { icon: Calendar, label: 'Show Calendar', path: '/calendar' },
     { icon: Briefcase, label: 'Show Management', path: '/shows' },
+    { icon: FileSpreadsheet, label: 'Orders & Sales', path: '/orders' },
     { icon: ClipboardList, label: 'Process Templates', path: '/process-templates' },
     { icon: Building2, label: 'Dealership Management', path: '/dealerships' },
     { icon: Users, label: 'Team Management', path: '/team' },
@@ -165,6 +168,7 @@ function AppLayout() {
             <Route path="/shows" element={<ShowManagement />} />
             <Route path="/show/:id" element={<ShowDetail />} />
             <Route path="/dealerships" element={<DealershipManagement />} />
+            <Route path="/orders" element={<OrdersAndSales />} />
             <Route path="/process-templates" element={<ProcessTemplates />} />
             <Route path="/team" element={<TeamManagement />} />
             <Route path="/powerbi" element={<PowerBI />} />
