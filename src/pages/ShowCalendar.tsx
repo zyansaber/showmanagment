@@ -197,7 +197,7 @@ export default function ShowCalendar() {
         <div className="text-lg text-gray-600">Loading show calendar...</div>
       </div>
     );
-
+  
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
