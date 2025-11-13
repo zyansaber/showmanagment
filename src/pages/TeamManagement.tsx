@@ -8,7 +8,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { UserPlus, Edit, Trash2, Lock } from 'lucide-react';
-import { dbGet, dbPush, dbUpdate, dbRemove } from '@/lib/firebase';
+import { dbGet, dbSet, dbUpdate } from '@/lib/firebase';
 import type { TeamMember, UserRole } from '@/types';
 
 export default function TeamManagement() {
@@ -63,7 +63,7 @@ export default function TeamManagement() {
         totalWorkDays: 0,
       };
       
-      await dbPush('teamMembers', member);
+      await dbSet(`teamMembers/${memberId}`, member as unknown as Record<string, unknown>);
       setTeamMembers([...teamMembers, member]);
       setIsAddingMember(false);
       setNewMember({
