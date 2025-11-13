@@ -1,10 +1,25 @@
 import { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  ResponsiveContainer,
+  PieChart,
+  Pie,
+  Cell,
+  LineChart,
+  Line,
+} from 'recharts';
 import { Users, TrendingUp, Calendar, Target } from 'lucide-react';
 import { dbGet } from '@/lib/firebase';
 import type { Show, TeamMember, ShowOrder } from '@/types';
+import { format as formatDate } from 'date-fns';
 
 export default function Dashboard() {
   const [shows, setShows] = useState<Show[]>([]);
@@ -52,7 +67,8 @@ export default function Dashboard() {
 
   // Calculate vehicle type distribution
   const vehicleTypes = orders.reduce((acc, order) => {
-    const type = order.chassisNumber.substring(0, 3).toUpperCase();
+    const chassis = order.chassisNumber || '';
+    const type = chassis.substring(0, 3).toUpperCase() || 'N/A';
     acc[type] = (acc[type] || 0) + 1;
     return acc;
   }, {} as Record<string, number>);
@@ -62,6 +78,22 @@ export default function Dashboard() {
     value,
     color: ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'][index % 5]
   }));
+
+  const vehicleTrendMap = orders.reduce((acc, order) => {
+    if (!order.date) return acc;
+    const parsed = new Date(order.date);
+    if (Number.isNaN(parsed.getTime())) return acc;
+    const key = formatDate(parsed, 'yyyy-MM');
+    acc[key] = (acc[key] || 0) + 1;
+    return acc;
+  }, {} as Record<string, number>);
+
+  const vehicleTrendData = Object.entries(vehicleTrendMap)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([key, value]) => ({
+      month: formatDate(new Date(`${key}-01`), 'MMM yyyy'),
+      value,
+    }));
 
   // Calculate show statistics by state (skip N/A values)
   const stateStats = shows.reduce((acc, show) => {
@@ -164,7 +196,7 @@ export default function Dashboard() {
         <TabsList className="bg-white">
           <TabsTrigger value="employees">Employee Performance</TabsTrigger>
           <TabsTrigger value="shows">Show Analytics</TabsTrigger>
-          <TabsTrigger value="vehicles">Caravan Distribution</TabsTrigger>
+          <TabsTrigger value="caravans">Caravan Distribution</TabsTrigger>
         </TabsList>
 
         {/* Employee Performance Tab */}
@@ -334,7 +366,7 @@ export default function Dashboard() {
         </TabsContent>
 
         {/* Vehicle Distribution Tab */}
-        <TabsContent value="Caravan" className="space-y-6">
+        <TabsContent value="caravans" className="space-y-6">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <Card>
               <CardHeader>
@@ -370,6 +402,35 @@ export default function Dashboard() {
 
             <Card>
               <CardHeader>
+                <CardTitle>Caravan Range Comparison</CardTitle>
+                <CardDescription>Units sold per model range</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {vehicleTypeData.length > 0 ? (
+                  <ResponsiveContainer width="100%" height={350}>
+                    <BarChart data={vehicleTypeData}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="name" />
+                      <YAxis />
+                      <Tooltip />
+                      <Legend />
+                      <Bar dataKey="value" name="Units">
+                        {vehicleTypeData.map((entry, index) => (
+                          <Cell key={`bar-${entry.name}-${index}`} fill={entry.color} />
+                        ))}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="text-center py-8 text-gray-500">No caravan data available</div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">            
+            <Card>
+              <CardHeader>
                 <CardTitle>Caravan Type Details</CardTitle>
               </CardHeader>
               <CardContent>
@@ -393,6 +454,28 @@ export default function Dashboard() {
                   </div>
                 ) : (
                   <div className="text-center py-8 text-gray-500">No caravan data available</div>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Order Trend</CardTitle>
+                <CardDescription>Monthly order intake across all shows</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {vehicleTrendData.length > 0 ? (
+                  <ResponsiveContainer width="100%" height={300}>
+                    <LineChart data={vehicleTrendData}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="month" />
+                      <YAxis />
+                      <Tooltip />
+                      <Line type="monotone" dataKey="value" stroke="#2563eb" strokeWidth={3} name="Orders" />
+                    </LineChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="text-center py-8 text-gray-500">No order trend data available</div>
                 )}
               </CardContent>
             </Card>
