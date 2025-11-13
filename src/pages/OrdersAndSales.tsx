@@ -1,0 +1,354 @@
+import { useEffect, useMemo, useState } from 'react';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { dbGet, dbUpdate } from '@/lib/firebase';
+import type { Show, ShowOrder } from '@/types';
+import { toast } from 'sonner';
+import { CheckCircle2, Loader2, Search, ShieldCheck } from 'lucide-react';
+
+const CONFIRMATION_PASSWORD = 'admin123';
+const CONFIRMATION_CACHE_KEY = 'orders-dashboard-confirmation';
+const CONFIRMATION_DURATION_MS = 5 * 60 * 1000; // 5 minutes
+
+interface DecoratedOrder extends ShowOrder {
+  showName: string;
+  range: string;
+}
+
+const statusStyles: Record<ShowOrder['status'], string> = {
+  Pending: 'bg-yellow-100 text-yellow-800',
+  Approved: 'bg-green-100 text-green-800',
+  Rejected: 'bg-red-100 text-red-800',
+};
+
+const formatDate = (value: string | undefined) => {
+  if (!value) return 'N/A';
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return value;
+  }
+  return parsed.toLocaleDateString('en-AU', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  });
+};
+
+export default function OrdersAndSales() {
+  const [orders, setOrders] = useState<ShowOrder[]>([]);
+  const [shows, setShows] = useState<Show[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [pendingOrder, setPendingOrder] = useState<ShowOrder | null>(null);
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [passwordInput, setPasswordInput] = useState('');
+  const [authExpiry, setAuthExpiry] = useState<number | null>(null);
+
+  const requiresPassword = !authExpiry || authExpiry <= Date.now();
+
+  useEffect(() => {
+    const cached = typeof window !== 'undefined' ? window.localStorage.getItem(CONFIRMATION_CACHE_KEY) : null;
+    if (!cached) return;
+    const expires = Number(cached);
+    if (Number.isFinite(expires) && expires > Date.now()) {
+      setAuthExpiry(expires);
+    } else if (typeof window !== 'undefined') {
+      window.localStorage.removeItem(CONFIRMATION_CACHE_KEY);
+    }
+  }, []);
+
+  useEffect(() => {
+    const loadData = async () => {
+      try {
+        const [ordersData, showsData] = await Promise.all([
+          dbGet('showOrders'),
+          dbGet('shows'),
+        ]);
+
+        setOrders(ordersData ? Object.values(ordersData) : []);
+        setShows(showsData ? Object.values(showsData) : []);
+        setError(null);
+      } catch (err) {
+        console.error('Error loading orders:', err);
+        setError('Failed to load orders. Please try again later.');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadData();
+  }, []);
+
+  const showLookup = useMemo(() =>
+    shows.reduce((acc, show) => {
+      if (show.id) {
+        acc[show.id] = show.name || 'Unnamed Show';
+      }
+      return acc;
+    }, {} as Record<string, string>),
+  [shows]);
+
+  const decoratedOrders: DecoratedOrder[] = useMemo(() => {
+    const term = searchTerm.trim().toLowerCase();
+    return orders
+      .slice()
+      .sort((a, b) => {
+        const dateA = new Date(a.date ?? '').getTime();
+        const dateB = new Date(b.date ?? '').getTime();
+        return Number.isNaN(dateB) ? -1 : Number.isNaN(dateA) ? 1 : dateB - dateA;
+      })
+      .filter((order) => {
+        if (!term) return true;
+        const haystack = [
+          order.chassisNumber,
+          order.orderType,
+          order.salesperson,
+          order.id,
+          showLookup[order.showId],
+        ]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase();
+        return haystack.includes(term);
+      })
+      .map((order) => ({
+        ...order,
+        showName: showLookup[order.showId] || 'Unknown Show',
+        range: (order.chassisNumber || '').substring(0, 3).toUpperCase() || 'N/A',
+      }));
+  }, [orders, searchTerm, showLookup]);
+
+  const totalOrders = orders.length;
+  const pendingOrders = orders.filter((order) => order.status === 'Pending').length;
+  const approvedOrders = orders.filter((order) => order.status === 'Approved').length;
+
+  const persistAuthExpiry = (expiresAt: number) => {
+    setAuthExpiry(expiresAt);
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(CONFIRMATION_CACHE_KEY, expiresAt.toString());
+    }
+  };
+
+  const confirmOrder = async (order: ShowOrder) => {
+    if (!order.id) {
+      toast.error('Order is missing an ID.');
+      setPendingOrder(null);
+      return;
+    }
+
+    try {
+      await dbUpdate(`showOrders/${order.id}`, {
+        status: 'Approved',
+        approvedBy: 'Orders Dashboard',
+        date: order.date,
+      });
+      setOrders((prev) =>
+        prev.map((existing) =>
+          existing.id === order.id
+            ? { ...existing, status: 'Approved', approvedBy: 'Orders Dashboard' }
+            : existing
+        )
+      );
+      toast.success(`Order ${order.id} confirmed.`);
+    } catch (err) {
+      console.error('Error confirming order:', err);
+      toast.error('Failed to confirm order. Please try again.');
+    } finally {
+      setPendingOrder(null);
+    }
+  };
+
+  const handleConfirmationClick = (order: ShowOrder) => {
+    if (order.status === 'Approved') {
+      toast.info('Order already confirmed.');
+      return;
+    }
+
+    setPendingOrder(order);
+    if (requiresPassword) {
+      setIsDialogOpen(true);
+    } else {
+      confirmOrder(order);
+    }
+  };
+
+  const handlePasswordSubmit = () => {
+    if (passwordInput.trim() !== CONFIRMATION_PASSWORD) {
+      toast.error('Incorrect password');
+      return;
+    }
+
+    const expiresAt = Date.now() + CONFIRMATION_DURATION_MS;
+    persistAuthExpiry(expiresAt);
+    setIsDialogOpen(false);
+    setPasswordInput('');
+
+    if (pendingOrder) {
+      confirmOrder(pendingOrder);
+    }
+  };
+
+  const handleDialogOpenChange = (open: boolean) => {
+    setIsDialogOpen(open);
+    if (!open) {
+      setPasswordInput('');
+      setPendingOrder(null);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="flex h-96 items-center justify-center text-gray-500">
+        <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+        Loading orders...
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-bold text-gray-900">Orders & Sales</h1>
+          <p className="text-sm text-gray-500">Overview of all show orders and sales confirmations</p>
+        </div>
+        <div className="flex items-center gap-2 text-sm text-gray-500">
+          <ShieldCheck className="h-4 w-4" />
+          {requiresPassword ? 'Confirmation requires password' : 'Confirmation unlocked'}
+        </div>
+      </div>
+
+      {error && (
+        <Card className="border-red-200 bg-red-50">
+          <CardContent className="py-3 text-sm text-red-700">{error}</CardContent>
+        </Card>
+      )}
+
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+        <Card>
+          <CardHeader className="pb-2">
+            <CardDescription>Total Orders</CardDescription>
+            <CardTitle className="text-3xl">{totalOrders}</CardTitle>
+          </CardHeader>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardDescription>Pending Confirmation</CardDescription>
+            <CardTitle className="text-3xl text-yellow-600">{pendingOrders}</CardTitle>
+          </CardHeader>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardDescription>Approved Orders</CardDescription>
+            <CardTitle className="text-3xl text-green-600">{approvedOrders}</CardTitle>
+          </CardHeader>
+        </Card>
+      </div>
+
+      <Card>
+        <CardHeader>
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <CardTitle>Orders List</CardTitle>
+              <CardDescription>Search and confirm orders across every show</CardDescription>
+            </div>
+            <div className="flex items-center gap-2">
+              <Search className="h-4 w-4 text-gray-500" />
+              <Input
+                placeholder="Search by chassis, show, salesperson or type"
+                value={searchTerm}
+                onChange={(event) => setSearchTerm(event.target.value)}
+                className="w-full lg:w-72"
+              />
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {decoratedOrders.length > 0 ? (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Chassis Number</TableHead>
+                  <TableHead>Model Range</TableHead>
+                  <TableHead>Show</TableHead>
+                  <TableHead>Type</TableHead>
+                  <TableHead>Salesperson</TableHead>
+                  <TableHead>Date</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {decoratedOrders.map((order) => {
+                  const rowKey = order.id || `${order.chassisNumber}-${order.date}`;
+                  return (
+                    <TableRow key={rowKey}>
+                      <TableCell className="font-medium">{order.chassisNumber}</TableCell>
+                    <TableCell>
+                      <Badge variant="outline">{order.range}</Badge>
+                    </TableCell>
+                    <TableCell>{order.showName}</TableCell>
+                    <TableCell>{order.orderType}</TableCell>
+                    <TableCell>{order.salesperson || 'Unassigned'}</TableCell>
+                    <TableCell>{formatDate(order.date)}</TableCell>
+                    <TableCell>
+                      <span className={`rounded-full px-2 py-1 text-xs font-semibold ${statusStyles[order.status]}`}>
+                        {order.status}
+                      </span>
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={() => handleConfirmationClick(order)}
+                        disabled={order.status === 'Approved'}
+                      >
+                        Confirmation
+                      </Button>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          ) : (
+            <div className="py-10 text-center text-gray-500">No orders found</div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Dialog open={isDialogOpen} onOpenChange={handleDialogOpenChange}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Enter Confirmation Password</DialogTitle>
+            <DialogDescription>Confirming an order requires administrator approval.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-4">
+            <Input
+              type="password"
+              placeholder="Enter password"
+              value={passwordInput}
+              onChange={(event) => setPasswordInput(event.target.value)}
+              onKeyDown={(event) => event.key === 'Enter' && handlePasswordSubmit()}
+            />
+            <p className="text-xs text-gray-500">Password unlocks confirmation actions for 5 minutes.</p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => handleDialogOpenChange(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handlePasswordSubmit}>
+              <CheckCircle2 className="mr-2 h-4 w-4" />
+              Confirm
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
