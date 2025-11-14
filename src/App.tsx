@@ -18,11 +18,13 @@ import {
   ClipboardList,
   FileSpreadsheet,
   FileText,
+  PenTool,
 } from 'lucide-react';
 import Dashboard from './pages/Dashboard';
 import ShowCalendar from './pages/ShowCalendar';
 import ShowDetail from './pages/ShowDetail';
 import ShowManagement from './pages/ShowManagement';
+import ShowLayoutDesigner from './pages/ShowLayoutDesigner';
 import TeamManagement from './pages/TeamManagement';
 import PowerBI from './pages/PowerBI';
 import DealershipManagement from './pages/DealershipManagement';
@@ -41,6 +43,7 @@ function Sidebar({ isOpen, setIsOpen }: { isOpen: boolean; setIsOpen: (open: boo
     { icon: LayoutDashboard, label: 'Dashboard', path: '/' },
     { icon: Calendar, label: 'Show Calendar', path: '/calendar' },
     { icon: Briefcase, label: 'Show Management', path: '/shows' },
+    { icon: PenTool, label: 'Show Layout Studio', path: '/layout-studio' },
     { icon: FileSpreadsheet, label: 'Orders & Sales', path: '/orders' },
     { icon: ClipboardList, label: 'Process Templates', path: '/process-templates' },
     { icon: Building2, label: 'Dealership Management', path: '/dealerships' },
@@ -171,6 +174,7 @@ function AppLayout() {
             <Route path="/calendar" element={<ShowCalendar />} />
             <Route path="/shows" element={<ShowManagement />} />
             <Route path="/show/:id" element={<ShowDetail />} />
+            <Route path="/layout-studio" element={<ShowLayoutDesigner />} />
             <Route path="/dealerships" element={<DealershipManagement />} />
             <Route path="/orders" element={<OrdersAndSales />} />
             <Route path="/process-templates" element={<ProcessTemplates />} />
