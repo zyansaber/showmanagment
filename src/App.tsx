@@ -17,6 +17,7 @@ import {
   Building2,
   ClipboardList,
   FileSpreadsheet,
+  FileText,
 } from 'lucide-react';
 import Dashboard from './pages/Dashboard';
 import ShowCalendar from './pages/ShowCalendar';
@@ -27,6 +28,7 @@ import PowerBI from './pages/PowerBI';
 import DealershipManagement from './pages/DealershipManagement';
 import ProcessTemplates from './pages/ProcessTemplates';
 import OrdersAndSales from './pages/OrdersAndSales';
+import ShowReport from './pages/ShowReport';
 
 const queryClient = new QueryClient();
 
@@ -42,6 +44,7 @@ function Sidebar({ isOpen, setIsOpen }: { isOpen: boolean; setIsOpen: (open: boo
     { icon: ClipboardList, label: 'Process Templates', path: '/process-templates' },
     { icon: Building2, label: 'Dealership Management', path: '/dealerships' },
     { icon: Users, label: 'Team Management', path: '/team' },
+    { icon: FileText, label: 'Show Report', path: '/show-report' },
     { icon: BarChart3, label: 'Power BI Reports', path: '/powerbi' },
   ];
 
@@ -172,6 +175,7 @@ function AppLayout() {
             <Route path="/process-templates" element={<ProcessTemplates />} />
             <Route path="/team" element={<TeamManagement />} />
             <Route path="/powerbi" element={<PowerBI />} />
+            <Route path="/show-report" element={<ShowReport />} />
           </Routes>
         </main>
       </div>
