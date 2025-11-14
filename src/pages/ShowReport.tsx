@@ -126,7 +126,11 @@ export default function ShowReport() {
     const memberIds = new Set(reportShow.teamMembers);
     return teamMembers
       .filter((member) => memberIds.has(member.memberId))
-      .sort((a, b) => a.memberName.localeCompare(b.memberName));
+      .sort((a, b) => {
+        const nameA = a.memberName?.trim() || a.memberId || '';
+        const nameB = b.memberName?.trim() || b.memberId || '';
+        return nameA.localeCompare(nameB);
+      });
   }, [reportShow?.teamMembers, teamMembers]);
 
   const reportCaravanPicks = useMemo(
@@ -240,10 +244,14 @@ export default function ShowReport() {
     () =>
       shows
         .slice()
-        .sort((a, b) => a.name.localeCompare(b.name))
+        .sort((a, b) => {
+          const nameA = a.name?.trim() || 'Untitled show';
+          const nameB = b.name?.trim() || 'Untitled show';
+          return nameA.localeCompare(nameB);
+        })
         .map((show) => ({
           id: show.id,
-          label: show.name || 'Untitled show',
+          label: show.name?.trim() || 'Untitled show',
           description: `${formatDate(show.startDate)} · ${show.siteLocation?.state || 'Unknown location'}`,
         })),
     [shows]
