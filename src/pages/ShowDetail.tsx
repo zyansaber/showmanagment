@@ -140,6 +140,7 @@ export default function ShowDetail() {
   const [availableCaravans, setAvailableCaravans] = useState<ScheduleOrder[]>([]);
   const [loadingCaravans, setLoadingCaravans] = useState<boolean>(false);
   const [caravanSearch, setCaravanSearch] = useState('');
+  const [currentShowKey, setCurrentShowKey] = useState<string | null>(null);
 
   const [newOrder, setNewOrder] = useState<Partial<ShowOrder>>({
     chassisNumber: '',
@@ -211,8 +212,10 @@ export default function ShowDetail() {
         dbGet('showCaravanPicks'),
       ]);
 
-      const allShows: Show[] = showsData ? Object.values(showsData) : [];
-      const currentShow = allShows.find(s => s.id === id);
+      const showEntries = showsData ? Object.entries(showsData as Record<string, Show>) : [];
+      const matchedShowEntry = showEntries.find(([, value]) => value.id === id);
+      const currentShow = matchedShowEntry ? matchedShowEntry[1] : null;
+      setCurrentShowKey(matchedShowEntry ? matchedShowEntry[0] : null);
       setShow(currentShow || null);
       setEditedShow(currentShow || {});
       setSelectedTeamMembers(currentShow?.teamMembers || []);
@@ -458,7 +461,13 @@ export default function ShowDetail() {
         teamMembers: selectedTeamMembers
       };
 
-      await dbUpdate(`shows/${id}`, updatedShow);
+      const firebaseKey = currentShowKey || id;
+      if (!firebaseKey) {
+        toast.error('Unable to determine show location in database.');
+        return;
+      }
+
+      await dbUpdate(`shows/${firebaseKey}`, updatedShow);
       setShow(updatedShow);
       setIsEditingInfo(false);
       toast.success('Show information updated successfully');
@@ -1289,8 +1298,13 @@ export default function ShowDetail() {
                         Cancel
                       </Button>
                       <Button onClick={async () => {
+                        const firebaseKey = currentShowKey || id;
+                        if (!firebaseKey) {
+                          toast.error('Unable to determine show location in database.');
+                          return;
+                        }
                         try {
-                          await dbUpdate(`shows/${id}`, { teamMembers: selectedTeamMembers });
+                          await dbUpdate(`shows/${firebaseKey}`, { teamMembers: selectedTeamMembers });
                           setShow({ ...show!, teamMembers: selectedTeamMembers });
                           setIsManagingTeam(false);
                           toast.success('Team members updated successfully');
