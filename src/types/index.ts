@@ -39,6 +39,17 @@ export interface Show {
   biUrl?: string;
 }
 
+export interface ShowCaravanPick {
+  id: string;
+  showId: string;
+  chassis: string;
+  model: string;
+  dealer: string;
+  productionStatus: string;
+  requestDeliveryDate?: string;
+}
+
+
 export interface TeamMember {
   memberId: string;
   memberName: string;
