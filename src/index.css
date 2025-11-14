@@ -99,3 +99,23 @@
     @apply bg-background text-foreground;
   }
 }
+
+@media print {
+  body * {
+    visibility: hidden;
+  }
+
+  #show-report-print,
+  #show-report-print * {
+    visibility: visible;
+  }
+
+  #show-report-print {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    padding: 24px;
+    background: #fff;
+    z-index: 9999;
+  }
+}
