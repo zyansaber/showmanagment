@@ -29,6 +29,7 @@ import DealershipManagement from './pages/DealershipManagement';
 import ProcessTemplates from './pages/ProcessTemplates';
 import OrdersAndSales from './pages/OrdersAndSales';
 import ShowReport from './pages/ShowReport';
+import AIHelpAssistant from './components/AIHelpAssistant';
 
 const queryClient = new QueryClient();
 
@@ -178,6 +179,7 @@ function AppLayout() {
             <Route path="/show-report" element={<ShowReport />} />
           </Routes>
         </main>
+        <AIHelpAssistant />
       </div>
     </div>
   );
