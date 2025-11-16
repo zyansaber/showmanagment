@@ -15,6 +15,10 @@ import {
   Grip,
   Sparkles,
   Layers,
+  DoorOpen,
+  Maximize,
+  Minimize,
+  Save,
 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
@@ -93,6 +97,15 @@ const paletteItems = [
     description: 'Drop a deformable quadrilateral site and drag each corner.',
     color: '#10b981',
   },
+  {
+    id: 'gate',
+    kind: 'gate' as const,
+    label: 'Entry arch / gate',
+    width: 6,
+    height: 3,
+    description: 'Curved entry arch to mark the arrival moment.',
+    color: '#fbbf24',
+  },
 ];
 
 type Tool = 'select' | 'line';
@@ -143,7 +156,8 @@ type LayoutElement = RectShapeElement | SiteShapeElement | LineElement;
 type DragState =
   | { id: string; kind: 'shape'; offsetX: number; offsetY: number }
   | { id: string; kind: 'line'; offsetX: number; offsetY: number }
-  | { id: string; kind: 'site-vertex'; vertexIndex: number; offsetX: number; offsetY: number };
+  | { id: string; kind: 'site-vertex'; vertexIndex: number; offsetX: number; offsetY: number }
+  | { id: string; kind: 'rotate-shape'; centerX: number; centerY: number; startAngle: number; startRotation: number };
 
 const getSiteCentroid = (points: SitePoint[]) => {
   const sum = points.reduce(
@@ -193,6 +207,14 @@ const ShowLayoutDesigner = () => {
   const [isLengthLocked, setIsLengthLocked] = useState(false);
   const [lockedLength, setLockedLength] = useState(5);
   const [linePreview, setLinePreview] = useState<LineElement | null>(null);
+  const [isFullScreen, setIsFullScreen] = useState(false);
+  const [firebaseConfig, setFirebaseConfig] = useState({
+    apiKey: '',
+    projectId: '',
+    collection: 'drafts',
+  });
+  const [isSavingDraft, setIsSavingDraft] = useState(false);
+  const [draftMessage, setDraftMessage] = useState<string | null>(null);
 
   const svgRef = useRef<SVGSVGElement | null>(null);
   const dragStateRef = useRef<DragState | null>(null);
@@ -303,7 +325,7 @@ const ShowLayoutDesigner = () => {
         color: paletteColor,
         caravanSize: palette.kind === 'caravan' ? defaultCaravanSize : undefined,
         caravanVariant: palette.kind === 'caravan' ? 'SRP' : undefined,
-        label: palette.label,
+        label: palette.kind === 'caravan' ? 'SRP' : palette.label,
       },
     ]);
   }, []);
@@ -427,6 +449,18 @@ const ShowLayoutDesigner = () => {
     if (dragStateRef.current) {
       const point = getCanvasPoint(event.clientX, event.clientY);
       if (!point) return;
+      if (dragStateRef.current.kind === 'rotate-shape') {
+        const angle = Math.atan2(point.y - dragStateRef.current.centerY, point.x - dragStateRef.current.centerX);
+        const deltaDeg = ((angle - dragStateRef.current.startAngle) * 180) / Math.PI;
+        setElements((prev) =>
+          prev.map((item) =>
+            item.id === dragStateRef.current?.id && item.kind !== 'line' && item.kind !== 'site'
+              ? { ...item, rotation: (dragStateRef.current.startRotation + deltaDeg + 360) % 360 }
+              : item
+          )
+        );
+        return;
+      }
       setElements((prev) =>
         prev.map((item) => {
           if (item.id !== dragStateRef.current?.id) return item;
@@ -548,6 +582,28 @@ const ShowLayoutDesigner = () => {
     };
   };
 
+  const handleRotationPointerDown = (
+    event: React.PointerEvent<SVGCircleElement>,
+    element: RectShapeElement,
+    centerX: number,
+    centerY: number
+  ) => {
+    event.stopPropagation();
+    if (tool !== 'select') return;
+    setSelectedId(element.id);
+    const point = getCanvasPoint(event.clientX, event.clientY);
+    if (!point) return;
+    const startAngle = Math.atan2(point.y - centerY, point.x - centerX);
+    dragStateRef.current = {
+      id: element.id,
+      kind: 'rotate-shape',
+      centerX,
+      centerY,
+      startAngle,
+      startRotation: element.rotation,
+    };
+  };
+
   const updateSelectedElement = (updates: Partial<RectShapeElement> | Partial<SiteShapeElement> | Partial<LineElement>) => {
     if (!selectedElement) return;
     setElements((prev) => prev.map((item) => (item.id === selectedElement.id ? { ...item, ...updates } : item)));
@@ -625,6 +681,47 @@ const ShowLayoutDesigner = () => {
     });
   };
 
+  const saveDraftToFirebase = async () => {
+    setIsSavingDraft(true);
+    setDraftMessage(null);
+    try {
+      if (!firebaseConfig.apiKey || !firebaseConfig.projectId) {
+        setDraftMessage('Add your Firebase API key and project ID to save drafts.');
+        return;
+      }
+
+      const payload = {
+        elements,
+        stats,
+        savedAt: new Date().toISOString(),
+      };
+
+      const response = await fetch(
+        `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/(default)/documents/${firebaseConfig.collection}?key=${firebaseConfig.apiKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            fields: {
+              data: { stringValue: JSON.stringify(payload) },
+            },
+          }),
+        }
+      );
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || 'Unable to save draft');
+      }
+      setDraftMessage('Draft saved to Firebase successfully.');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error saving draft';
+      setDraftMessage(message);
+    } finally {
+      setIsSavingDraft(false);
+    }
+  };
+
   const renderRectShape = (element: RectShapeElement) => {
     const widthPx = element.width * PIXELS_PER_METER;
     const heightPx = element.height * PIXELS_PER_METER;
@@ -637,6 +734,18 @@ const ShowLayoutDesigner = () => {
     const caravanPath = hasDrawbar
       ? `M ${-widthPx / 2} ${-heightPx / 2} h ${widthPx} l ${triangleLengthPx} ${heightPx / 2} l ${-triangleLengthPx} ${heightPx / 2} h ${-widthPx} z`
       : undefined;
+
+    const archHeight = element.kind === 'gate' ? heightPx : 0;
+    const archWidth = element.kind === 'gate' ? widthPx : 0;
+    const archRadius = archWidth / 2;
+    const labelContent =
+      element.kind === 'caravan'
+        ? `${(element.caravanVariant ?? 'SRP').toUpperCase()}`
+        : element.label;
+    const secondaryLabel =
+      element.kind === 'caravan'
+        ? CARAVAN_SIZES[element.caravanSize ?? 'small'].label
+        : `${element.width.toFixed(1)}m × ${element.height.toFixed(1)}m`;
 
     return (
       <g
@@ -653,6 +762,14 @@ const ShowLayoutDesigner = () => {
             stroke={isSelected ? '#0ea5e9' : element.color}
             strokeWidth={isSelected ? 3 : 2}
             strokeLinejoin="round"
+          />
+        ) : element.kind === 'gate' ? (
+          <path
+            d={`M ${-archWidth / 2} ${archHeight / 2} L ${-archWidth / 2} ${-archHeight / 2} A ${archRadius} ${archRadius} 0 0 1 ${archWidth / 2} ${-archHeight / 2} L ${archWidth / 2} ${archHeight / 2} Z`}
+            fill={element.color}
+            fillOpacity={0.18}
+            stroke={isSelected ? '#0ea5e9' : element.color}
+            strokeWidth={isSelected ? 4 : 2}
           />
         ) : (
           <rect
@@ -677,10 +794,10 @@ const ShowLayoutDesigner = () => {
           textAnchor="middle"
           alignmentBaseline="middle"
           fontSize={14}
-          fontWeight={600}
+          fontWeight={700}
           fill="white"
         >
-          {element.label}
+          {labelContent}
         </text>
         <text
           x={0}
@@ -689,8 +806,33 @@ const ShowLayoutDesigner = () => {
           fontSize={11}
           fill="#334155"
         >
-          {`${element.width.toFixed(1)}m × ${element.height.toFixed(1)}m`}
+          {secondaryLabel}
         </text>
+
+        {isSelected && element.kind !== 'line' && (
+          <g>
+            <line
+              x1={0}
+              y1={-heightPx / 2 - 20}
+              x2={0}
+              y2={-heightPx / 2 - 4}
+              stroke="#0ea5e9"
+              strokeWidth={3}
+            />
+            <circle
+              cx={0}
+              cy={-heightPx / 2 - 28}
+              r={10}
+              fill="#0ea5e9"
+              stroke="white"
+              strokeWidth={2}
+              className="cursor-pointer"
+              onPointerDown={(event) =>
+                handleRotationPointerDown(event, element, element.x, element.y)
+              }
+            />
+          </g>
+        )}
       </g>
     );
   };
@@ -778,7 +920,11 @@ const ShowLayoutDesigner = () => {
   };
 
   return (
-    <div className="space-y-6">
+    <div
+      className={`space-y-6 ${
+        isFullScreen ? 'fixed inset-0 z-50 bg-white p-4 overflow-auto shadow-2xl' : ''
+      }`}
+    >
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-semibold text-slate-900">Show layout studio</h1>
@@ -787,16 +933,27 @@ const ShowLayoutDesigner = () => {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <Button variant="outline" onClick={() => setIsFullScreen((prev) => !prev)} className="gap-2">
+            {isFullScreen ? <Minimize className="h-4 w-4" /> : <Maximize className="h-4 w-4" />}
+            {isFullScreen ? 'Exit full screen' : 'Full screen'}
+          </Button>
           <Button variant="outline" onClick={resetLayout} className="gap-2">
             <RotateCcw className="h-4 w-4" /> Reset
           </Button>
           <Button className="gap-2" onClick={() => setTool('line')}>
             <PenTool className="h-4 w-4" /> Quick line
           </Button>
+          <Button className="gap-2" variant="secondary" onClick={saveDraftToFirebase} disabled={isSavingDraft}>
+            <Save className="h-4 w-4" /> {isSavingDraft ? 'Saving...' : 'Save draft'}
+          </Button>
         </div>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-[280px_1fr_320px]">
+      <div
+        className={`grid gap-4 lg:grid-cols-[300px_1fr_340px] ${
+          isFullScreen ? 'h-[calc(100vh-140px)]' : ''
+        }`}
+      >
         <Card className="h-full border-2 border-slate-100">
           <CardHeader>
             <CardTitle className="text-xl flex items-center gap-2">
@@ -865,7 +1022,7 @@ const ShowLayoutDesigner = () => {
                 <TabsTrigger value="notes">Guides</TabsTrigger>
               </TabsList>
               <TabsContent value="palette">
-                <ScrollArea className="h-[340px] pr-4">
+                <ScrollArea className={`${isFullScreen ? 'h-[520px]' : 'h-[380px]'} pr-4`}>
                   <div className="space-y-4">
                     {paletteItems.map((item) => (
                       <div
@@ -886,6 +1043,7 @@ const ShowLayoutDesigner = () => {
                             {item.kind === 'office' && <Building2 className="h-4 w-4 text-slate-700" />}
                             {item.kind === 'screen' && <Monitor className="h-4 w-4 text-orange-500" />}
                             {item.kind === 'service' && <Wrench className="h-4 w-4 text-violet-500" />}
+                            {item.kind === 'gate' && <DoorOpen className="h-4 w-4 text-amber-500" />}
                           </div>
                         </div>
                         <div className="mt-3 flex items-center justify-between text-xs text-slate-500">
@@ -1133,7 +1291,10 @@ const ShowLayoutDesigner = () => {
                             className="mt-1 w-full rounded-md border border-slate-300 px-2 py-2 text-sm"
                             value={selectedElement.caravanVariant ?? 'SRP'}
                             onChange={(event) =>
-                              updateSelectedElement({ caravanVariant: event.target.value as RectShapeElement['caravanVariant'] })
+                              updateSelectedElement({
+                                caravanVariant: event.target.value as RectShapeElement['caravanVariant'],
+                                label: (event.target.value as RectShapeElement['caravanVariant']).toUpperCase(),
+                              })
                             }
                           >
                             {['SRP', 'SRT', 'SRH', 'SRV', 'SRC'].map((variant) => (
@@ -1222,6 +1383,36 @@ const ShowLayoutDesigner = () => {
                   </dd>
                 </div>
               </dl>
+            </div>
+
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 space-y-3">
+              <p className="text-sm font-semibold text-slate-900">Firebase draft sync</p>
+              <p className="text-xs text-slate-500">
+                Enter your Firebase REST API details to store drafts. Data is stored as a JSON string in the chosen collection.
+              </p>
+              <div className="space-y-2 text-sm">
+                <Label className="text-xs text-slate-500">API key</Label>
+                <Input
+                  placeholder="AIza..."
+                  value={firebaseConfig.apiKey}
+                  onChange={(event) => setFirebaseConfig((prev) => ({ ...prev, apiKey: event.target.value }))}
+                />
+                <Label className="text-xs text-slate-500">Project ID</Label>
+                <Input
+                  placeholder="your-project-id"
+                  value={firebaseConfig.projectId}
+                  onChange={(event) => setFirebaseConfig((prev) => ({ ...prev, projectId: event.target.value }))}
+                />
+                <Label className="text-xs text-slate-500">Collection (optional)</Label>
+                <Input
+                  placeholder="drafts"
+                  value={firebaseConfig.collection}
+                  onChange={(event) => setFirebaseConfig((prev) => ({ ...prev, collection: event.target.value }))}
+                />
+                {draftMessage && (
+                  <p className="text-xs font-semibold text-amber-700">{draftMessage}</p>
+                )}
+              </div>
             </div>
           </CardContent>
         </Card>
