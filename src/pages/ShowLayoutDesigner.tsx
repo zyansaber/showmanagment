@@ -30,6 +30,14 @@ const PIXELS_PER_METER = 40;
 const CANVAS_DIMENSIONS = { width: 120, height: 80 }; // meters
 const SNAP_STEP = 0.25; // meters
 
+const CARAVAN_SIZES = {
+  small: { width: 7, height: 3, label: 'Small (7m x 3m)', color: '#0ea5e9' },
+  medium: { width: 8, height: 3, label: 'Medium (8m x 3m)', color: '#6366f1' },
+  large: { width: 9, height: 3, label: 'Large (9m x 3m)', color: '#a855f7' },
+};
+
+type CaravanSize = keyof typeof CARAVAN_SIZES;
+
 const paletteItems = [
   {
     id: 'plant',
@@ -43,11 +51,11 @@ const paletteItems = [
   {
     id: 'caravan',
     kind: 'caravan' as const,
-    label: 'Caravan bay (7m x 3m)',
-    width: 7,
-    height: 3,
+    label: 'Caravan bay (configurable)',
+    width: CARAVAN_SIZES.small.width,
+    height: CARAVAN_SIZES.small.height,
     description: 'Standard caravan footprint with generous spacing.',
-    color: '#2563eb',
+    color: CARAVAN_SIZES.small.color,
   },
   {
     id: 'office',
@@ -76,24 +84,48 @@ const paletteItems = [
     description: 'Utilities, charging or hospitality support zone.',
     color: '#7c3aed',
   },
+  {
+    id: 'site',
+    kind: 'site' as const,
+    label: 'Freeform site',
+    width: 12,
+    height: 8,
+    description: 'Drop a deformable quadrilateral site and drag each corner.',
+    color: '#10b981',
+  },
 ];
 
 type Tool = 'select' | 'line';
 
 type ShapeKind = (typeof paletteItems)[number]['kind'];
 
+type RectShapeKind = Exclude<ShapeKind, 'site'>;
+
 interface BaseElement {
   id: string;
   label: string;
 }
 
-interface ShapeElement extends BaseElement {
-  kind: ShapeKind;
+interface RectShapeElement extends BaseElement {
+  kind: RectShapeKind;
   x: number; // meters, center
   y: number;
   width: number; // meters
   height: number; // meters
   rotation: number; // degrees
+  color: string;
+  caravanSize?: CaravanSize;
+  caravanVariant?: 'SRP' | 'SRT' | 'SRH' | 'SRV' | 'SRC';
+}
+
+interface SitePoint {
+  x: number;
+  y: number;
+}
+
+interface SiteShapeElement extends BaseElement {
+  kind: 'site';
+  points: SitePoint[];
   color: string;
 }
 
@@ -106,11 +138,43 @@ interface LineElement extends BaseElement {
   length: number; // meters
 }
 
-type LayoutElement = ShapeElement | LineElement;
+type LayoutElement = RectShapeElement | SiteShapeElement | LineElement;
 
 type DragState =
   | { id: string; kind: 'shape'; offsetX: number; offsetY: number }
-  | { id: string; kind: 'line'; offsetX: number; offsetY: number };
+  | { id: string; kind: 'line'; offsetX: number; offsetY: number }
+  | { id: string; kind: 'site-vertex'; vertexIndex: number; offsetX: number; offsetY: number };
+
+const getSiteCentroid = (points: SitePoint[]) => {
+  const sum = points.reduce(
+    (acc, curr) => ({ x: acc.x + curr.x, y: acc.y + curr.y }),
+    { x: 0, y: 0 }
+  );
+  return { x: sum.x / points.length, y: sum.y / points.length };
+};
+
+const polygonArea = (points: SitePoint[]) => {
+  let area = 0;
+  for (let i = 0; i < points.length; i += 1) {
+    const j = (i + 1) % points.length;
+    area += points[i].x * points[j].y - points[j].x * points[i].y;
+  }
+  return Math.abs(area / 2);
+};
+
+const caravanArea = (element: RectShapeElement) => {
+  const triangleLength = 1.5;
+  const bodyArea = element.width * element.height;
+  const triangleArea = (element.height * triangleLength) / 2;
+  return bodyArea + triangleArea;
+};
+
+const elementArea = (element: LayoutElement) => {
+  if (element.kind === 'line') return 0;
+  if (element.kind === 'site') return polygonArea(element.points);
+  if (element.kind === 'caravan') return caravanArea(element);
+  return element.width * element.height;
+};
 
 const formatNumber = (value: number, digits = 2) => Number(value.toFixed(digits));
 
@@ -154,14 +218,30 @@ const ShowLayoutDesigner = () => {
   );
 
   const stats = useMemo(() => {
-    const footprint = elements
-      .filter((item): item is ShapeElement => item.kind !== 'line')
-      .reduce((acc, curr) => acc + curr.width * curr.height, 0);
+    const siteArea = elements
+      .filter((item): item is SiteShapeElement => item.kind === 'site')
+      .reduce((acc, curr) => acc + polygonArea(curr.points), 0);
+    const caravanElements = elements.filter((item): item is RectShapeElement => item.kind === 'caravan');
+    const caravanFootprint = caravanElements.reduce((acc, curr) => acc + caravanArea(curr), 0);
+    const footprint = elements.reduce((acc, curr) => acc + elementArea(curr), 0);
     const lines = elements.filter((item) => item.kind === 'line').length;
+    const caravanVariantCounts = caravanElements.reduce(
+      (acc, curr) => {
+        const variant = curr.caravanVariant ?? 'SRP';
+        acc[variant] = (acc[variant] ?? 0) + 1;
+        return acc;
+      },
+      {} as Record<NonNullable<RectShapeElement['caravanVariant']>, number>
+    );
+
     return {
       items: elements.length,
       footprint: formatNumber(footprint, 1),
       lines,
+      siteArea: formatNumber(siteArea, 2),
+      caravanArea: formatNumber(caravanFootprint, 2),
+      netArea: formatNumber(Math.max(siteArea - caravanFootprint, 0), 2),
+      caravanVariantCounts,
     };
   }, [elements]);
 
@@ -181,17 +261,48 @@ const ShowLayoutDesigner = () => {
   const addShapeFromPalette = useCallback((itemId: string, position?: { x: number; y: number }) => {
     const palette = paletteItems.find((entry) => entry.id === itemId);
     if (!palette) return;
+    const center = { x: position?.x ?? CANVAS_DIMENSIONS.width / 2, y: position?.y ?? CANVAS_DIMENSIONS.height / 2 };
+
+    if (palette.kind === 'site') {
+      const halfWidth = palette.width / 2;
+      const halfHeight = palette.height / 2;
+      const points: SitePoint[] = [
+        { x: center.x - halfWidth, y: center.y - halfHeight },
+        { x: center.x + halfWidth, y: center.y - halfHeight },
+        { x: center.x + halfWidth, y: center.y + halfHeight },
+        { x: center.x - halfWidth, y: center.y + halfHeight },
+      ];
+      setElements((prev) => [
+        ...prev,
+        {
+          id: uuidv4(),
+          kind: 'site',
+          points,
+          color: palette.color,
+          label: palette.label,
+        },
+      ]);
+      return;
+    }
+
+    const defaultCaravanSize: CaravanSize = 'small';
+    const paletteColor = palette.kind === 'caravan' ? CARAVAN_SIZES[defaultCaravanSize].color : palette.color;
+    const paletteWidth = palette.kind === 'caravan' ? CARAVAN_SIZES[defaultCaravanSize].width : palette.width;
+    const paletteHeight = palette.kind === 'caravan' ? CARAVAN_SIZES[defaultCaravanSize].height : palette.height;
+
     setElements((prev) => [
       ...prev,
       {
         id: uuidv4(),
         kind: palette.kind,
-        x: position?.x ?? CANVAS_DIMENSIONS.width / 2,
-        y: position?.y ?? CANVAS_DIMENSIONS.height / 2,
-        width: palette.width,
-        height: palette.height,
+        x: center.x,
+        y: center.y,
+        width: paletteWidth,
+        height: paletteHeight,
         rotation: 0,
-        color: palette.color,
+        color: paletteColor,
+        caravanSize: palette.kind === 'caravan' ? defaultCaravanSize : undefined,
+        caravanVariant: palette.kind === 'caravan' ? 'SRP' : undefined,
         label: palette.label,
       },
     ]);
@@ -320,6 +431,18 @@ const ShowLayoutDesigner = () => {
         prev.map((item) => {
           if (item.id !== dragStateRef.current?.id) return item;
           if (dragStateRef.current?.kind === 'shape' && item.kind !== 'line') {
+            if (item.kind === 'site') {
+              const centroid = getSiteCentroid(item.points);
+              const nextCenterX = snapValue(point.x - dragStateRef.current.offsetX);
+              const nextCenterY = snapValue(point.y - dragStateRef.current.offsetY);
+              const deltaX = nextCenterX - centroid.x;
+              const deltaY = nextCenterY - centroid.y;
+              return {
+                ...item,
+                points: item.points.map((p) => ({ x: p.x + deltaX, y: p.y + deltaY })),
+              };
+            }
+
             return {
               ...item,
               x: snapValue(point.x - dragStateRef.current.offsetX),
@@ -340,6 +463,14 @@ const ShowLayoutDesigner = () => {
               x2: item.x2 + deltaX,
               y2: item.y2 + deltaY,
             };
+          }
+          if (dragStateRef.current?.kind === 'site-vertex' && item.kind === 'site') {
+            const updated = [...item.points];
+            updated[dragStateRef.current.vertexIndex] = {
+              x: snapValue(point.x - dragStateRef.current.offsetX),
+              y: snapValue(point.y - dragStateRef.current.offsetY),
+            };
+            return { ...item, points: updated };
           }
           return item;
         })
@@ -380,6 +511,14 @@ const ShowLayoutDesigner = () => {
         offsetX: point.x - centerX,
         offsetY: point.y - centerY,
       };
+    } else if (element.kind === 'site') {
+      const centroid = getSiteCentroid(element.points);
+      dragStateRef.current = {
+        id: element.id,
+        kind: 'shape',
+        offsetX: point.x - centroid.x,
+        offsetY: point.y - centroid.y,
+      };
     } else {
       dragStateRef.current = {
         id: element.id,
@@ -390,14 +529,33 @@ const ShowLayoutDesigner = () => {
     }
   };
 
-  const updateSelectedElement = (updates: Partial<ShapeElement> | Partial<LineElement>) => {
+  const handleSiteVertexPointerDown = (
+    event: React.PointerEvent<SVGCircleElement>,
+    element: SiteShapeElement,
+    index: number
+  ) => {
+    event.stopPropagation();
+    if (tool !== 'select') return;
+    setSelectedId(element.id);
+    const point = getCanvasPoint(event.clientX, event.clientY);
+    if (!point) return;
+    dragStateRef.current = {
+      id: element.id,
+      kind: 'site-vertex',
+      vertexIndex: index,
+      offsetX: point.x - element.points[index].x,
+      offsetY: point.y - element.points[index].y,
+    };
+  };
+
+  const updateSelectedElement = (updates: Partial<RectShapeElement> | Partial<SiteShapeElement> | Partial<LineElement>) => {
     if (!selectedElement) return;
     setElements((prev) => prev.map((item) => (item.id === selectedElement.id ? { ...item, ...updates } : item)));
   };
 
   const handleShapeDimensionChange = (dimension: 'width' | 'height', value: number) => {
-    if (!selectedElement || selectedElement.kind === 'line') return;
-    updateSelectedElement({ [dimension]: Math.max(0.5, value) } as Partial<ShapeElement>);
+    if (!selectedElement || selectedElement.kind === 'line' || selectedElement.kind === 'site') return;
+    updateSelectedElement({ [dimension]: Math.max(0.5, value) } as Partial<RectShapeElement>);
   };
 
   const handleLineLengthChange = (value: number) => {
@@ -424,12 +582,61 @@ const ShowLayoutDesigner = () => {
     lineStartRef.current = null;
   };
 
-  const renderShape = (element: ShapeElement) => {
+  const duplicateSelected = () => {
+    if (!selectedElement) return;
+    setElements((prev) => {
+      const source = prev.find((item) => item.id === selectedElement.id);
+      if (!source) return prev;
+      const offset = 1;
+      if (source.kind === 'line') {
+        const clone: LineElement = {
+          ...source,
+          id: uuidv4(),
+          label: `${source.label} copy`,
+          x1: source.x1 + offset,
+          x2: source.x2 + offset,
+          y1: source.y1 + offset,
+          y2: source.y2 + offset,
+        };
+        setSelectedId(clone.id);
+        return [...prev, clone];
+      }
+
+      if (source.kind === 'site') {
+        const clone: SiteShapeElement = {
+          ...source,
+          id: uuidv4(),
+          label: `${source.label} copy`,
+          points: source.points.map((point) => ({ x: point.x + offset, y: point.y + offset })),
+        };
+        setSelectedId(clone.id);
+        return [...prev, clone];
+      }
+
+      const clone: RectShapeElement = {
+        ...source,
+        id: uuidv4(),
+        label: `${source.label} copy`,
+        x: source.x + offset,
+        y: source.y + offset,
+      };
+      setSelectedId(clone.id);
+      return [...prev, clone];
+    });
+  };
+
+  const renderRectShape = (element: RectShapeElement) => {
     const widthPx = element.width * PIXELS_PER_METER;
     const heightPx = element.height * PIXELS_PER_METER;
     const translateX = element.x * PIXELS_PER_METER;
     const translateY = element.y * PIXELS_PER_METER;
     const isSelected = element.id === selectedId;
+    const triangleLengthPx = 1.5 * PIXELS_PER_METER;
+    const hasDrawbar = element.kind === 'caravan';
+
+    const caravanPath = hasDrawbar
+      ? `M ${-widthPx / 2} ${-heightPx / 2} h ${widthPx} l ${triangleLengthPx} ${heightPx / 2} l ${-triangleLengthPx} ${heightPx / 2} h ${-widthPx} z`
+      : undefined;
 
     return (
       <g
@@ -438,26 +645,31 @@ const ShowLayoutDesigner = () => {
         onPointerDown={(event) => handleElementPointerDown(event, element)}
         className="cursor-move"
       >
-        <rect
-          x={-widthPx / 2}
-          y={-heightPx / 2}
-          width={widthPx}
-          height={heightPx}
-          rx={element.kind === 'screen' ? 6 : element.kind === 'plant' ? widthPx / 2 : 12}
-          ry={element.kind === 'plant' ? heightPx / 2 : 12}
-          fill={element.kind === 'plant' ? '#34d399' : element.color}
-          stroke={isSelected ? '#facc15' : '#0f172a'}
-          strokeWidth={isSelected ? 4 : 2}
-          opacity={element.kind === 'screen' ? 0.85 : 0.95}
-        />
-        {element.kind === 'plant' && (
-          <circle
-            cx={0}
-            cy={0}
-            r={Math.min(widthPx, heightPx) / 3}
-            fill="#059669"
-            opacity={0.8}
+        {hasDrawbar ? (
+          <path
+            d={caravanPath}
+            fill={element.color}
+            fillOpacity={0.15}
+            stroke={isSelected ? '#0ea5e9' : element.color}
+            strokeWidth={isSelected ? 3 : 2}
+            strokeLinejoin="round"
           />
+        ) : (
+          <rect
+            x={-widthPx / 2}
+            y={-heightPx / 2}
+            width={widthPx}
+            height={heightPx}
+            rx={element.kind === 'screen' ? 6 : element.kind === 'plant' ? widthPx / 2 : 12}
+            ry={element.kind === 'plant' ? heightPx / 2 : 12}
+            fill={element.kind === 'plant' ? '#34d399' : element.color}
+            stroke={isSelected ? '#0ea5e9' : '#0f172a'}
+            strokeWidth={isSelected ? 4 : 2}
+            opacity={element.kind === 'screen' ? 0.85 : 0.95}
+          />
+        )}
+        {element.kind === 'plant' && !hasDrawbar && (
+          <circle cx={0} cy={0} r={Math.min(widthPx, heightPx) / 3} fill="#059669" opacity={0.8} />
         )}
         <text
           x={0}
@@ -478,6 +690,49 @@ const ShowLayoutDesigner = () => {
           fill="#334155"
         >
           {`${element.width.toFixed(1)}m × ${element.height.toFixed(1)}m`}
+        </text>
+      </g>
+    );
+  };
+
+  const renderSiteShape = (element: SiteShapeElement) => {
+    const isSelected = element.id === selectedId;
+    const path = element.points
+      .map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x * PIXELS_PER_METER} ${point.y * PIXELS_PER_METER}`)
+      .join(' ');
+
+    return (
+      <g key={element.id} onPointerDown={(event) => handleElementPointerDown(event, element)} className="cursor-move">
+        <path
+          d={`${path} Z`}
+          fill={element.color}
+          fillOpacity={0.1}
+          stroke={isSelected ? '#0ea5e9' : element.color}
+          strokeWidth={isSelected ? 3 : 2}
+        />
+        {element.points.map((point, index) => (
+          <circle
+            key={`${element.id}-pt-${index}`}
+            cx={point.x * PIXELS_PER_METER}
+            cy={point.y * PIXELS_PER_METER}
+            r={8}
+            fill="#0ea5e9"
+            stroke="white"
+            strokeWidth={2}
+            className="cursor-pointer"
+            onPointerDown={(event) => handleSiteVertexPointerDown(event, element, index)}
+          />
+        ))}
+        <text
+          x={getSiteCentroid(element.points).x * PIXELS_PER_METER}
+          y={getSiteCentroid(element.points).y * PIXELS_PER_METER}
+          textAnchor="middle"
+          alignmentBaseline="middle"
+          fontSize={14}
+          fontWeight={600}
+          fill="white"
+        >
+          {element.label}
         </text>
       </g>
     );
@@ -744,9 +999,11 @@ const ShowLayoutDesigner = () => {
                       onPointerDown={handleCanvasPointerDown}
                     >
                       <rect width={canvasWidthPx} height={canvasHeightPx} fill="transparent" />
-                      {elements.map((element) =>
-                        element.kind === 'line' ? renderLine(element) : renderShape(element)
-                      )}
+                      {elements.map((element) => {
+                        if (element.kind === 'line') return renderLine(element);
+                        if (element.kind === 'site') return renderSiteShape(element);
+                        return renderRectShape(element);
+                      })}
                       {linePreview && (
                         <line
                           x1={linePreview.x1 * PIXELS_PER_METER}
@@ -784,17 +1041,22 @@ const ShowLayoutDesigner = () => {
                     <p className="text-sm font-semibold text-slate-900">{selectedElement.label}</p>
                     <p className="text-xs text-slate-500">{selectedElement.kind === 'line' ? 'Measurement' : 'Asset'}</p>
                   </div>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="text-xs text-red-500"
-                    onClick={() => {
-                      setElements((prev) => prev.filter((item) => item.id !== selectedElement.id));
-                      setSelectedId(null);
-                    }}
-                  >
-                    Remove
-                  </Button>
+                  <div className="flex gap-2">
+                    <Button variant="secondary" size="sm" onClick={duplicateSelected}>
+                      Duplicate
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="text-xs text-red-500"
+                      onClick={() => {
+                        setElements((prev) => prev.filter((item) => item.id !== selectedElement.id));
+                        setSelectedId(null);
+                      }}
+                    >
+                      Remove
+                    </Button>
+                  </div>
                 </div>
 
                 <div className="space-y-3">
@@ -805,7 +1067,7 @@ const ShowLayoutDesigner = () => {
                   />
                 </div>
 
-                {selectedElement.kind === 'line' ? (
+                {selectedElement.kind === 'line' && (
                   <div className="space-y-3">
                     <Label className="text-xs text-slate-500">Length (m)</Label>
                     <Input
@@ -816,7 +1078,21 @@ const ShowLayoutDesigner = () => {
                       onChange={(event) => handleLineLengthChange(Math.max(0.5, Number(event.target.value)))}
                     />
                   </div>
-                ) : (
+                )}
+
+                {selectedElement.kind === 'site' && (
+                  <div className="space-y-3">
+                    <Label className="text-xs text-slate-500">Site area</Label>
+                    <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700">
+                      {polygonArea(selectedElement.points).toFixed(2)} m²
+                    </div>
+                    <p className="text-xs text-slate-500">
+                      Drag any of the four corner nodes to reshape the parcel to match real-world irregularities.
+                    </p>
+                  </div>
+                )}
+
+                {selectedElement.kind !== 'line' && selectedElement.kind !== 'site' && (
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <Label className="text-xs text-slate-500">Width (m)</Label>
@@ -849,6 +1125,53 @@ const ShowLayoutDesigner = () => {
                       />
                       <div className="mt-1 text-xs text-slate-500">{selectedElement.rotation.toFixed(0)}°</div>
                     </div>
+                    {selectedElement.kind === 'caravan' && (
+                      <>
+                        <div>
+                          <Label className="text-xs text-slate-500">Model range</Label>
+                          <select
+                            className="mt-1 w-full rounded-md border border-slate-300 px-2 py-2 text-sm"
+                            value={selectedElement.caravanVariant ?? 'SRP'}
+                            onChange={(event) =>
+                              updateSelectedElement({ caravanVariant: event.target.value as RectShapeElement['caravanVariant'] })
+                            }
+                          >
+                            {['SRP', 'SRT', 'SRH', 'SRV', 'SRC'].map((variant) => (
+                              <option key={variant} value={variant}>
+                                {variant}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <Label className="text-xs text-slate-500">Size & colour</Label>
+                          <select
+                            className="mt-1 w-full rounded-md border border-slate-300 px-2 py-2 text-sm"
+                            value={selectedElement.caravanSize ?? 'small'}
+                            onChange={(event) => {
+                              const sizeKey = event.target.value as CaravanSize;
+                              const sizing = CARAVAN_SIZES[sizeKey];
+                              updateSelectedElement({
+                                caravanSize: sizeKey,
+                                width: sizing.width,
+                                height: sizing.height,
+                                color: sizing.color,
+                              });
+                            }}
+                          >
+                            {Object.entries(CARAVAN_SIZES).map(([key, value]) => (
+                              <option key={key} value={key}>
+                                {value.label}
+                              </option>
+                            ))}
+                          </select>
+                          <div className="mt-2 flex items-center gap-2 text-xs text-slate-500">
+                            <span className="h-3 w-6 rounded-full" style={{ backgroundColor: selectedElement.color }} />
+                            <span>Preview colour updates with each size.</span>
+                          </div>
+                        </div>
+                      </>
+                    )}
                   </div>
                 )}
               </div>
@@ -872,6 +1195,31 @@ const ShowLayoutDesigner = () => {
                 <div className="flex items-center justify-between">
                   <dt>Dimension lines</dt>
                   <dd className="font-semibold text-slate-900">{stats.lines}</dd>
+                </div>
+                <div className="flex items-center justify-between">
+                  <dt>Site area</dt>
+                  <dd className="font-semibold text-slate-900">{stats.siteArea} m²</dd>
+                </div>
+                <div className="flex items-center justify-between">
+                  <dt>Caravan coverage</dt>
+                  <dd className="font-semibold text-slate-900">{stats.caravanArea} m²</dd>
+                </div>
+                <div className="flex items-center justify-between">
+                  <dt>Usable area</dt>
+                  <dd className="font-semibold text-emerald-700">{stats.netArea} m²</dd>
+                </div>
+                <div>
+                  <dt className="text-slate-500">Caravan model mix</dt>
+                  <dd className="mt-1 flex flex-wrap gap-2 text-xs text-slate-600">
+                    {['SRP', 'SRT', 'SRH', 'SRV', 'SRC'].map((variant) => (
+                      <span
+                        key={variant}
+                        className="rounded-full bg-slate-200 px-2 py-1 font-semibold text-slate-800"
+                      >
+                        {variant}: {stats.caravanVariantCounts[variant as RectShapeElement['caravanVariant']] ?? 0}
+                      </span>
+                    ))}
+                  </dd>
                 </div>
               </dl>
             </div>
