@@ -147,10 +147,10 @@ const CARAVAN_VARIANT_COLORS: Record<
   string
 > = {
   SRP: '#0ea5e9',
-  SRT: '#f59e0b',
-  SRH: '#10b981',
-  SRV: '#ec4899',
-  SRC: '#6366f1',
+  SRT: '#f97316',
+  SRH: '#16a34a',
+  SRV: '#db2777',
+  SRC: '#4f46e5',
 };
 
 interface SitePoint {
@@ -836,9 +836,15 @@ const ShowLayoutDesigner = () => {
         ? CARAVAN_SIZES[element.caravanSize ?? 'small'].label
         : `${element.width.toFixed(1)}m × ${element.height.toFixed(1)}m`;
 
-    const primaryFontSize = element.kind === 'caravan' ? 16 : 14;
-    const secondaryFontSize = element.kind === 'caravan' ? 12 : 11;
-    const secondaryYOffset = element.kind === 'caravan' ? heightPx / 2 + 18 : heightPx / 2 + 14;
+    const primaryFontSize =
+      element.kind === 'caravan'
+        ? Math.max(16, Math.min(heightPx * 0.55, widthPx * 0.5))
+        : 14;
+    const secondaryFontSize =
+      element.kind === 'caravan'
+        ? Math.max(14, Math.min(heightPx * 0.24, widthPx * 0.35))
+        : 11;
+    const secondaryYOffset = element.kind === 'caravan' ? heightPx / 2 + secondaryFontSize : heightPx / 2 + 14;
 
     return (
       <g
@@ -849,9 +855,9 @@ const ShowLayoutDesigner = () => {
       >
         {element.kind === 'street' && (
           <defs>
-            <pattern id={streetPatternId} patternUnits="userSpaceOnUse" width={20} height={20} patternTransform="rotate(45)">
-              <rect width={20} height={20} fill={adjustHexLuminance(element.color, 0.35)} />
-              <path d="M -5 10 L 25 10" stroke={adjustHexLuminance(element.color, -0.1)} strokeWidth={4} opacity={0.45} />
+            <pattern id={streetPatternId} patternUnits="userSpaceOnUse" width={18} height={18} patternTransform="rotate(45)">
+              <rect width={18} height={18} fill="white" />
+              <path d="M -9 9 L 27 9" stroke="#0f172a" strokeWidth={9} opacity={0.5} />
             </pattern>
           </defs>
         )}
@@ -859,9 +865,9 @@ const ShowLayoutDesigner = () => {
           <path
             d={caravanPath}
             fill={element.color}
-            fillOpacity={0.15}
+            fillOpacity={0.35}
             stroke={isSelected ? '#0ea5e9' : element.color}
-            strokeWidth={isSelected ? 3 : 2}
+            strokeWidth={isSelected ? 4 : 3}
             strokeLinejoin="round"
           />
         ) : element.kind === 'gate' ? (
@@ -896,7 +902,7 @@ const ShowLayoutDesigner = () => {
           alignmentBaseline="middle"
           fontSize={primaryFontSize}
           fontWeight={700}
-          fill="white"
+          fill={element.kind === 'caravan' ? '#0f172a' : 'white'}
         >
           {labelContent}
         </text>
@@ -905,7 +911,7 @@ const ShowLayoutDesigner = () => {
           y={secondaryYOffset}
           textAnchor="middle"
           fontSize={secondaryFontSize}
-          fill="#334155"
+          fill={element.kind === 'caravan' ? '#0f172a' : '#334155'}
         >
           {secondaryLabel}
         </text>
