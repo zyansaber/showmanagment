@@ -19,6 +19,8 @@ import {
   Maximize,
   Minimize,
   Save,
+  FileDown,
+  Route,
 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
@@ -106,6 +108,15 @@ const paletteItems = [
     description: 'Curved entry arch to mark the arrival moment.',
     color: '#fbbf24',
   },
+  {
+    id: 'street',
+    kind: 'street' as const,
+    label: 'Street corridor',
+    width: 18,
+    height: 6,
+    description: 'Long shaded strip for roads or promenades with diagonal hatch.',
+    color: '#334155',
+  },
 ];
 
 type Tool = 'select' | 'line';
@@ -130,6 +141,17 @@ interface RectShapeElement extends BaseElement {
   caravanSize?: CaravanSize;
   caravanVariant?: 'SRP' | 'SRT' | 'SRH' | 'SRV' | 'SRC';
 }
+
+const CARAVAN_VARIANT_COLORS: Record<
+  NonNullable<RectShapeElement['caravanVariant']>,
+  string
+> = {
+  SRP: '#0ea5e9',
+  SRT: '#f59e0b',
+  SRH: '#10b981',
+  SRV: '#ec4899',
+  SRC: '#6366f1',
+};
 
 interface SitePoint {
   x: number;
@@ -192,6 +214,22 @@ const elementArea = (element: LayoutElement) => {
 
 const formatNumber = (value: number, digits = 2) => Number(value.toFixed(digits));
 
+const adjustHexLuminance = (hex: string, amount: number) => {
+  const normalized = hex.replace('#', '');
+  const num = parseInt(normalized, 16);
+  const clamp = (value: number) => Math.max(0, Math.min(255, value));
+  const r = clamp((num >> 16) + 255 * amount);
+  const g = clamp(((num >> 8) & 0x00ff) + 255 * amount);
+  const b = clamp((num & 0x0000ff) + 255 * amount);
+  return `#${((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1)}`;
+};
+
+const getCaravanColor = (variant: NonNullable<RectShapeElement['caravanVariant']>, size: CaravanSize = 'small') => {
+  const base = CARAVAN_VARIANT_COLORS[variant];
+  const lift = size === 'large' ? 0.14 : size === 'medium' ? 0.08 : 0.02;
+  return adjustHexLuminance(base, lift);
+};
+
 const getLineAngle = (line: LineElement) => Math.atan2(line.y2 - line.y1, line.x2 - line.x1);
 
 const canvasWidthPx = CANVAS_DIMENSIONS.width * PIXELS_PER_METER;
@@ -201,7 +239,7 @@ const ShowLayoutDesigner = () => {
   const [elements, setElements] = useState<LayoutElement[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [tool, setTool] = useState<Tool>('select');
-  const [zoom, setZoom] = useState(1);
+  const [zoom, setZoom] = useState(2);
   const [snapToGrid, setSnapToGrid] = useState(true);
   const [showGrid, setShowGrid] = useState(true);
   const [isLengthLocked, setIsLengthLocked] = useState(false);
@@ -215,6 +253,7 @@ const ShowLayoutDesigner = () => {
   });
   const [isSavingDraft, setIsSavingDraft] = useState(false);
   const [draftMessage, setDraftMessage] = useState<string | null>(null);
+  const [isExporting, setIsExporting] = useState(false);
 
   const svgRef = useRef<SVGSVGElement | null>(null);
   const dragStateRef = useRef<DragState | null>(null);
@@ -308,7 +347,10 @@ const ShowLayoutDesigner = () => {
     }
 
     const defaultCaravanSize: CaravanSize = 'small';
-    const paletteColor = palette.kind === 'caravan' ? CARAVAN_SIZES[defaultCaravanSize].color : palette.color;
+    const paletteColor =
+      palette.kind === 'caravan'
+        ? getCaravanColor('SRP', defaultCaravanSize)
+        : palette.color;
     const paletteWidth = palette.kind === 'caravan' ? CARAVAN_SIZES[defaultCaravanSize].width : palette.width;
     const paletteHeight = palette.kind === 'caravan' ? CARAVAN_SIZES[defaultCaravanSize].height : palette.height;
 
@@ -722,6 +764,52 @@ const ShowLayoutDesigner = () => {
     }
   };
 
+  const exportToPdf = async () => {
+    if (!svgRef.current) return;
+
+    setIsExporting(true);
+    try {
+      const serializer = new XMLSerializer();
+      const svgString = serializer.serializeToString(svgRef.current);
+      const blob = new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+
+      const image = new Image();
+      image.src = url;
+      await new Promise((resolve, reject) => {
+        image.onload = resolve;
+        image.onerror = reject;
+      });
+
+      const canvas = document.createElement('canvas');
+      canvas.width = svgRef.current.clientWidth * window.devicePixelRatio;
+      canvas.height = svgRef.current.clientHeight * window.devicePixelRatio;
+      const context = canvas.getContext('2d');
+      if (!context) return;
+
+      context.setTransform(window.devicePixelRatio, 0, 0, window.devicePixelRatio, 0, 0);
+      context.drawImage(image, 0, 0);
+      URL.revokeObjectURL(url);
+
+      const imgData = canvas.toDataURL('image/png');
+      const printWindow = window.open('', '_blank', 'width=1200,height=900');
+      if (!printWindow) return;
+
+      printWindow.document.write(
+        `<html><head><title>Show layout</title></head><body style="margin:0;display:flex;align-items:center;justify-content:center;background:#f8fafc;">
+          <img src="${imgData}" style="max-width:100%;height:auto;" />
+        </body></html>`
+      );
+      printWindow.document.close();
+      printWindow.focus();
+      printWindow.print();
+    } catch (error) {
+      console.error('Unable to export PDF', error);
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
   const renderRectShape = (element: RectShapeElement) => {
     const widthPx = element.width * PIXELS_PER_METER;
     const heightPx = element.height * PIXELS_PER_METER;
@@ -730,6 +818,7 @@ const ShowLayoutDesigner = () => {
     const isSelected = element.id === selectedId;
     const triangleLengthPx = 1.5 * PIXELS_PER_METER;
     const hasDrawbar = element.kind === 'caravan';
+    const streetPatternId = `street-pattern-${element.id}`;
 
     const caravanPath = hasDrawbar
       ? `M ${-widthPx / 2} ${-heightPx / 2} h ${widthPx} l ${triangleLengthPx} ${heightPx / 2} l ${-triangleLengthPx} ${heightPx / 2} h ${-widthPx} z`
@@ -747,6 +836,10 @@ const ShowLayoutDesigner = () => {
         ? CARAVAN_SIZES[element.caravanSize ?? 'small'].label
         : `${element.width.toFixed(1)}m × ${element.height.toFixed(1)}m`;
 
+    const primaryFontSize = element.kind === 'caravan' ? 16 : 14;
+    const secondaryFontSize = element.kind === 'caravan' ? 12 : 11;
+    const secondaryYOffset = element.kind === 'caravan' ? heightPx / 2 + 18 : heightPx / 2 + 14;
+
     return (
       <g
         key={element.id}
@@ -754,6 +847,14 @@ const ShowLayoutDesigner = () => {
         onPointerDown={(event) => handleElementPointerDown(event, element)}
         className="cursor-move"
       >
+        {element.kind === 'street' && (
+          <defs>
+            <pattern id={streetPatternId} patternUnits="userSpaceOnUse" width={20} height={20} patternTransform="rotate(45)">
+              <rect width={20} height={20} fill={adjustHexLuminance(element.color, 0.35)} />
+              <path d="M -5 10 L 25 10" stroke={adjustHexLuminance(element.color, -0.1)} strokeWidth={4} opacity={0.45} />
+            </pattern>
+          </defs>
+        )}
         {hasDrawbar ? (
           <path
             d={caravanPath}
@@ -779,7 +880,7 @@ const ShowLayoutDesigner = () => {
             height={heightPx}
             rx={element.kind === 'screen' ? 6 : element.kind === 'plant' ? widthPx / 2 : 12}
             ry={element.kind === 'plant' ? heightPx / 2 : 12}
-            fill={element.kind === 'plant' ? '#34d399' : element.color}
+            fill={element.kind === 'plant' ? '#34d399' : element.kind === 'street' ? `url(#${streetPatternId})` : element.color}
             stroke={isSelected ? '#0ea5e9' : '#0f172a'}
             strokeWidth={isSelected ? 4 : 2}
             opacity={element.kind === 'screen' ? 0.85 : 0.95}
@@ -793,7 +894,7 @@ const ShowLayoutDesigner = () => {
           y={0}
           textAnchor="middle"
           alignmentBaseline="middle"
-          fontSize={14}
+          fontSize={primaryFontSize}
           fontWeight={700}
           fill="white"
         >
@@ -801,9 +902,9 @@ const ShowLayoutDesigner = () => {
         </text>
         <text
           x={0}
-          y={heightPx / 2 + 14}
+          y={secondaryYOffset}
           textAnchor="middle"
-          fontSize={11}
+          fontSize={secondaryFontSize}
           fill="#334155"
         >
           {secondaryLabel}
@@ -943,6 +1044,9 @@ const ShowLayoutDesigner = () => {
           <Button className="gap-2" onClick={() => setTool('line')}>
             <PenTool className="h-4 w-4" /> Quick line
           </Button>
+          <Button className="gap-2" variant="outline" onClick={exportToPdf} disabled={isExporting}>
+            <FileDown className="h-4 w-4" /> {isExporting ? 'Exporting...' : 'Export PDF'}
+          </Button>
           <Button className="gap-2" variant="secondary" onClick={saveDraftToFirebase} disabled={isSavingDraft}>
             <Save className="h-4 w-4" /> {isSavingDraft ? 'Saving...' : 'Save draft'}
           </Button>
@@ -965,6 +1069,58 @@ const ShowLayoutDesigner = () => {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
+            <Tabs defaultValue="palette">
+              <TabsList className="grid grid-cols-2">
+                <TabsTrigger value="palette">Palette</TabsTrigger>
+                <TabsTrigger value="notes">Guides</TabsTrigger>
+              </TabsList>
+              <TabsContent value="palette">
+                <ScrollArea className="h-[560px] pr-4">
+                  <div className="grid gap-3">
+                    {paletteItems.map((item) => (
+                      <div
+                        key={item.id}
+                        className="cursor-grab active:cursor-grabbing rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition hover:shadow-md"
+                        draggable
+                        onDragStart={(event) => handleDragStart(event, item.id)}
+                        onClick={() => addShapeFromPalette(item.id)}
+                      >
+                        <div className="flex items-start justify-between">
+                          <div>
+                            <p className="text-sm font-semibold text-slate-900">{item.label}</p>
+                            <p className="text-xs text-slate-500">{item.description}</p>
+                          </div>
+                          <div className="rounded-full bg-slate-100 p-2">
+                            {item.kind === 'plant' && <Trees className="h-4 w-4 text-emerald-600" />}
+                            {item.kind === 'caravan' && <Tent className="h-4 w-4 text-blue-600" />}
+                            {item.kind === 'office' && <Building2 className="h-4 w-4 text-slate-700" />}
+                            {item.kind === 'screen' && <Monitor className="h-4 w-4 text-orange-500" />}
+                            {item.kind === 'service' && <Wrench className="h-4 w-4 text-violet-500" />}
+                            {item.kind === 'gate' && <DoorOpen className="h-4 w-4 text-amber-500" />}
+                            {item.kind === 'street' && <Route className="h-4 w-4 text-slate-700" />}
+                          </div>
+                        </div>
+                        <div className="mt-3 flex items-center justify-between text-xs text-slate-500">
+                          <span>{`${item.width}m x ${item.height}m`}</span>
+                          <span>Drag onto canvas</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </ScrollArea>
+              </TabsContent>
+              <TabsContent value="notes">
+                <div className="space-y-3 rounded-xl bg-slate-50 p-4 text-xs text-slate-600">
+                  <p className="font-semibold text-slate-800">Best practices</p>
+                  <ul className="space-y-2 list-disc pl-4">
+                    <li>Align caravan rows with locked 7 m lines for perfect spacing.</li>
+                    <li>Use the service blocks to reserve hospitality or technical areas.</li>
+                    <li>Combine straight lines with plants to soften the visitor journey.</li>
+                  </ul>
+                </div>
+              </TabsContent>
+            </Tabs>
+
             <div>
               <Label className="text-xs uppercase text-slate-500">Tool</Label>
               <div className="mt-2 grid grid-cols-2 gap-2">
@@ -1015,57 +1171,6 @@ const ShowLayoutDesigner = () => {
                 </div>
               )}
             </div>
-
-            <Tabs defaultValue="palette">
-              <TabsList className="grid grid-cols-2">
-                <TabsTrigger value="palette">Palette</TabsTrigger>
-                <TabsTrigger value="notes">Guides</TabsTrigger>
-              </TabsList>
-              <TabsContent value="palette">
-                <ScrollArea className={`${isFullScreen ? 'h-[520px]' : 'h-[380px]'} pr-4`}>
-                  <div className="space-y-4">
-                    {paletteItems.map((item) => (
-                      <div
-                        key={item.id}
-                        draggable
-                        onDragStart={(event) => handleDragStart(event, item.id)}
-                        onClick={() => addShapeFromPalette(item.id)}
-                        className="cursor-grab active:cursor-grabbing rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition hover:border-slate-400"
-                      >
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <p className="font-semibold text-slate-900">{item.label}</p>
-                            <p className="text-xs text-slate-500">{item.description}</p>
-                          </div>
-                          <div className="rounded-full bg-slate-100 p-2">
-                            {item.kind === 'plant' && <Trees className="h-4 w-4 text-emerald-600" />}
-                            {item.kind === 'caravan' && <Tent className="h-4 w-4 text-blue-600" />}
-                            {item.kind === 'office' && <Building2 className="h-4 w-4 text-slate-700" />}
-                            {item.kind === 'screen' && <Monitor className="h-4 w-4 text-orange-500" />}
-                            {item.kind === 'service' && <Wrench className="h-4 w-4 text-violet-500" />}
-                            {item.kind === 'gate' && <DoorOpen className="h-4 w-4 text-amber-500" />}
-                          </div>
-                        </div>
-                        <div className="mt-3 flex items-center justify-between text-xs text-slate-500">
-                          <span>{`${item.width}m x ${item.height}m`}</span>
-                          <span>Drag onto canvas</span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </ScrollArea>
-              </TabsContent>
-              <TabsContent value="notes">
-                <div className="space-y-3 rounded-xl bg-slate-50 p-4 text-xs text-slate-600">
-                  <p className="font-semibold text-slate-800">Best practices</p>
-                  <ul className="space-y-2 list-disc pl-4">
-                    <li>Align caravan rows with locked 7 m lines for perfect spacing.</li>
-                    <li>Use the service blocks to reserve hospitality or technical areas.</li>
-                    <li>Combine straight lines with plants to soften the visitor journey.</li>
-                  </ul>
-                </div>
-              </TabsContent>
-            </Tabs>
           </CardContent>
         </Card>
 
@@ -1086,10 +1191,10 @@ const ShowLayoutDesigner = () => {
                 <ZoomOut className="h-4 w-4" />
                 <Slider
                   value={[zoom]}
-                  min={0.5}
-                  max={2}
+                  min={0.75}
+                  max={3}
                   step={0.1}
-                  onValueChange={(value) => setZoom(value[0] ?? 1)}
+                  onValueChange={(value) => setZoom(value[0] ?? 2)}
                   className="w-32"
                 />
                 <ZoomIn className="h-4 w-4" />
@@ -1290,12 +1395,14 @@ const ShowLayoutDesigner = () => {
                           <select
                             className="mt-1 w-full rounded-md border border-slate-300 px-2 py-2 text-sm"
                             value={selectedElement.caravanVariant ?? 'SRP'}
-                            onChange={(event) =>
+                            onChange={(event) => {
+                              const variant = event.target.value as RectShapeElement['caravanVariant'];
                               updateSelectedElement({
-                                caravanVariant: event.target.value as RectShapeElement['caravanVariant'],
-                                label: (event.target.value as RectShapeElement['caravanVariant']).toUpperCase(),
-                              })
-                            }
+                                caravanVariant: variant,
+                                label: variant.toUpperCase(),
+                                color: getCaravanColor(variant, selectedElement.caravanSize ?? 'small'),
+                              });
+                            }}
                           >
                             {['SRP', 'SRT', 'SRH', 'SRV', 'SRC'].map((variant) => (
                               <option key={variant} value={variant}>
@@ -1316,7 +1423,7 @@ const ShowLayoutDesigner = () => {
                                 caravanSize: sizeKey,
                                 width: sizing.width,
                                 height: sizing.height,
-                                color: sizing.color,
+                                color: getCaravanColor(selectedElement.caravanVariant ?? 'SRP', sizeKey),
                               });
                             }}
                           >
