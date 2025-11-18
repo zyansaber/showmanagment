@@ -14,6 +14,9 @@ interface AustraliaMapProps {
   selectedState: string;
 }
 
+const MAP_EMBED_URL =
+  'https://www.openstreetmap.org/export/embed.html?bbox=110.0%2C-48.0%2C180.0%2C-10.0&layer=mapnik';
+
 const MAP_BOUNDS = {
   minLon: 110,
   maxLon: 180,
@@ -81,8 +84,11 @@ export default function AustraliaMap({ stateStats, onStateClick, selectedState }
         <div className="absolute inset-0 bg-gradient-to-br from-slate-900 via-slate-950 to-slate-900" />
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(56,189,248,0.18),transparent_65%)]" />
         <div className="relative aspect-[5/3]">
-          <div
-            className="pointer-events-none absolute inset-0 h-full w-full bg-[url('/assets/australia-map.svg')] bg-cover bg-center opacity-90"
+          <iframe
+            src={MAP_EMBED_URL}
+            title="Australia and New Zealand map"
+            className="pointer-events-none absolute inset-0 h-full w-full border-0 opacity-90"
+            loading="lazy"
             aria-hidden
           />
           <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-sky-500/10 via-slate-950/10 to-blue-900/20 mix-blend-screen" />
