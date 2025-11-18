@@ -296,6 +296,7 @@ export default function ShowManagement() {
     try {
       const text = await file.text();
       const lines = text
+        .replace(/^\uFEFF/, '')
         .split(/\r?\n/)
         .map((line) => line.trim())
         .filter(Boolean);
