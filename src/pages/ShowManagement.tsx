@@ -239,17 +239,17 @@ export default function ShowManagement() {
         ...rows.map((row) => row.map(escapeCsvValue).join(',')),
       ].join('\n');
 
-      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const blob = new Blob([`\ufeff${csvContent}`], { type: 'text/csv;charset=utf-8;' });
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = 'shows.xlsx';
+      link.download = 'shows.csv';
       link.click();
       URL.revokeObjectURL(url);
-      toast.success('Excel 导出完成（以 CSV 形式，Excel 可直接打开）');
+      toast.success('Export complete. You can open the CSV directly in Excel.');
     } catch (err) {
       console.error('Error exporting shows:', err);
-      toast.error('导出失败，请稍后重试');
+      toast.error('Export failed. Please try again.');
     } finally {
       setIsExporting(false);
     }
@@ -301,7 +301,7 @@ export default function ShowManagement() {
         .filter(Boolean);
 
       if (lines.length < 2) {
-        toast.error('文件内容为空或格式不正确');
+        toast.error('File is empty or has an invalid format.');
         return;
       }
 
@@ -309,7 +309,7 @@ export default function ShowManagement() {
       const missingHeaders = csvHeaders.filter((expected) => !header.includes(expected));
 
       if (missingHeaders.length > 0) {
-        toast.error('文件头部缺失必要字段，请使用导出的模板进行修改');
+        toast.error('Missing required headers. Please edit the exported template only.');
         return;
       }
 
@@ -373,17 +373,17 @@ export default function ShowManagement() {
 
       if (updatedShows.length > 0) {
         setShows(Array.from(existingShows.values()));
-        toast.success(`成功更新 ${updatedShows.length} 条记录`);
+        toast.success(`Updated ${updatedShows.length} record(s).`);
       } else {
-        toast.info('没有可更新的记录');
+        toast.info('No records were updated.');
       }
 
       if (failedIds.length > 0) {
-        toast.warning(`以下 ID 未找到，未被更新：${failedIds.join(', ')}`);
+        toast.warning(`The following IDs were not found: ${failedIds.join(', ')}`);
       }
     } catch (err) {
       console.error('Error importing CSV:', err);
-      toast.error('上传或解析文件失败，请确认格式正确');
+      toast.error('Import failed. Please confirm the CSV format and try again.');
     } finally {
       setIsImporting(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
@@ -437,10 +437,10 @@ export default function ShowManagement() {
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <Button variant="outline" size="sm" onClick={handleDownloadCsv} disabled={isExporting}>
-                <Download className="mr-2 h-4 w-4" /> 导出 Excel
+                <Download className="mr-2 h-4 w-4" /> Export CSV
               </Button>
               <Button variant="outline" size="sm" onClick={handleUploadClick} disabled={isImporting}>
-                <Upload className="mr-2 h-4 w-4" /> 导入并覆盖
+                <Upload className="mr-2 h-4 w-4" /> Import & Overwrite
               </Button>
               {selectedState !== 'All' && (
                 <Button variant="outline" size="sm" onClick={() => setSelectedState('All')}>
@@ -450,7 +450,8 @@ export default function ShowManagement() {
             </div>
           </div>
           <p className="mt-2 text-xs text-gray-500">
-            下载后仅修改第二列开始的数据，请保持 ID 列不变。上传 CSV（Excel 另存为 CSV）后，将按 ID 覆盖对应记录。
+            After downloading, change only the fields from column 2 onward and leave the ID column untouched. Save the sheet
+            as CSV before uploading—the import will overwrite matching records by ID.
           </p>
         </CardHeader>
         <CardContent>
