@@ -253,14 +253,14 @@ export default function ShowManagement() {
 
   const parseCsvLine = (line: string) => {
     const result: string[] = [];
-@@ -268,50 +264,70 @@ export default function ShowManagement() {
-          current += '"';
-          i += 1;
-        } else {
-          inQuotes = !inQuotes;
-        }
-      } else if (char === ',' && !inQuotes) {
-        result.push(current);
+    let current = '';
+    let inQuotes = false;
+
+    for (let i = 0; i < line.length; i += 1) {
+      const char = line[i];
+
+      if (char === '"') {
+        if (inQuotes && line[i + 1] === '"') {
           current += '"';
           i += 1;
         } else {
@@ -305,7 +305,7 @@ export default function ShowManagement() {
       return acc;
     }, {} as T);
   }
-
+  
   const applyCsvUpdate = async (file: File) => {
     setIsImporting(true);
 
@@ -594,4 +594,3 @@ export default function ShowManagement() {
     </div>
   );
 }
-
