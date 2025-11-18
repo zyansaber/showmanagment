@@ -261,6 +261,13 @@ export default function ShowManagement() {
         }
       } else if (char === ',' && !inQuotes) {
         result.push(current);
+          current += '"';
+          i += 1;
+        } else {
+          inQuotes = !inQuotes;
+        }
+      } else if (char === ',' && !inQuotes) {
+        result.push(current);
         current = '';
       } else {
         current += char;
@@ -279,7 +286,7 @@ export default function ShowManagement() {
     return Number.isFinite(parsed) ? parsed : undefined;
   };
 
-  const stripUndefined = <T>(value: T): T => {
+  function stripUndefined<T>(value: T): T {
     if (!value || typeof value !== 'object' || Array.isArray(value)) {
       return value;
     }
@@ -297,8 +304,8 @@ export default function ShowManagement() {
       acc[key as keyof T] = val as T[keyof T];
       return acc;
     }, {} as T);
-  };
-  
+  }
+
   const applyCsvUpdate = async (file: File) => {
     setIsImporting(true);
 
