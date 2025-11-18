@@ -253,14 +253,7 @@ export default function ShowManagement() {
 
   const parseCsvLine = (line: string) => {
     const result: string[] = [];
-    let current = '';
-    let inQuotes = false;
-
-    for (let i = 0; i < line.length; i += 1) {
-      const char = line[i];
-
-      if (char === '"') {
-        if (inQuotes && line[i + 1] === '"') {
+@@ -268,50 +264,70 @@ export default function ShowManagement() {
           current += '"';
           i += 1;
         } else {
