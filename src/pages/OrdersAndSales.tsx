@@ -4,11 +4,16 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { dbGet, dbUpdate } from '@/lib/firebase';
-import type { Show, ShowOrder } from '@/types';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
+import { dbGet, dbSet, dbUpdate } from '@/lib/firebase';
+import type { Show, ShowOrder, TeamMember } from '@/types';
 import { toast } from 'sonner';
-import { CheckCircle2, Loader2, Search, ShieldCheck } from 'lucide-react';
+import { Check, CheckCircle2, Loader2, Plus, Search, ShieldCheck } from 'lucide-react';
+import { cn } from '@/lib/utils';
 
 const CONFIRMATION_PASSWORD = 'admin123';
 const CONFIRMATION_CACHE_KEY = 'orders-dashboard-confirmation';
@@ -41,6 +46,7 @@ const formatDate = (value: string | undefined) => {
 export default function OrdersAndSales() {
   const [orders, setOrders] = useState<ShowOrder[]>([]);
   const [shows, setShows] = useState<Show[]>([]);
+  const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
@@ -48,6 +54,16 @@ export default function OrdersAndSales() {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [passwordInput, setPasswordInput] = useState('');
   const [authExpiry, setAuthExpiry] = useState<number | null>(null);
+  const [isAddingOrder, setIsAddingOrder] = useState(false);
+  const [isSalespersonPickerOpen, setIsSalespersonPickerOpen] = useState(false);
+  const [newOrder, setNewOrder] = useState<Partial<ShowOrder>>({
+    chassisNumber: '',
+    orderType: 'New Order',
+    salesperson: '',
+    status: 'Pending',
+    showId: '',
+    date: new Date().toISOString().split('T')[0],
+  });
 
   const requiresPassword = !authExpiry || authExpiry <= Date.now();
 
@@ -65,13 +81,15 @@ export default function OrdersAndSales() {
   useEffect(() => {
     const loadData = async () => {
       try {
-        const [ordersData, showsData] = await Promise.all([
+        const [ordersData, showsData, teamData] = await Promise.all([
           dbGet('showOrders'),
           dbGet('shows'),
+          dbGet('teamMembers'),
         ]);
 
         setOrders(ordersData ? Object.values(ordersData) : []);
         setShows(showsData ? Object.values(showsData) : []);
+        setTeamMembers(teamData ? Object.values(teamData) : []);
         setError(null);
       } catch (err) {
         console.error('Error loading orders:', err);
@@ -126,6 +144,14 @@ export default function OrdersAndSales() {
   const totalOrders = orders.length;
   const pendingOrders = orders.filter((order) => order.status === 'Pending').length;
   const approvedOrders = orders.filter((order) => order.status === 'Approved').length;
+
+  const selectedShow = useMemo(() => shows.find((show) => show.id === newOrder.showId), [newOrder.showId, shows]);
+
+  const showTeamMembers = useMemo(() => {
+    if (!selectedShow) return [] as TeamMember[];
+    const memberIds = selectedShow.teamMembers || [];
+    return teamMembers.filter((member) => memberIds.includes(member.memberId));
+  }, [selectedShow, teamMembers]);
 
   const persistAuthExpiry = (expiresAt: number) => {
     setAuthExpiry(expiresAt);
@@ -201,6 +227,41 @@ export default function OrdersAndSales() {
     }
   };
 
+  const handleAddOrder = async () => {
+    if (!newOrder.chassisNumber || !newOrder.salesperson || !newOrder.showId || !newOrder.date) {
+      toast.error('Please fill in all required fields');
+      return;
+    }
+
+    try {
+      const order: ShowOrder = {
+        id: `ORD-${Date.now()}`,
+        showId: newOrder.showId,
+        chassisNumber: newOrder.chassisNumber,
+        orderType: (newOrder.orderType as ShowOrder['orderType']) || 'New Order',
+        salesperson: newOrder.salesperson,
+        date: newOrder.date,
+        status: 'Pending',
+      };
+
+      await dbSet(`showOrders/${order.id}`, order as unknown as Record<string, unknown>);
+      setOrders((prev) => [...prev, order]);
+      setIsAddingOrder(false);
+      setNewOrder({
+        chassisNumber: '',
+        orderType: 'New Order',
+        salesperson: '',
+        status: 'Pending',
+        showId: '',
+        date: new Date().toISOString().split('T')[0],
+      });
+      toast.success('Order added successfully');
+    } catch (err) {
+      console.error('Error adding order:', err);
+      toast.error('Failed to add order');
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex h-96 items-center justify-center text-gray-500">
@@ -250,25 +311,159 @@ export default function OrdersAndSales() {
         </Card>
       </div>
 
-      <Card>
-        <CardHeader>
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-            <div>
-              <CardTitle>Orders List</CardTitle>
-              <CardDescription>Search and confirm orders across every show</CardDescription>
+        <Card>
+          <CardHeader>
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <CardTitle>Orders List</CardTitle>
+                <CardDescription>Search and confirm orders across every show</CardDescription>
+              </div>
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
+                <Dialog open={isAddingOrder} onOpenChange={setIsAddingOrder}>
+                  <DialogTrigger asChild>
+                    <Button>
+                      <Plus className="mr-2 h-4 w-4" />
+                      Add Order
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent>
+                    <DialogHeader>
+                      <DialogTitle>Add New Order</DialogTitle>
+                      <DialogDescription>Link a new order to an existing show</DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-4 py-2">
+                      <div className="space-y-2">
+                        <Label>Show *</Label>
+                        <Select
+                          value={newOrder.showId}
+                          onValueChange={(value) => setNewOrder({ ...newOrder, showId: value, salesperson: '' })}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select show" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {shows.map((show) => (
+                              <SelectItem key={show.id} value={show.id}>
+                                {show.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label>Chassis Number *</Label>
+                        <Input
+                          value={newOrder.chassisNumber}
+                          onChange={(event) => setNewOrder({ ...newOrder, chassisNumber: event.target.value })}
+                          placeholder="e.g., SRV123456"
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label>Order Type</Label>
+                        <Select
+                          value={newOrder.orderType}
+                          onValueChange={(value) => setNewOrder({ ...newOrder, orderType: value as ShowOrder['orderType'] })}
+                        >
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="New Order">New Order</SelectItem>
+                            <SelectItem value="Transfer from Stock">Transfer from Stock</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label>Salesperson *</Label>
+                        <Popover open={isSalespersonPickerOpen} onOpenChange={setIsSalespersonPickerOpen}>
+                          <PopoverTrigger asChild>
+                            <Button
+                              variant="outline"
+                              role="combobox"
+                              aria-expanded={isSalespersonPickerOpen}
+                              className="w-full justify-between"
+                              disabled={!selectedShow}
+                            >
+                              {newOrder.salesperson || 'Select salesperson'}
+                            </Button>
+                          </PopoverTrigger>
+                          <PopoverContent className="w-[280px] p-0">
+                            <Command>
+                              <CommandInput placeholder="Search team member..." />
+                              <CommandList>
+                                <CommandEmpty>No team member found.</CommandEmpty>
+                                <CommandGroup heading={selectedShow ? 'Team Members' : 'Select a show first'}>
+                                  {showTeamMembers.map((member) => (
+                                    <CommandItem
+                                      key={member.memberId}
+                                      value={member.memberName}
+                                      onSelect={(value) => {
+                                        setNewOrder({ ...newOrder, salesperson: value });
+                                        setIsSalespersonPickerOpen(false);
+                                      }}
+                                    >
+                                      <Check
+                                        className={cn(
+                                          'mr-2 h-4 w-4',
+                                          newOrder.salesperson === member.memberName ? 'opacity-100' : 'opacity-0'
+                                        )}
+                                      />
+                                      <div className="flex flex-col">
+                                        <span>{member.memberName}</span>
+                                        <span className="text-xs text-muted-foreground">{member.role}</span>
+                                      </div>
+                                    </CommandItem>
+                                  ))}
+                                </CommandGroup>
+                              </CommandList>
+                            </Command>
+                          </PopoverContent>
+                        </Popover>
+                        {newOrder.salesperson && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="mt-2"
+                            onClick={() => setNewOrder({ ...newOrder, salesperson: '' })}
+                          >
+                            Clear selection
+                          </Button>
+                        )}
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label>Date *</Label>
+                        <Input
+                          type="date"
+                          value={newOrder.date}
+                          onChange={(event) => setNewOrder({ ...newOrder, date: event.target.value })}
+                        />
+                      </div>
+                    </div>
+                    <DialogFooter>
+                      <Button variant="outline" onClick={() => setIsAddingOrder(false)}>
+                        Cancel
+                      </Button>
+                      <Button onClick={handleAddOrder}>Add Order</Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
+                <div className="flex items-center gap-2">
+                  <Search className="h-4 w-4 text-gray-500" />
+                  <Input
+                    placeholder="Search by chassis, show, salesperson or type"
+                    value={searchTerm}
+                    onChange={(event) => setSearchTerm(event.target.value)}
+                    className="w-full lg:w-72"
+                  />
+                </div>
+              </div>
             </div>
-            <div className="flex items-center gap-2">
-              <Search className="h-4 w-4 text-gray-500" />
-              <Input
-                placeholder="Search by chassis, show, salesperson or type"
-                value={searchTerm}
-                onChange={(event) => setSearchTerm(event.target.value)}
-                className="w-full lg:w-72"
-              />
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent>
+          </CardHeader>
+          <CardContent>
           {decoratedOrders.length > 0 ? (
             <Table>
               <TableHeader>
@@ -289,27 +484,27 @@ export default function OrdersAndSales() {
                   return (
                     <TableRow key={rowKey}>
                       <TableCell className="font-medium">{order.chassisNumber}</TableCell>
-                    <TableCell>
-                      <Badge variant="outline">{order.range}</Badge>
-                    </TableCell>
-                    <TableCell>{order.showName}</TableCell>
-                    <TableCell>{order.orderType}</TableCell>
-                    <TableCell>{order.salesperson || 'Unassigned'}</TableCell>
-                    <TableCell>{formatDate(order.date)}</TableCell>
-                    <TableCell>
-                      <span className={`rounded-full px-2 py-1 text-xs font-semibold ${statusStyles[order.status]}`}>
-                        {order.status}
-                      </span>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <Button
-                        size="sm"
-                        variant="secondary"
-                        onClick={() => handleConfirmationClick(order)}
-                        disabled={order.status === 'Approved'}
-                      >
-                        Confirmation
-                      </Button>
+                      <TableCell>
+                        <Badge variant="outline">{order.range}</Badge>
+                      </TableCell>
+                      <TableCell>{order.showName}</TableCell>
+                      <TableCell>{order.orderType}</TableCell>
+                      <TableCell>{order.salesperson || 'Unassigned'}</TableCell>
+                      <TableCell>{formatDate(order.date)}</TableCell>
+                      <TableCell>
+                        <span className={`rounded-full px-2 py-1 text-xs font-semibold ${statusStyles[order.status]}`}>
+                          {order.status}
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          onClick={() => handleConfirmationClick(order)}
+                          disabled={order.status === 'Approved'}
+                        >
+                          Confirmation
+                        </Button>
                       </TableCell>
                     </TableRow>
                   );
