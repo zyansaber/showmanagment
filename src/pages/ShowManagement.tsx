@@ -186,7 +186,6 @@ export default function ShowManagement() {
     'Stand Size',
     'Layout Address',
     'Status',
-    'BI URL',
   ];
 
   const escapeCsvValue = (value: unknown) => {
@@ -229,7 +228,6 @@ export default function ShowManagement() {
         show.standSize,
         show.layoutAddress,
         show.status,
-        show.biUrl,
       ]);
 
       const csvContent = [
@@ -288,6 +286,26 @@ export default function ShowManagement() {
     return Number.isFinite(parsed) ? parsed : undefined;
   };
 
+  const stripUndefined = <T>(value: T): T => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return value;
+    }
+
+    return Object.entries(value).reduce((acc, [key, val]) => {
+      if (val === undefined) return acc;
+
+      if (val && typeof val === 'object' && !Array.isArray(val)) {
+        const cleaned = stripUndefined(val);
+        if (Object.keys(cleaned).length === 0) return acc;
+        acc[key as keyof T] = cleaned as T[keyof T];
+        return acc;
+      }
+
+      acc[key as keyof T] = val as T[keyof T];
+      return acc;
+    }, {} as T);
+  };
+  
   const applyCsvUpdate = async (file: File) => {
     setIsImporting(true);
 
@@ -369,12 +387,13 @@ export default function ShowManagement() {
           standSize: getUpdatedText('Stand Size', cells, existing.standSize),
           layoutAddress: getUpdatedText('Layout Address', cells, existing.layoutAddress),
           status: (getUpdatedText('Status', cells, existing.status) as Show['status']) || existing.status,
-          biUrl: getUpdatedText('BI URL', cells, existing.biUrl),
         };
 
-        await dbUpdate(`shows/${id}`, updatedData as unknown as Record<string, unknown>);
-        updatedShows.push(updatedData);
-        existingShows.set(id, updatedData);
+        const cleanedData = stripUndefined(updatedData);
+
+        await dbUpdate(`shows/${id}`, cleanedData as unknown as Record<string, unknown>);
+        updatedShows.push(cleanedData);
+        existingShows.set(id, cleanedData);
       }
 
       if (updatedShows.length > 0) {
