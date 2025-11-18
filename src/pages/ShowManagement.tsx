@@ -186,7 +186,6 @@ export default function ShowManagement() {
     'Stand Size',
     'Layout Address',
     'Status',
-    'Team Members (semicolon separated)',
     'BI URL',
   ];
 
@@ -230,7 +229,6 @@ export default function ShowManagement() {
         show.standSize,
         show.layoutAddress,
         show.status,
-        Array.isArray(show.teamMembers) ? show.teamMembers.join(';') : '',
         show.biUrl,
       ]);
 
@@ -342,7 +340,6 @@ export default function ShowManagement() {
           continue;
         }
 
-        const teamMembersCell = getCell('Team Members (semicolon separated)', cells);
         const updatedData: Show = {
           ...existing,
           id,
@@ -372,8 +369,6 @@ export default function ShowManagement() {
           standSize: getUpdatedText('Stand Size', cells, existing.standSize),
           layoutAddress: getUpdatedText('Layout Address', cells, existing.layoutAddress),
           status: (getUpdatedText('Status', cells, existing.status) as Show['status']) || existing.status,
-          teamMembers:
-            teamMembersCell?.split(';').map((member) => member.trim()).filter(Boolean) || existing.teamMembers,
           biUrl: getUpdatedText('BI URL', cells, existing.biUrl),
         };
 
