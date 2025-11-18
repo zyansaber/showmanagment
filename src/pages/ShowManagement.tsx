@@ -307,23 +307,33 @@ export default function ShowManagement() {
       }
 
       const header = parseCsvLine(lines[0]);
-      const missingHeaders = csvHeaders.filter((expected) => !header.includes(expected));
+      const headerIndex = Object.fromEntries(header.map((title, idx) => [title, idx]));
 
-      if (missingHeaders.length > 0) {
-        toast.error('Missing required headers. Please edit the exported template only.');
+      if (!('ID' in headerIndex)) {
+        toast.error('Missing the ID column. Please keep the ID column from the exported template.');
         return;
       }
-
       const existingShows = new Map(shows.map((show) => [show.id, show]));
       const updatedShows: Show[] = [];
       const failedIds: string[] = [];
 
-      const headerIndex = Object.fromEntries(header.map((title, idx) => [title, idx]));
-
       const updates = lines.slice(1).map((line) => parseCsvLine(line)).filter((cells) => cells.length > 1);
 
+      const getCell = (key: (typeof csvHeaders)[number], cells: string[]) => {
+        const index = headerIndex[key];
+        if (index === undefined) return undefined;
+        return cells[index];
+      };
+
+      const getUpdatedText = (key: (typeof csvHeaders)[number], cells: string[], fallback: string | undefined) => {
+        const value = getCell(key, cells);
+        if (value === undefined) return fallback;
+        const trimmed = value.trim();
+        return trimmed ? trimmed : fallback;
+      };
+
       for (const cells of updates) {
-        const id = cells[headerIndex['ID']];
+        const id = getCell('ID', cells);
         if (!id) continue;
 
         const existing = existingShows.get(id);
@@ -332,39 +342,39 @@ export default function ShowManagement() {
           continue;
         }
 
-        const teamMembersCell = cells[headerIndex['Team Members (semicolon separated)']];
+        const teamMembersCell = getCell('Team Members (semicolon separated)', cells);
         const updatedData: Show = {
           ...existing,
           id,
-          name: cells[headerIndex['Name']] || existing.name,
-          dealership: cells[headerIndex['Dealership']] || existing.dealership,
+          name: getUpdatedText('Name', cells, existing.name),
+          dealership: getUpdatedText('Dealership', cells, existing.dealership),
           siteLocation: {
             ...existing.siteLocation,
-            number: cells[headerIndex['Site Number']] || existing.siteLocation?.number || '',
-            street: cells[headerIndex['Street']] || existing.siteLocation?.street || '',
-            suburb: cells[headerIndex['Suburb']] || existing.siteLocation?.suburb || '',
-            postcode: cells[headerIndex['Postcode']] || existing.siteLocation?.postcode || '',
-            state: cells[headerIndex['State']] || existing.siteLocation?.state || '',
-            country: cells[headerIndex['Country']] || existing.siteLocation?.country || '',
+            number: getUpdatedText('Site Number', cells, existing.siteLocation?.number || ''),
+            street: getUpdatedText('Street', cells, existing.siteLocation?.street || ''),
+            suburb: getUpdatedText('Suburb', cells, existing.siteLocation?.suburb || ''),
+            postcode: getUpdatedText('Postcode', cells, existing.siteLocation?.postcode || ''),
+            state: getUpdatedText('State', cells, existing.siteLocation?.state || ''),
+            country: getUpdatedText('Country', cells, existing.siteLocation?.country || ''),
           },
-          startDate: cells[headerIndex['Start Date']] || existing.startDate,
-          finishDate: cells[headerIndex['Finish Date']] || existing.finishDate,
-          showDuration: parseNumberCell(cells[headerIndex['Show Duration']]) ?? existing.showDuration,
-          target2024: parseNumberCell(cells[headerIndex['Target 2024']]) ?? existing.target2024,
-          sales2024: parseNumberCell(cells[headerIndex['Sales 2024']]) ?? existing.sales2024,
-          target2025: parseNumberCell(cells[headerIndex['Target 2025']]) ?? existing.target2025,
-          sales2025: parseNumberCell(cells[headerIndex['Sales 2025']]) ?? existing.sales2025,
-          target2026: parseNumberCell(cells[headerIndex['Target 2026']]) ?? existing.target2026,
-          sales2026: parseNumberCell(cells[headerIndex['Sales 2026']]) ?? existing.sales2026,
-          eventOrganiser: cells[headerIndex['Event Organiser']] || existing.eventOrganiser,
+          startDate: getUpdatedText('Start Date', cells, existing.startDate),
+          finishDate: getUpdatedText('Finish Date', cells, existing.finishDate),
+          showDuration: parseNumberCell(getCell('Show Duration', cells)) ?? existing.showDuration,
+          target2024: parseNumberCell(getCell('Target 2024', cells)) ?? existing.target2024,
+          sales2024: parseNumberCell(getCell('Sales 2024', cells)) ?? existing.sales2024,
+          target2025: parseNumberCell(getCell('Target 2025', cells)) ?? existing.target2025,
+          sales2025: parseNumberCell(getCell('Sales 2025', cells)) ?? existing.sales2025,
+          target2026: parseNumberCell(getCell('Target 2026', cells)) ?? existing.target2026,
+          sales2026: parseNumberCell(getCell('Sales 2026', cells)) ?? existing.sales2026,
+          eventOrganiser: getUpdatedText('Event Organiser', cells, existing.eventOrganiser),
           caravansOnDisplay:
-            parseNumberCell(cells[headerIndex['Caravans On Display']]) ?? existing.caravansOnDisplay,
-          standSize: cells[headerIndex['Stand Size']] || existing.standSize,
-          layoutAddress: cells[headerIndex['Layout Address']] || existing.layoutAddress,
-          status: (cells[headerIndex['Status']] as Show['status']) || existing.status,
+            parseNumberCell(getCell('Caravans On Display', cells)) ?? existing.caravansOnDisplay,
+          standSize: getUpdatedText('Stand Size', cells, existing.standSize),
+          layoutAddress: getUpdatedText('Layout Address', cells, existing.layoutAddress),
+          status: (getUpdatedText('Status', cells, existing.status) as Show['status']) || existing.status,
           teamMembers:
             teamMembersCell?.split(';').map((member) => member.trim()).filter(Boolean) || existing.teamMembers,
-          biUrl: cells[headerIndex['BI URL']] || existing.biUrl,
+          biUrl: getUpdatedText('BI URL', cells, existing.biUrl),
         };
 
         await dbUpdate(`shows/${id}`, updatedData as unknown as Record<string, unknown>);
