@@ -346,7 +346,7 @@ export default function ShowManagement() {
           name: getUpdatedText('Name', cells, existing.name),
           dealership: getUpdatedText('Dealership', cells, existing.dealership),
           siteLocation: {
-            ...existing.siteLocation,
+            ...(existing.siteLocation || {}),
             number: getUpdatedText('Site Number', cells, existing.siteLocation?.number || ''),
             street: getUpdatedText('Street', cells, existing.siteLocation?.street || ''),
             suburb: getUpdatedText('Suburb', cells, existing.siteLocation?.suburb || ''),
