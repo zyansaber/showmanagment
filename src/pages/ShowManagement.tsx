@@ -8,6 +8,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Download, MapPin, Plus, Trash2, Upload } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
 import { dbGet, dbRemove, dbSet, dbUpdate } from '@/lib/firebase';
+import { dbGet, dbRemove, dbSet, dbUpdate } from '@/lib/firebase';
 import type { Show } from '@/types';
 import { toast } from 'sonner';
 
