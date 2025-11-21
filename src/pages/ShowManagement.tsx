@@ -5,8 +5,9 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Download, MapPin, Trash2, Upload } from 'lucide-react';
-import { dbGet, dbRemove, dbUpdate } from '@/lib/firebase';
+import { Download, MapPin, Plus, Trash2, Upload } from 'lucide-react';
+import { v4 as uuidv4 } from 'uuid';
+import { dbGet, dbRemove, dbSet, dbUpdate } from '@/lib/firebase';
 import type { Show } from '@/types';
 import { toast } from 'sonner';
 
@@ -70,6 +71,7 @@ export default function ShowManagement() {
   const [selectedState, setSelectedState] = useState<string>('All');
   const [isExporting, setIsExporting] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
+  const [isCreatingShow, setIsCreatingShow] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
@@ -162,6 +164,51 @@ export default function ShowManagement() {
     }
   };
 
+  const handleAddShow = async () => {
+    setIsCreatingShow(true);
+    try {
+      const id = uuidv4();
+      const newShow: Show = {
+        id,
+        name: 'New Show',
+        siteLocation: {
+          number: '',
+          street: '',
+          suburb: '',
+          postcode: '',
+          state: '',
+          country: '',
+        },
+        dealership: '',
+        startDate: '',
+        finishDate: '',
+        showDuration: 0,
+        target2024: 0,
+        sales2024: 0,
+        target2025: 0,
+        sales2025: 0,
+        target2026: 0,
+        sales2026: 0,
+        eventOrganiser: '',
+        caravansOnDisplay: 0,
+        standSize: '',
+        layoutAddress: '',
+        status: 'Not Started',
+        teamMembers: [],
+      };
+
+      await dbSet(`shows/${id}`, newShow as unknown as Record<string, unknown>);
+      setShows((prev) => [...prev, newShow]);
+      toast.success('New show created. You can now add details.');
+      navigate(`/show/${id}`);
+    } catch (err) {
+      console.error('Error creating show:', err);
+      toast.error('Failed to create a new show. Please try again.');
+    } finally {
+      setIsCreatingShow(false);
+    }
+  };
+  
   const csvHeaders = [
     'ID',
     'Name',
@@ -461,6 +508,9 @@ export default function ShowManagement() {
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
+              <Button onClick={handleAddShow} disabled={isCreatingShow}>
+                <Plus className="mr-2 h-4 w-4" /> {isCreatingShow ? 'Creating...' : 'Add Show'}
+              </Button>
               <Button variant="outline" size="sm" onClick={handleDownloadCsv} disabled={isExporting}>
                 <Download className="mr-2 h-4 w-4" /> Export CSV
               </Button>
