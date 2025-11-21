@@ -424,7 +424,7 @@ export default function ShowDetail() {
 
   const handleSaveShowInfo = async () => {
     try {
-      if (!editedShow.name || !editedShow.startDate || !editedShow.finishDate) {
+      if (!editedShow.name) {
         toast.error('Please fill in all required fields');
         return;
       }
@@ -1143,7 +1143,7 @@ export default function ShowDetail() {
                     <h3 className="font-semibold text-lg">Dates & Details</h3>
                     <div className="grid grid-cols-2 gap-4">
                       <div>
-                        <Label>Start Date *</Label>
+                        <Label>Start Date</Label>
                         <Input
                           type="date"
                           value={editedShow.startDate}
@@ -1151,7 +1151,7 @@ export default function ShowDetail() {
                         />
                       </div>
                       <div>
-                        <Label>Finish Date *</Label>
+                        <Label>Finish Date</Label>
                         <Input
                           type="date"
                           value={editedShow.finishDate}
