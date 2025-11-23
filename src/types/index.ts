@@ -137,3 +137,25 @@ export interface Dealership {
   name: string;
   orders: ScheduleOrder[];
 }
+
+export type ExpenseCategory = 'Dealer Operations' | 'Factory' | 'Stand & Venue' | 'Other';
+
+export interface BudgetExpenseItem {
+  id: string;
+  description: string;
+  category: ExpenseCategory;
+  amount: number;
+  date: string;
+  notes?: string;
+}
+
+export interface ShowBudgetProfile {
+  showId: string;
+  durationDays: number;
+  salesTarget: number;
+  standCosts: number;
+  dealerCostsTransport: number;
+  factoryTravelCosts: number;
+  expenses: BudgetExpenseItem[];
+  lastUpdated?: string;
+}
