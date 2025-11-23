@@ -19,6 +19,7 @@ import {
   FileSpreadsheet,
   FileText,
   PenTool,
+  Wallet,
 } from 'lucide-react';
 import Dashboard from './pages/Dashboard';
 import ShowCalendar from './pages/ShowCalendar';
@@ -31,6 +32,7 @@ import DealershipManagement from './pages/DealershipManagement';
 import ProcessTemplates from './pages/ProcessTemplates';
 import OrdersAndSales from './pages/OrdersAndSales';
 import ShowReport from './pages/ShowReport';
+import ShowBudgetExpense from './pages/ShowBudgetExpense';
 import AIHelpAssistant from './components/AIHelpAssistant';
 
 const queryClient = new QueryClient();
@@ -49,6 +51,7 @@ function Sidebar({ isOpen, setIsOpen }: { isOpen: boolean; setIsOpen: (open: boo
     { icon: Building2, label: 'Dealership Management', path: '/dealerships' },
     { icon: Users, label: 'Team Management', path: '/team' },
     { icon: FileText, label: 'Show Report', path: '/show-report' },
+    { icon: Wallet, label: 'Show Budget & Expense', path: '/budget' },
     { icon: BarChart3, label: 'Power BI Reports', path: '/powerbi' },
   ];
 
@@ -181,6 +184,7 @@ function AppLayout() {
             <Route path="/team" element={<TeamManagement />} />
             <Route path="/powerbi" element={<PowerBI />} />
             <Route path="/show-report" element={<ShowReport />} />
+            <Route path="/budget" element={<ShowBudgetExpense />} />
           </Routes>
         </main>
         <AIHelpAssistant />
