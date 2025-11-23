@@ -92,7 +92,7 @@ export default function OrdersAndSales() {
           dbGet('shows'),
           dbGet('teamMembers'),
           schedulingDbGet('schedule'),
-          dbGet('yardnewvaninvoice'),
+          schedulingDbGet('yardnewvaninvoice'),
         ]);
 
         setOrders(ordersData ? Object.values(ordersData) : []);
