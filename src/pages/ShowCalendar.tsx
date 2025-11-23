@@ -4,11 +4,10 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useNavigate } from 'react-router-dom';
 import { MapPin, Calendar as CalendarIcon, Users } from 'lucide-react';
-import { format, isValid, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, addMonths, subMonths } from 'date-fns';
+import { format, parseISO, isValid, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, addMonths, subMonths } from 'date-fns';
 import { dbGet } from '@/lib/firebase';
 import type { Show } from '@/types';
 import AustraliaMap from '@/components/AustraliaMap';
-import { parseDateString } from '@/lib/date';
 
 export default function ShowCalendar() {
   const navigate = useNavigate();
@@ -49,8 +48,12 @@ export default function ShowCalendar() {
     if (!dateString || typeof dateString !== 'string') return false;
     const trimmed = dateString.trim().toLowerCase();
     if (trimmed === 'n/a' || trimmed === '' || trimmed === 'na') return false;
-    const parsed = parseDateString(dateString);
-    return Boolean(parsed && isValid(parsed));
+    try {
+      const parsed = parseISO(dateString);
+      return isValid(parsed);
+    } catch {
+      return false;
+    }
   };
 
   const isValidNumber = (value: number | string | undefined): boolean => {
@@ -109,10 +112,13 @@ export default function ShowCalendar() {
       });
 
   const showsOnDate = selectedDate ? filteredShows.filter(show => {
-    const start = parseDateString(show.startDate);
-    const end = parseDateString(show.finishDate);
-    if (!start || !end) return false;
-    return selectedDate >= start && selectedDate <= end;
+    try {
+      const start = parseISO(show.startDate);
+      const end = parseISO(show.finishDate);
+      return selectedDate >= start && selectedDate <= end;
+    } catch {
+      return false;
+    }
   }) : [];
 
   const displayedShows = selectedDate ? showsOnDate : filteredShows;
@@ -175,10 +181,13 @@ export default function ShowCalendar() {
 
   const hasShowOnDate = (date: Date) => {
     return filteredShows.some(show => {
-      const start = parseDateString(show.startDate);
-      const end = parseDateString(show.finishDate);
-      if (!start || !end) return false;
-      return date >= start && date <= end;
+      try {
+        const start = parseISO(show.startDate);
+        const end = parseISO(show.finishDate);
+        return date >= start && date <= end;
+      } catch {
+        return false;
+      }
     });
   };
 
@@ -350,12 +359,7 @@ export default function ShowCalendar() {
                           <div className="flex items-center gap-2">
                             <CalendarIcon className="h-4 w-4" />
                             <span>
-                              {(() => {
-                                const start = parseDateString(show.startDate);
-                                const end = parseDateString(show.finishDate);
-                                if (!start || !end) return 'Date unavailable';
-                                return `${format(start, 'MMM dd')} - ${format(end, 'MMM dd, yyyy')}`;
-                              })()}
+                              {format(parseISO(show.startDate), 'MMM dd')} - {format(parseISO(show.finishDate), 'MMM dd, yyyy')}
                             </span>
                           </div>
                           <div className="flex items-center gap-2">
@@ -414,4 +418,3 @@ export default function ShowCalendar() {
     </div>
   );
 }
-
