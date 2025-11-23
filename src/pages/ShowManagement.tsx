@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import AustraliaMap from '@/components/AustraliaMap';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Download, MapPin, Plus, Trash2, Upload } from 'lucide-react';
+import { Download, MapPin, Plus, Search, SortAsc, SortDesc, Trash2, Upload } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
-import { dbGet, dbRemove, dbSet, dbUpdate } from '@/lib/firebase';
 import { dbGet, dbRemove, dbSet, dbUpdate } from '@/lib/firebase';
 import type { Show } from '@/types';
 import { toast } from 'sonner';
@@ -73,6 +73,9 @@ export default function ShowManagement() {
   const [isExporting, setIsExporting] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
   const [isCreatingShow, setIsCreatingShow] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [sortKey, setSortKey] = useState<'name' | 'startDate'>('startDate');
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
@@ -91,6 +94,77 @@ export default function ShowManagement() {
 
     loadShows();
   }, []);
+
+  const determineStatus = (show: Show): Show['status'] => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const start = show.startDate ? new Date(show.startDate) : null;
+    const finish = show.finishDate ? new Date(show.finishDate) : null;
+
+    if (start && !Number.isNaN(start.getTime())) start.setHours(0, 0, 0, 0);
+    if (finish && !Number.isNaN(finish.getTime())) finish.setHours(0, 0, 0, 0);
+
+    if (start && !Number.isNaN(start.getTime()) && today < start) {
+      return 'Not Started';
+    }
+
+    if (finish && !Number.isNaN(finish.getTime()) && today > finish) {
+      return 'Finished';
+    }
+
+    if (
+      start &&
+      !Number.isNaN(start.getTime()) &&
+      finish &&
+      !Number.isNaN(finish.getTime()) &&
+      today >= start &&
+      today <= finish
+    ) {
+      return 'In Progress';
+    }
+
+    if (start && !Number.isNaN(start.getTime()) && !finish) {
+      return today >= start ? 'In Progress' : 'Not Started';
+    }
+
+    if (finish && !Number.isNaN(finish.getTime()) && !start) {
+      return today > finish ? 'Finished' : 'In Progress';
+    }
+
+    return 'Not Started';
+  };
+
+  useEffect(() => {
+    const syncStatuses = async () => {
+      if (shows.length === 0) return;
+
+      const updatedShows: Show[] = [];
+      const statusUpdates: { id: string; status: Show['status'] }[] = [];
+
+      for (const show of shows) {
+        const computedStatus = determineStatus(show);
+        if (computedStatus !== show.status && show.id) {
+          statusUpdates.push({ id: show.id, status: computedStatus });
+          updatedShows.push({ ...show, status: computedStatus });
+        } else {
+          updatedShows.push(show);
+        }
+      }
+
+      if (statusUpdates.length === 0) return;
+
+      setShows(updatedShows);
+
+      await Promise.all(
+        statusUpdates.map(({ id, status }) =>
+          dbUpdate(`shows/${id}`, { status } as unknown as Record<string, unknown>)
+        )
+      );
+    };
+
+    syncStatuses();
+  }, [shows]);
 
   const validShows = useMemo(
     () =>
@@ -135,6 +209,74 @@ export default function ShowManagement() {
       (show) => normaliseState(show.siteLocation?.state) === selectedState
     );
   }, [validShows, selectedState]);
+
+  const fuzzyMatch = (query: string, text: string | undefined) => {
+    if (!query || !text) return false;
+    const lowerQuery = query.toLowerCase();
+    const lowerText = text.toLowerCase();
+
+    if (lowerText.includes(lowerQuery)) return true;
+
+    let qi = 0;
+    for (let i = 0; i < lowerText.length && qi < lowerQuery.length; i += 1) {
+      if (lowerText[i] === lowerQuery[qi]) {
+        qi += 1;
+      }
+    }
+
+    return qi === lowerQuery.length;
+  };
+
+  const searchedShows = useMemo(() => {
+    if (!searchTerm.trim()) return filteredShows;
+
+    return filteredShows.filter((show) => {
+      const state = normaliseState(show.siteLocation?.state) || '';
+      return (
+        fuzzyMatch(searchTerm, show.name) ||
+        fuzzyMatch(searchTerm, show.dealership) ||
+        fuzzyMatch(searchTerm, show.siteLocation?.suburb) ||
+        fuzzyMatch(searchTerm, state) ||
+        fuzzyMatch(searchTerm, show.status)
+      );
+    });
+  }, [filteredShows, searchTerm]);
+
+  const statusPriority = useMemo<Record<Show['status'], number>>(
+    () => ({
+      'In Progress': 0,
+      'Not Started': 1,
+      Finished: 2,
+      Completed: 3,
+    }),
+    []
+  );
+
+  const sortedShows = useMemo(() => {
+    return [...searchedShows].sort((a, b) => {
+      const statusDiff = (statusPriority[a.status] ?? 99) - (statusPriority[b.status] ?? 99);
+      if (statusDiff !== 0) return statusDiff;
+
+      const direction = sortDirection === 'asc' ? 1 : -1;
+
+      if (sortKey === 'name') {
+        return a.name.localeCompare(b.name) * direction;
+      }
+
+      const dateA = a.startDate ? new Date(a.startDate).getTime() : 0;
+      const dateB = b.startDate ? new Date(b.startDate).getTime() : 0;
+
+      return (dateA - dateB) * direction;
+    });
+  }, [searchedShows, sortDirection, sortKey, statusPriority]);
+
+  const searchSuggestions = useMemo(() => {
+    if (!searchTerm.trim()) return [] as string[];
+    const names = Array.from(new Set(validShows.map((show) => show.name?.trim()).filter(Boolean)));
+    return names
+      .filter((name) => fuzzyMatch(searchTerm, name || ''))
+      .slice(0, 5) as string[];
+  }, [searchTerm, validShows]);
 
   const handleStateSelect = (state: string) => {
     setSelectedState(state);
@@ -550,10 +692,52 @@ export default function ShowManagement() {
                 Select a row to view detailed information about each show.
               </p>
             </div>
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="relative w-64">
+                <Input
+                  value={searchTerm}
+                  onChange={(event) => setSearchTerm(event.target.value)}
+                  placeholder="Search shows..."
+                  className="pr-10"
+                />
+                <Search className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                {searchSuggestions.length > 0 && (
+                  <div className="absolute z-10 mt-1 w-full rounded-md border bg-white shadow">
+                    {searchSuggestions.map((suggestion) => (
+                      <button
+                        key={suggestion}
+                        type="button"
+                        className="block w-full px-3 py-2 text-left text-sm hover:bg-gray-50"
+                        onClick={() => setSearchTerm(suggestion)}
+                      >
+                        {suggestion}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setSortKey(sortKey === 'name' ? 'startDate' : 'name')}
+                >
+                  {sortKey === 'name' ? 'Sort by Date' : 'Sort by Name'}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  onClick={() => setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc')}
+                  aria-label="Toggle sort direction"
+                >
+                  {sortDirection === 'asc' ? <SortAsc className="h-4 w-4" /> : <SortDesc className="h-4 w-4" />}
+                </Button>
+              </div>
+            </div>
           </div>
         </CardHeader>
         <CardContent>
-          {filteredShows.length > 0 ? (
+          {sortedShows.length > 0 ? (
             <Table>
               <TableHeader>
                 <TableRow>
@@ -566,7 +750,7 @@ export default function ShowManagement() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredShows.map((show) => {
+                {sortedShows.map((show) => {
                   const state = normaliseState(show.siteLocation?.state);
                   const locationParts = [
                     show.siteLocation?.suburb?.trim(),
@@ -577,7 +761,7 @@ export default function ShowManagement() {
                   const duration = parseMetric(show.showDuration);
 
                   const statusVariant =
-                    show.status === 'Completed'
+                    show.status === 'Finished'
                       ? 'default'
                       : show.status === 'In Progress'
                         ? 'secondary'
