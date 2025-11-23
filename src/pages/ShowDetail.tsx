@@ -36,6 +36,7 @@ import type {
 } from '@/types';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
+import { formatDisplayDate, formatInputDate, parseDateString } from '@/lib/date';
 
 const TASK_STATUSES: ShowTask['status'][] = ['Not Started', 'In Progress', 'Blocked', 'Done'];
 const TASK_STAGES: ShowTask['stage'][] = ['Design', 'Booking', 'Logistics', 'Marketing'];
@@ -380,8 +381,8 @@ export default function ShowDetail() {
 
   const startDateInfo = useMemo(() => {
     if (show?.startDate) {
-      const parsed = new Date(show.startDate);
-      if (!Number.isNaN(parsed.getTime())) {
+      const parsed = parseDateString(show.startDate);
+      if (parsed) {
         return { date: parsed, hasStartDate: true } as const;
       }
     }
@@ -431,9 +432,10 @@ export default function ShowDetail() {
 
       const calculateDuration = (start: string, end: string) => {
         if (!start || !end) return 0;
-        const startDate = new Date(start);
-        const endDate = new Date(end);
-               const diffTime = Math.abs(endDate.getTime() - startDate.getTime());
+        const startDate = parseDateString(start);
+        const endDate = parseDateString(end);
+        if (!startDate || !endDate) return 0;
+        const diffTime = Math.abs(endDate.getTime() - startDate.getTime());
         return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
       };
 
@@ -555,17 +557,11 @@ export default function ShowDetail() {
     }
   };
 
-  const formatDateForInput = (date: Date) => date.toISOString().split('T')[0];
+  const formatDateForInput = (date: Date) => formatInputDate(date.toISOString()) || date.toISOString().split('T')[0];
 
-  const formatDateForPreview = (date: Date) =>
-    date.toLocaleDateString('en-AU', { day: '2-digit', month: 'short', year: 'numeric' });
+  const formatDateForPreview = (date: Date) => formatDisplayDate(date, 'dd/MM/yyyy');
 
-  const formatScheduleDate = (value: string) => {
-    if (!value) return 'TBD';
-    const parsed = new Date(value);
-    if (Number.isNaN(parsed.getTime())) return value;
-    return parsed.toLocaleDateString('en-AU', { day: '2-digit', month: 'short', year: 'numeric' });
-  };
+  const formatScheduleDate = (value: string) => formatDisplayDate(value, 'dd/MM/yyyy', 'TBD');
 
   const updatePreviewTask = (taskId: string, updates: Partial<ProcessTemplateTask>) => {
     setTemplatePreviewTasks((prev) =>
@@ -1146,7 +1142,7 @@ export default function ShowDetail() {
                         <Label>Start Date</Label>
                         <Input
                           type="date"
-                          value={editedShow.startDate}
+                          value={formatInputDate(editedShow.startDate)}
                           onChange={(e) => setEditedShow({ ...editedShow, startDate: e.target.value })}
                         />
                       </div>
@@ -1154,7 +1150,7 @@ export default function ShowDetail() {
                         <Label>Finish Date</Label>
                         <Input
                           type="date"
-                          value={editedShow.finishDate}
+                          value={formatInputDate(editedShow.finishDate)}
                           onChange={(e) => setEditedShow({ ...editedShow, finishDate: e.target.value })}
                         />
                       </div>
@@ -1579,7 +1575,7 @@ export default function ShowDetail() {
                             <Label>Start Date *</Label>
                             <Input
                               type="date"
-                              value={newTask.startDate}
+                              value={formatInputDate(newTask.startDate)}
                               onChange={(e) => setNewTask({ ...newTask, startDate: e.target.value })}
                             />
                           </div>
@@ -1587,7 +1583,7 @@ export default function ShowDetail() {
                             <Label>Due Date *</Label>
                             <Input
                               type="date"
-                              value={newTask.dueDate}
+                              value={formatInputDate(newTask.dueDate)}
                               onChange={(e) => setNewTask({ ...newTask, dueDate: e.target.value })}
                             />
                           </div>
@@ -1707,7 +1703,7 @@ export default function ShowDetail() {
                               <Label>Start Date *</Label>
                               <Input
                                 type="date"
-                                value={editingTaskForm.startDate ?? editingTask.startDate}
+                                value={formatInputDate(editingTaskForm.startDate ?? editingTask.startDate)}
                                 onChange={(e) =>
                                   setEditingTaskForm((prev) => ({ ...prev, startDate: e.target.value }))
                                 }
@@ -1717,7 +1713,7 @@ export default function ShowDetail() {
                               <Label>Due Date *</Label>
                               <Input
                                 type="date"
-                                value={editingTaskForm.dueDate ?? editingTask.dueDate}
+                                value={formatInputDate(editingTaskForm.dueDate ?? editingTask.dueDate)}
                                 onChange={(e) =>
                                   setEditingTaskForm((prev) => ({ ...prev, dueDate: e.target.value }))
                                 }
