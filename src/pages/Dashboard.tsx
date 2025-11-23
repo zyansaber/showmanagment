@@ -20,7 +20,6 @@ import { Users, TrendingUp, Calendar, Target } from 'lucide-react';
 import { dbGet } from '@/lib/firebase';
 import type { Show, TeamMember, ShowOrder } from '@/types';
 import { format as formatDate } from 'date-fns';
-import { parseDateString } from '@/lib/date';
 
 export default function Dashboard() {
   const [shows, setShows] = useState<Show[]>([]);
@@ -82,8 +81,8 @@ export default function Dashboard() {
 
   const vehicleTrendMap = orders.reduce((acc, order) => {
     if (!order.date) return acc;
-    const parsed = parseDateString(order.date);
-    if (!parsed) return acc;
+    const parsed = new Date(order.date);
+    if (Number.isNaN(parsed.getTime())) return acc;
     const key = formatDate(parsed, 'yyyy-MM');
     acc[key] = (acc[key] || 0) + 1;
     return acc;
