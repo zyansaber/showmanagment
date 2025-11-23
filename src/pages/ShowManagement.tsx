@@ -11,6 +11,7 @@ import { dbGet, dbRemove, dbSet, dbUpdate } from '@/lib/firebase';
 import { dbGet, dbRemove, dbSet, dbUpdate } from '@/lib/firebase';
 import type { Show } from '@/types';
 import { toast } from 'sonner';
+import { formatDisplayDate } from '@/lib/date';
 
 type StateStats = {
   shows: number;
@@ -49,20 +50,7 @@ const formatCurrency = (value: number) =>
 const formatNumber = (value: number) =>
   value > 0 ? value.toLocaleString('en-AU', { maximumFractionDigits: 0 }) : 'N/A';
 
-const formatDate = (value: string | undefined) => {
-  if (!value) return 'N/A';
-  const trimmed = value.trim();
-  if (!trimmed) return 'N/A';
-  const normalised = trimmed.toLowerCase();
-  if (normalised === 'n/a' || normalised === 'na') return 'N/A';
-  const parsed = new Date(trimmed);
-  if (Number.isNaN(parsed.getTime())) return trimmed;
-  return parsed.toLocaleDateString('en-AU', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-  });
-};
+const formatDate = (value: string | undefined) => formatDisplayDate(value, 'dd/MM/yyyy');
 
 export default function ShowManagement() {
   const navigate = useNavigate();
