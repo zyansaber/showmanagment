@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
@@ -9,8 +8,8 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
-import { dbGet, dbSet, dbUpdate } from '@/lib/firebase';
-import type { Show, ShowOrder, TeamMember } from '@/types';
+import { dbGet, dbSet, dbUpdate, schedulingDbGet } from '@/lib/firebase';
+import type { ScheduleOrder, Show, ShowOrder, TeamMember } from '@/types';
 import { toast } from 'sonner';
 import { Check, CheckCircle2, Loader2, Plus, Search, ShieldCheck } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -21,8 +20,11 @@ const CONFIRMATION_DURATION_MS = 5 * 60 * 1000; // 5 minutes
 
 interface DecoratedOrder extends ShowOrder {
   showName: string;
-  range: string;
+  orderStatus: string;
+  handoverDealer: string;
+  handoverInvoice: string;
 }
+
 
 const statusStyles: Record<ShowOrder['status'], string> = {
   Pending: 'bg-yellow-100 text-yellow-800',
@@ -47,6 +49,8 @@ export default function OrdersAndSales() {
   const [orders, setOrders] = useState<ShowOrder[]>([]);
   const [shows, setShows] = useState<Show[]>([]);
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
+  const [scheduleOrders, setScheduleOrders] = useState<Record<string, ScheduleOrder>>({});
+  const [invoiceByChassis, setInvoiceByChassis] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
@@ -67,6 +71,8 @@ export default function OrdersAndSales() {
 
   const requiresPassword = !authExpiry || authExpiry <= Date.now();
 
+  const normaliseChassis = (value?: string | null) => value?.trim().toUpperCase() || '';
+
   useEffect(() => {
     const cached = typeof window !== 'undefined' ? window.localStorage.getItem(CONFIRMATION_CACHE_KEY) : null;
     if (!cached) return;
@@ -81,15 +87,60 @@ export default function OrdersAndSales() {
   useEffect(() => {
     const loadData = async () => {
       try {
-        const [ordersData, showsData, teamData] = await Promise.all([
+        const [ordersData, showsData, teamData, scheduleData, invoicesData] = await Promise.all([
           dbGet('showOrders'),
           dbGet('shows'),
           dbGet('teamMembers'),
+          schedulingDbGet('schedule'),
+          dbGet('yardnewvaninvoice'),
         ]);
 
         setOrders(ordersData ? Object.values(ordersData) : []);
         setShows(showsData ? Object.values(showsData) : []);
         setTeamMembers(teamData ? Object.values(teamData) : []);
+        if (scheduleData) {
+          const map = Object.values(scheduleData as Record<string, ScheduleOrder>).reduce(
+            (acc, order) => {
+              const key = normaliseChassis(order.Chassis);
+              if (key) {
+                acc[key] = order;
+              }
+              return acc;
+            },
+            {} as Record<string, ScheduleOrder>
+          );
+          setScheduleOrders(map);
+        }
+
+        if (invoicesData) {
+          const invoiceMap: Record<string, string> = {};
+          Object.values(invoicesData as Record<string, unknown>).forEach((warehouse) => {
+            if (!warehouse || typeof warehouse !== 'object') return;
+
+            Object.entries(warehouse as Record<string, unknown>).forEach(([chassis, invoiceEntry]) => {
+              const chassisKey = normaliseChassis(chassis);
+              if (!chassisKey) return;
+
+              if (typeof invoiceEntry === 'string') {
+                invoiceMap[chassisKey] = invoiceEntry;
+                return;
+              }
+
+              if (!invoiceEntry || typeof invoiceEntry !== 'object') return;
+
+              const invoiceDates = Object.keys(invoiceEntry as Record<string, unknown>);
+              if (invoiceDates.length === 0) return;
+
+              const latestDate = invoiceDates
+                .slice()
+                .sort((a, b) => new Date(b).getTime() - new Date(a).getTime())[0];
+
+              invoiceMap[chassisKey] = latestDate;
+            });
+          });
+
+          setInvoiceByChassis(invoiceMap);
+        }
         setError(null);
       } catch (err) {
         console.error('Error loading orders:', err);
@@ -137,9 +188,14 @@ export default function OrdersAndSales() {
       .map((order) => ({
         ...order,
         showName: showLookup[order.showId] || 'Unknown Show',
-        range: (order.chassisNumber || '').substring(0, 3).toUpperCase() || 'N/A',
+        orderStatus: scheduleOrders[normaliseChassis(order.chassisNumber)]?.['Regent Production']?.trim() || 'N/A',
+        handoverDealer: scheduleOrders[normaliseChassis(order.chassisNumber)]?.Dealer?.trim() || 'Unknown',
+        handoverInvoice:
+          invoiceByChassis[normaliseChassis(order.chassisNumber)]
+            ? formatDate(invoiceByChassis[normaliseChassis(order.chassisNumber)])
+            : 'not invoiced',
       }));
-  }, [orders, searchTerm, showLookup]);
+  }, [invoiceByChassis, orders, scheduleOrders, searchTerm, showLookup]);
 
   const totalOrders = orders.length;
   const pendingOrders = orders.filter((order) => order.status === 'Pending').length;
@@ -469,12 +525,14 @@ export default function OrdersAndSales() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Chassis Number</TableHead>
-                  <TableHead>Model Range</TableHead>
                   <TableHead>Show</TableHead>
                   <TableHead>Type</TableHead>
                   <TableHead>Salesperson</TableHead>
                   <TableHead>Date</TableHead>
                   <TableHead>Status</TableHead>
+                  <TableHead>Order Status</TableHead>
+                  <TableHead>Handover Dealer</TableHead>
+                  <TableHead>Handover Invoice</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
@@ -484,9 +542,6 @@ export default function OrdersAndSales() {
                   return (
                     <TableRow key={rowKey}>
                       <TableCell className="font-medium">{order.chassisNumber}</TableCell>
-                      <TableCell>
-                        <Badge variant="outline">{order.range}</Badge>
-                      </TableCell>
                       <TableCell>{order.showName}</TableCell>
                       <TableCell>{order.orderType}</TableCell>
                       <TableCell>{order.salesperson || 'Unassigned'}</TableCell>
@@ -496,6 +551,9 @@ export default function OrdersAndSales() {
                           {order.status}
                         </span>
                       </TableCell>
+                      <TableCell>{order.orderStatus}</TableCell>
+                      <TableCell>{order.handoverDealer}</TableCell>
+                      <TableCell>{order.handoverInvoice}</TableCell>
                       <TableCell className="text-right">
                         <Button
                           size="sm"
