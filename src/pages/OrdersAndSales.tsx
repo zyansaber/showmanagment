@@ -72,6 +72,28 @@ export default function OrdersAndSales() {
   const requiresPassword = !authExpiry || authExpiry <= Date.now();
 
   const normaliseChassis = (value?: string | null) => value?.trim().toUpperCase() || '';
+  const extractInvoiceDate = (invoiceEntry: unknown): string | null => {
+    if (typeof invoiceEntry === 'string') return invoiceEntry;
+    if (!invoiceEntry || typeof invoiceEntry !== 'object') return null;
+
+    const entryObj = invoiceEntry as Record<string, unknown>;
+    if (typeof entryObj.invoiceDate === 'string') return entryObj.invoiceDate;
+
+    const source = entryObj._source;
+    if (source && typeof source === 'object' && typeof (source as Record<string, unknown>).invoiceDate === 'string') {
+      return (source as Record<string, unknown>).invoiceDate;
+    }
+
+    const dateKeys = Object.keys(entryObj).filter(
+      (key) => !Number.isNaN(new Date(key).getTime()) && Number.isFinite(new Date(key).getTime())
+    );
+    if (dateKeys.length === 0) return null;
+
+    return dateKeys
+      .slice()
+      .sort((a, b) => new Date(b).getTime() - new Date(a).getTime())[0];
+  };
+
 
   useEffect(() => {
     const cached = typeof window !== 'undefined' ? window.localStorage.getItem(CONFIRMATION_CACHE_KEY) : null;
@@ -120,22 +142,10 @@ export default function OrdersAndSales() {
             Object.entries(warehouse as Record<string, unknown>).forEach(([chassis, invoiceEntry]) => {
               const chassisKey = normaliseChassis(chassis);
               if (!chassisKey) return;
-
-              if (typeof invoiceEntry === 'string') {
-                invoiceMap[chassisKey] = invoiceEntry;
-                return;
+              const invoiceDate = extractInvoiceDate(invoiceEntry);
+              if (invoiceDate) {
+                invoiceMap[chassisKey] = invoiceDate;
               }
-
-              if (!invoiceEntry || typeof invoiceEntry !== 'object') return;
-
-              const invoiceDates = Object.keys(invoiceEntry as Record<string, unknown>);
-              if (invoiceDates.length === 0) return;
-
-              const latestDate = invoiceDates
-                .slice()
-                .sort((a, b) => new Date(b).getTime() - new Date(a).getTime())[0];
-
-              invoiceMap[chassisKey] = latestDate;
             });
           });
 
@@ -553,7 +563,15 @@ export default function OrdersAndSales() {
                       </TableCell>
                       <TableCell>{order.orderStatus}</TableCell>
                       <TableCell>{order.handoverDealer}</TableCell>
-                      <TableCell>{order.handoverInvoice}</TableCell>
+                      <TableCell>
+                        {order.handoverInvoice === 'not invoiced' ? (
+                          <span className="text-xs italic text-muted-foreground">not invoiced</span>
+                        ) : (
+                          <span className="inline-flex items-center rounded-full bg-green-100 px-2 py-1 text-xs font-semibold text-green-800">
+                            {order.handoverInvoice}
+                          </span>
+                        )}
+                      </TableCell>
                       <TableCell className="text-right">
                         <Button
                           size="sm"
