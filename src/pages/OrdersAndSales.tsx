@@ -12,8 +12,7 @@ import { dbGet, dbSet, dbUpdate, schedulingDbGet } from '@/lib/firebase';
 import type { ScheduleOrder, Show, ShowOrder, TeamMember } from '@/types';
 import { toast } from 'sonner';
 import { Check, CheckCircle2, Loader2, Plus, Search, ShieldCheck } from 'lucide-react';
-import { cn } from '@/lib/utils';c
-import { formatDisplayDate, getDateTimestamp } from '@/lib/date';
+import { cn } from '@/lib/utils';
 
 const CONFIRMATION_PASSWORD = 'admin123';
 const CONFIRMATION_CACHE_KEY = 'orders-dashboard-confirmation';
@@ -33,7 +32,18 @@ const statusStyles: Record<ShowOrder['status'], string> = {
   Rejected: 'bg-red-100 text-red-800',
 };
 
-const formatDate = (value: string | undefined) => formatDisplayDate(value, 'dd/MM/yyyy');
+const formatDate = (value: string | undefined) => {
+  if (!value) return 'N/A';
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return value;
+  }
+  return parsed.toLocaleDateString('en-AU', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  });
+};
 
 export default function OrdersAndSales() {
   const [orders, setOrders] = useState<ShowOrder[]>([]);
@@ -74,13 +84,16 @@ export default function OrdersAndSales() {
       return (source as Record<string, unknown>).invoiceDate;
     }
 
-    const dateKeys = Object.keys(entryObj).filter((key) => !Number.isNaN(getDateTimestamp(key)));
+    const dateKeys = Object.keys(entryObj).filter(
+      (key) => !Number.isNaN(new Date(key).getTime()) && Number.isFinite(new Date(key).getTime())
+    );
     if (dateKeys.length === 0) return null;
 
     return dateKeys
       .slice()
-      .sort((a, b) => getDateTimestamp(b) - getDateTimestamp(a))[0];
+      .sort((a, b) => new Date(b).getTime() - new Date(a).getTime())[0];
   };
+
 
   useEffect(() => {
     const cached = typeof window !== 'undefined' ? window.localStorage.getItem(CONFIRMATION_CACHE_KEY) : null;
@@ -164,8 +177,8 @@ export default function OrdersAndSales() {
     return orders
       .slice()
       .sort((a, b) => {
-        const dateA = getDateTimestamp(a.date);
-        const dateB = getDateTimestamp(b.date);
+        const dateA = new Date(a.date ?? '').getTime();
+        const dateB = new Date(b.date ?? '').getTime();
         return Number.isNaN(dateB) ? -1 : Number.isNaN(dateA) ? 1 : dateB - dateA;
       })
       .filter((order) => {
