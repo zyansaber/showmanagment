@@ -34,6 +34,8 @@ const formatCurrency = (value: number) =>
     maximumFractionDigits: 0,
   });
 
+const formatUnits = (value: number) => `${value.toLocaleString('en-US', { maximumFractionDigits: 0 })} units`;
+
 const toSafeNumber = (value: unknown): number => {
   if (typeof value === 'number') return Number.isFinite(value) && value > 0 ? value : 0;
   if (typeof value === 'string') {
@@ -209,6 +211,19 @@ export default function ShowBudgetExpense() {
     [expenseSummary.total, totalBudget]
   );
 
+  const actualDealerSpend = useMemo(
+    () =>
+      (expenseSummary.byCategory?.['Dealer Operations'] ?? 0) +
+      (expenseSummary.byCategory?.['Stand & Venue'] ?? 0) +
+      (expenseSummary.byCategory?.Other ?? 0),
+    [expenseSummary.byCategory]
+  );
+
+  const actualFactorySpend = useMemo(
+    () => expenseSummary.byCategory?.Factory ?? 0,
+    [expenseSummary.byCategory]
+  );
+
   const handleBudgetChange = (key: keyof ShowBudgetProfile, value: number) => {
     if (!budget) return;
     setBudget({ ...budget, [key]: value });
@@ -321,8 +336,8 @@ export default function ShowBudgetExpense() {
                 <p className="text-lg font-semibold">{budget.durationDays || 'Not set'}</p>
               </div>
               <div>
-                <p className="text-xs uppercase text-slate-500">Sales Target</p>
-                <p className="text-lg font-semibold">{formatCurrency(budget.salesTarget)}</p>
+                <p className="text-xs uppercase text-slate-500">Sales Target (units)</p>
+                <p className="text-lg font-semibold">{formatUnits(budget.salesTarget)}</p>
               </div>
               <div>
                 <p className="text-xs uppercase text-slate-500">Last updated</p>
@@ -348,44 +363,83 @@ export default function ShowBudgetExpense() {
 
       {budget && selectedShow && !loading && (
         <>
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-            <Card className="border-blue-100 bg-blue-50/70">
-              <CardHeader className="pb-2">
-                <CardDescription>Total Budget</CardDescription>
-                <CardTitle className="text-2xl text-blue-900">{formatCurrency(totalBudget)}</CardTitle>
-              </CardHeader>
-              <CardContent className="text-sm text-blue-800">
-                Includes all Dealer and Factory budget lines.
-              </CardContent>
-            </Card>
-            <Card className="border-emerald-100 bg-emerald-50/70">
-              <CardHeader className="pb-2">
-                <CardDescription>Actual Expenses</CardDescription>
-                <CardTitle className="text-2xl text-emerald-900">{formatCurrency(expenseSummary.total)}</CardTitle>
-              </CardHeader>
-              <CardContent className="text-sm text-emerald-800">
-                Captured from real expense entries.
-              </CardContent>
-            </Card>
-            <Card className="border-amber-100 bg-amber-50/70">
-              <CardHeader className="pb-2">
-                <CardDescription>Variance vs Budget</CardDescription>
-                <CardTitle className="text-2xl text-amber-900">{formatCurrency(variance)}</CardTitle>
-              </CardHeader>
-              <CardContent className="text-sm text-amber-800">
-                Positive shows budget remaining; negative indicates overspend.
-              </CardContent>
-            </Card>
-            <Card className="border-slate-200">
-              <CardHeader className="pb-2">
-                <CardDescription>Expense Coverage</CardDescription>
-                <CardTitle className="text-2xl">{coverage}%</CardTitle>
-              </CardHeader>
-              <CardContent className="text-sm text-slate-600">
-                Actual expenses divided by total budget.
-              </CardContent>
-            </Card>
-          </div>
+          <Card className="shadow-sm">
+            <CardHeader>
+              <CardTitle>Statement of Expenditure Position</CardTitle>
+              <CardDescription>
+                A financial-report view summarizing budgeted vs. actual spend with variances at a glance.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid gap-3 sm:grid-cols-3">
+                <div>
+                  <p className="text-xs uppercase text-slate-500">Budgeted total (Dealer + Factory)</p>
+                  <p className="text-xl font-semibold text-slate-900">{formatCurrency(totalBudget)}</p>
+                </div>
+                <div>
+                  <p className="text-xs uppercase text-slate-500">Actual expenditures recorded</p>
+                  <p className="text-xl font-semibold text-slate-900">{formatCurrency(expenseSummary.total)}</p>
+                </div>
+                <div>
+                  <p className="text-xs uppercase text-slate-500">Variance</p>
+                  <p className={`text-xl font-semibold ${variance >= 0 ? 'text-emerald-700' : 'text-amber-700'}`}>
+                    {formatCurrency(variance)}
+                  </p>
+                </div>
+              </div>
+
+              <div className="overflow-x-auto rounded-xl border">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-slate-50/70">
+                      <TableHead>Category</TableHead>
+                      <TableHead className="text-right">Budget (AUD)</TableHead>
+                      <TableHead className="text-right">Actual (AUD)</TableHead>
+                      <TableHead className="text-right">Variance</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    <TableRow>
+                      <TableCell className="font-medium">Dealer Costs</TableCell>
+                      <TableCell className="text-right">{formatCurrency(totalDealerCosts)}</TableCell>
+                      <TableCell className="text-right">{formatCurrency(actualDealerSpend)}</TableCell>
+                      <TableCell className="text-right">{formatCurrency(totalDealerCosts - actualDealerSpend)}</TableCell>
+                    </TableRow>
+                    <TableRow>
+                      <TableCell className="font-medium">Factory Costs</TableCell>
+                      <TableCell className="text-right">{formatCurrency(totalFactoryCosts)}</TableCell>
+                      <TableCell className="text-right">{formatCurrency(actualFactorySpend)}</TableCell>
+                      <TableCell className="text-right">{formatCurrency(totalFactoryCosts - actualFactorySpend)}</TableCell>
+                    </TableRow>
+                    <TableRow className="bg-slate-50/70 font-semibold">
+                      <TableCell>Totals</TableCell>
+                      <TableCell className="text-right">{formatCurrency(totalBudget)}</TableCell>
+                      <TableCell className="text-right">{formatCurrency(expenseSummary.total)}</TableCell>
+                      <TableCell className="text-right">{formatCurrency(variance)}</TableCell>
+                    </TableRow>
+                  </TableBody>
+                </Table>
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-3">
+                <div>
+                  <p className="text-xs uppercase text-slate-500">Sales Target (units)</p>
+                  <p className="text-lg font-semibold text-slate-900">{formatUnits(budget.salesTarget)}</p>
+                </div>
+                <div>
+                  <p className="text-xs uppercase text-slate-500">Expense coverage</p>
+                  <p className="text-lg font-semibold text-slate-900">{coverage}%</p>
+                  <p className="text-xs text-slate-500">Actual spend divided by total budget.</p>
+                </div>
+                <div>
+                  <p className="text-xs uppercase text-slate-500">Last updated</p>
+                  <p className="text-lg font-semibold text-slate-900">
+                    {budget.lastUpdated ? new Date(budget.lastUpdated).toLocaleString() : 'Not saved'}
+                  </p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
 
           <Card className="shadow-sm">
             <CardHeader>
