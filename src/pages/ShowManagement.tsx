@@ -1,487 +1,625 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  Legend,
-  ResponsiveContainer,
-  PieChart,
-  Pie,
-  Cell,
-  LineChart,
-  Line,
-} from 'recharts';
-import { Users, TrendingUp, Calendar, Target } from 'lucide-react';
-import { dbGet } from '@/lib/firebase';
-import type { Show, TeamMember, ShowOrder } from '@/types';
-import { format as formatDate } from 'date-fns';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
+import { dbGet, dbSet, dbUpdate, schedulingDbGet } from '@/lib/firebase';
+import type { ScheduleOrder, Show, ShowOrder, TeamMember } from '@/types';
+import { toast } from 'sonner';
+import { Check, CheckCircle2, Loader2, Plus, Search, ShieldCheck } from 'lucide-react';
+import { cn } from '@/lib/utils';
 
-export default function Dashboard() {
+const CONFIRMATION_PASSWORD = 'admin123';
+const CONFIRMATION_CACHE_KEY = 'orders-dashboard-confirmation';
+const CONFIRMATION_DURATION_MS = 5 * 60 * 1000; // 5 minutes
+
+interface DecoratedOrder extends ShowOrder {
+  showName: string;
+  orderStatus: string;
+  handoverDealer: string;
+  handoverInvoice: string;
+}
+
+
+const statusStyles: Record<ShowOrder['status'], string> = {
+  Pending: 'bg-yellow-100 text-yellow-800',
+  Approved: 'bg-green-100 text-green-800',
+  Rejected: 'bg-red-100 text-red-800',
+};
+
+const formatDate = (value: string | undefined) => {
+  if (!value) return 'N/A';
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return value;
+  }
+  return parsed.toLocaleDateString('en-AU', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  });
+};
+
+export default function OrdersAndSales() {
+  const [orders, setOrders] = useState<ShowOrder[]>([]);
   const [shows, setShows] = useState<Show[]>([]);
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
-  const [orders, setOrders] = useState<ShowOrder[]>([]);
+  const [scheduleOrders, setScheduleOrders] = useState<Record<string, ScheduleOrder>>({});
+  const [invoiceByChassis, setInvoiceByChassis] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [pendingOrder, setPendingOrder] = useState<ShowOrder | null>(null);
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [passwordInput, setPasswordInput] = useState('');
+  const [authExpiry, setAuthExpiry] = useState<number | null>(null);
+  const [isAddingOrder, setIsAddingOrder] = useState(false);
+  const [isSalespersonPickerOpen, setIsSalespersonPickerOpen] = useState(false);
+  const [newOrder, setNewOrder] = useState<Partial<ShowOrder>>({
+    chassisNumber: '',
+    orderType: 'New Order',
+    salesperson: '',
+    status: 'Pending',
+    showId: '',
+    date: new Date().toISOString().split('T')[0],
+  });
+
+  const requiresPassword = !authExpiry || authExpiry <= Date.now();
+
+  const normaliseChassis = (value?: string | null) => value?.trim().toUpperCase() || '';
+  const extractInvoiceDate = (invoiceEntry: unknown): string | null => {
+    if (typeof invoiceEntry === 'string') return invoiceEntry;
+    if (!invoiceEntry || typeof invoiceEntry !== 'object') return null;
+
+    const entryObj = invoiceEntry as Record<string, unknown>;
+    if (typeof entryObj.invoiceDate === 'string') return entryObj.invoiceDate;
+
+    const source = entryObj._source;
+    if (source && typeof source === 'object' && typeof (source as Record<string, unknown>).invoiceDate === 'string') {
+      return (source as Record<string, unknown>).invoiceDate;
+    }
+
+    const dateKeys = Object.keys(entryObj).filter(
+      (key) => !Number.isNaN(new Date(key).getTime()) && Number.isFinite(new Date(key).getTime())
+    );
+    if (dateKeys.length === 0) return null;
+
+    return dateKeys
+      .slice()
+      .sort((a, b) => new Date(b).getTime() - new Date(a).getTime())[0];
+  };
+
 
   useEffect(() => {
+    const cached = typeof window !== 'undefined' ? window.localStorage.getItem(CONFIRMATION_CACHE_KEY) : null;
+    if (!cached) return;
+    const expires = Number(cached);
+    if (Number.isFinite(expires) && expires > Date.now()) {
+      setAuthExpiry(expires);
+    } else if (typeof window !== 'undefined') {
+      window.localStorage.removeItem(CONFIRMATION_CACHE_KEY);
+    }
+  }, []);
+
+  useEffect(() => {
+    const loadData = async () => {
+      try {
+        const [ordersData, showsData, teamData, scheduleData, invoicesData] = await Promise.all([
+          dbGet('showOrders'),
+          dbGet('shows'),
+          dbGet('teamMembers'),
+          schedulingDbGet('schedule'),
+          schedulingDbGet('yardnewvaninvoice'),
+        ]);
+
+        setOrders(ordersData ? Object.values(ordersData) : []);
+        setShows(showsData ? Object.values(showsData) : []);
+        setTeamMembers(teamData ? Object.values(teamData) : []);
+        if (scheduleData) {
+          const map = Object.values(scheduleData as Record<string, ScheduleOrder>).reduce(
+            (acc, order) => {
+              const key = normaliseChassis(order.Chassis);
+              if (key) {
+                acc[key] = order;
+              }
+              return acc;
+            },
+            {} as Record<string, ScheduleOrder>
+          );
+          setScheduleOrders(map);
+        }
+
+        if (invoicesData) {
+          const invoiceMap: Record<string, string> = {};
+          Object.values(invoicesData as Record<string, unknown>).forEach((warehouse) => {
+            if (!warehouse || typeof warehouse !== 'object') return;
+
+            Object.entries(warehouse as Record<string, unknown>).forEach(([chassis, invoiceEntry]) => {
+              const chassisKey = normaliseChassis(chassis);
+              if (!chassisKey) return;
+              const invoiceDate = extractInvoiceDate(invoiceEntry);
+              if (invoiceDate) {
+                invoiceMap[chassisKey] = invoiceDate;
+              }
+            });
+          });
+
+          setInvoiceByChassis(invoiceMap);
+        }
+        setError(null);
+      } catch (err) {
+        console.error('Error loading orders:', err);
+        setError('Failed to load orders. Please try again later.');
+      } finally {
+        setLoading(false);
+      }
+    };
+
     loadData();
   }, []);
 
-  const loadData = async () => {
-    try {
-      const [showsData, membersData, ordersData] = await Promise.all([
-        dbGet('shows'),
-        dbGet('teamMembers'),
-        dbGet('showOrders')
-      ]);
+  const showLookup = useMemo(() =>
+    shows.reduce((acc, show) => {
+      if (show.id) {
+        acc[show.id] = show.name || 'Unnamed Show';
+      }
+      return acc;
+    }, {} as Record<string, string>),
+  [shows]);
 
-      setShows(showsData ? Object.values(showsData) : []);
-      setTeamMembers(membersData ? Object.values(membersData) : []);
-      setOrders(ordersData ? Object.values(ordersData) : []);
-    } catch (error) {
-      console.error('Error loading data:', error);
-    } finally {
-      setLoading(false);
+  const decoratedOrders: DecoratedOrder[] = useMemo(() => {
+    const term = searchTerm.trim().toLowerCase();
+    return orders
+      .slice()
+      .sort((a, b) => {
+        const dateA = new Date(a.date ?? '').getTime();
+        const dateB = new Date(b.date ?? '').getTime();
+        return Number.isNaN(dateB) ? -1 : Number.isNaN(dateA) ? 1 : dateB - dateA;
+      })
+      .filter((order) => {
+        if (!term) return true;
+        const haystack = [
+          order.chassisNumber,
+          order.orderType,
+          order.salesperson,
+          order.id,
+          showLookup[order.showId],
+        ]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase();
+        return haystack.includes(term);
+      })
+      .map((order) => ({
+        ...order,
+        showName: showLookup[order.showId] || 'Unknown Show',
+        orderStatus: scheduleOrders[normaliseChassis(order.chassisNumber)]?.['Regent Production']?.trim() || 'N/A',
+        handoverDealer: scheduleOrders[normaliseChassis(order.chassisNumber)]?.Dealer?.trim() || 'Unknown',
+        handoverInvoice:
+          invoiceByChassis[normaliseChassis(order.chassisNumber)]
+            ? formatDate(invoiceByChassis[normaliseChassis(order.chassisNumber)])
+            : 'not invoiced',
+      }));
+  }, [invoiceByChassis, orders, scheduleOrders, searchTerm, showLookup]);
+
+  const totalOrders = orders.length;
+  const pendingOrders = orders.filter((order) => order.status === 'Pending').length;
+  const approvedOrders = orders.filter((order) => order.status === 'Approved').length;
+
+  const selectedShow = useMemo(() => shows.find((show) => show.id === newOrder.showId), [newOrder.showId, shows]);
+
+  const showTeamMembers = useMemo(() => {
+    if (!selectedShow) return [] as TeamMember[];
+    const memberIds = selectedShow.teamMembers || [];
+    return teamMembers.filter((member) => memberIds.includes(member.memberId));
+  }, [selectedShow, teamMembers]);
+
+  const persistAuthExpiry = (expiresAt: number) => {
+    setAuthExpiry(expiresAt);
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(CONFIRMATION_CACHE_KEY, expiresAt.toString());
     }
   };
 
-  // Calculate employee statistics
-  const employeeStats = teamMembers
-    .filter(m => m.activeFlag === 1)
-    .map(member => {
-      const memberOrders = orders.filter(o => o.salesperson === member.memberName);
-      const workDays = member.totalWorkDays || 0;
-      return {
-        name: member.memberName,
-        sales: memberOrders.length,
-        workDays: workDays,
-        avgDaily: workDays > 0 ? (memberOrders.length / workDays).toFixed(2) : 0
+  const confirmOrder = async (order: ShowOrder) => {
+    if (!order.id) {
+      toast.error('Order is missing an ID.');
+      setPendingOrder(null);
+      return;
+    }
+
+    try {
+      await dbUpdate(`showOrders/${order.id}`, {
+        status: 'Approved',
+        approvedBy: 'Orders Dashboard',
+        date: order.date,
+      });
+      setOrders((prev) =>
+        prev.map((existing) =>
+          existing.id === order.id
+            ? { ...existing, status: 'Approved', approvedBy: 'Orders Dashboard' }
+            : existing
+        )
+      );
+      toast.success(`Order ${order.id} confirmed.`);
+    } catch (err) {
+      console.error('Error confirming order:', err);
+      toast.error('Failed to confirm order. Please try again.');
+    } finally {
+      setPendingOrder(null);
+    }
+  };
+
+  const handleConfirmationClick = (order: ShowOrder) => {
+    if (order.status === 'Approved') {
+      toast.info('Order already confirmed.');
+      return;
+    }
+
+    setPendingOrder(order);
+    if (requiresPassword) {
+      setIsDialogOpen(true);
+    } else {
+      confirmOrder(order);
+    }
+  };
+
+  const handlePasswordSubmit = () => {
+    if (passwordInput.trim() !== CONFIRMATION_PASSWORD) {
+      toast.error('Incorrect password');
+      return;
+    }
+
+    const expiresAt = Date.now() + CONFIRMATION_DURATION_MS;
+    persistAuthExpiry(expiresAt);
+    setIsDialogOpen(false);
+    setPasswordInput('');
+
+    if (pendingOrder) {
+      confirmOrder(pendingOrder);
+    }
+  };
+
+  const handleDialogOpenChange = (open: boolean) => {
+    setIsDialogOpen(open);
+    if (!open) {
+      setPasswordInput('');
+      setPendingOrder(null);
+    }
+  };
+
+  const handleAddOrder = async () => {
+    if (!newOrder.chassisNumber || !newOrder.salesperson || !newOrder.showId || !newOrder.date) {
+      toast.error('Please fill in all required fields');
+      return;
+    }
+
+    try {
+      const order: ShowOrder = {
+        id: `ORD-${Date.now()}`,
+        showId: newOrder.showId,
+        chassisNumber: newOrder.chassisNumber,
+        orderType: (newOrder.orderType as ShowOrder['orderType']) || 'New Order',
+        salesperson: newOrder.salesperson,
+        date: newOrder.date,
+        status: 'Pending',
       };
-    })
-    .sort((a, b) => b.sales - a.sales)
-    .slice(0, 5);
 
-  // Calculate vehicle type distribution
-  const vehicleTypes = orders.reduce((acc, order) => {
-    const chassis = order.chassisNumber || '';
-    const type = chassis.substring(0, 3).toUpperCase() || 'N/A';
-    acc[type] = (acc[type] || 0) + 1;
-    return acc;
-  }, {} as Record<string, number>);
-
-  const vehicleTypeData = Object.entries(vehicleTypes).map(([name, value], index) => ({
-    name,
-    value,
-    color: ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'][index % 5]
-  }));
-
-  const vehicleTrendMap = orders.reduce((acc, order) => {
-    if (!order.date) return acc;
-    const parsed = new Date(order.date);
-    if (Number.isNaN(parsed.getTime())) return acc;
-    const key = formatDate(parsed, 'yyyy-MM');
-    acc[key] = (acc[key] || 0) + 1;
-    return acc;
-  }, {} as Record<string, number>);
-
-  const vehicleTrendData = Object.entries(vehicleTrendMap)
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([key, value]) => ({
-      month: formatDate(new Date(`${key}-01`), 'MMM yyyy'),
-      value,
-    }));
-
-  // Calculate show statistics by state (skip N/A values)
-  const stateStats = shows.reduce((acc, show) => {
-    const state = show.siteLocation?.state?.trim();
-    if (!state) {
-      return acc;
+      await dbSet(`showOrders/${order.id}`, order as unknown as Record<string, unknown>);
+      setOrders((prev) => [...prev, order]);
+      setIsAddingOrder(false);
+      setNewOrder({
+        chassisNumber: '',
+        orderType: 'New Order',
+        salesperson: '',
+        status: 'Pending',
+        showId: '',
+        date: new Date().toISOString().split('T')[0],
+      });
+      toast.success('Order added successfully');
+    } catch (err) {
+      console.error('Error adding order:', err);
+      toast.error('Failed to add order');
     }
-    if (!acc[state]) {
-      acc[state] = { shows: 0, totalSales: 0, totalDays: 0 };
-    }
-    acc[state].shows += 1;
-    // Only add sales if not N/A (not 0)
-    if (show.sales2025 > 0) {
-      acc[state].totalSales += show.sales2025;
-    }
-    // Only add days if not N/A (not 0)
-    if (show.showDuration && show.showDuration > 0) {
-      acc[state].totalDays += show.showDuration;
-    }
-    return acc;
-  }, {} as Record<string, { shows: number; totalSales: number; totalDays: number }>);
-
-  const stateData = Object.entries(stateStats).map(([state, data]) => ({
-    state,
-    shows: data.shows,
-    dailySales: data.totalDays > 0 ? (data.totalSales / data.totalDays).toFixed(2) : 0
-  }));
-
-  // Calculate overall statistics (skip N/A values)
-  const totalShows = shows.length;
-  const completedShows = shows.filter(s => s.status === 'Completed').length;
-  
-  // Only sum non-zero (non-N/A) values
-  const totalSales2025 = shows.reduce((sum, s) => sum + (s.sales2025 > 0 ? s.sales2025 : 0), 0);
-  const target2025 = shows.reduce((sum, s) => sum + (s.target2025 > 0 ? s.target2025 : 0), 0);
-  const totalSales2024 = shows.reduce((sum, s) => sum + (s.sales2024 > 0 ? s.sales2024 : 0), 0);
-  const target2024 = shows.reduce((sum, s) => sum + (s.target2024 > 0 ? s.target2024 : 0), 0);
-
-  const stats = [
-    {
-      title: 'Total Shows 2025',
-      value: totalShows.toString(),
-      description: `${completedShows} completed`,
-      icon: Calendar,
-      color: 'text-blue-600',
-    },
-    {
-      title: 'Total Sales 2025',
-      value: totalSales2025.toString(),
-      description: `Target: ${target2025}`,
-      icon: TrendingUp,
-      color: 'text-green-600',
-    },
-    {
-      title: 'Active Team Members',
-      value: teamMembers.filter(m => m.activeFlag === 1).length.toString(),
-      description: `${shows.filter(s => s.status === 'In Progress').length} shows in progress`,
-      icon: Users,
-      color: 'text-purple-600',
-    },
-    {
-      title: 'Target Achievement',
-      value: target2025 > 0 ? `${Math.round((totalSales2025 / target2025) * 100)}%` : '0%',
-      description: `2025 target: ${target2025} units`,
-      icon: Target,
-      color: 'text-orange-600',
-    },
-  ];
+  };
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-96">
-        <div className="text-lg text-gray-600">Loading dashboard data...</div>
+      <div className="flex h-96 items-center justify-center text-gray-500">
+        <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+        Loading orders...
       </div>
     );
   }
 
   return (
     <div className="space-y-6">
-      {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        {stats.map((stat, index) => (
-          <Card key={index} className="hover:shadow-lg transition-shadow">
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium text-gray-600">
-                {stat.title}
-              </CardTitle>
-              <stat.icon className={`h-5 w-5 ${stat.color}`} />
-            </CardHeader>
-            <CardContent>
-              <div className="text-3xl font-bold text-gray-900">{stat.value}</div>
-              <p className="text-xs text-gray-500 mt-1">{stat.description}</p>
-            </CardContent>
-          </Card>
-        ))}
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-bold text-gray-900">Orders & Sales</h1>
+          <p className="text-sm text-gray-500">Overview of all show orders and sales confirmations</p>
+        </div>
+        <div className="flex items-center gap-2 text-sm text-gray-500">
+          <ShieldCheck className="h-4 w-4" />
+          {requiresPassword ? 'Confirmation requires password' : 'Confirmation unlocked'}
+        </div>
       </div>
 
-      {/* Main Content Tabs */}
-      <Tabs defaultValue="employees" className="space-y-6">
-        <TabsList className="bg-white">
-          <TabsTrigger value="employees">Employee Performance</TabsTrigger>
-          <TabsTrigger value="shows">Show Analytics</TabsTrigger>
-          <TabsTrigger value="caravans">Caravan Distribution</TabsTrigger>
-        </TabsList>
+      {error && (
+        <Card className="border-red-200 bg-red-50">
+          <CardContent className="py-3 text-sm text-red-700">{error}</CardContent>
+        </Card>
+      )}
 
-        {/* Employee Performance Tab */}
-        <TabsContent value="employees" className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>Top Sales Performance</CardTitle>
-              <CardDescription>Employee sales ranking and statistics</CardDescription>
-            </CardHeader>
-            <CardContent>
-              {employeeStats.length > 0 ? (
-                <ResponsiveContainer width="100%" height={350}>
-                  <BarChart data={employeeStats}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="name" />
-                    <YAxis />
-                    <Tooltip />
-                    <Legend />
-                    <Bar dataKey="sales" fill="#3b82f6" name="Total Sales" />
-                  </BarChart>
-                </ResponsiveContainer>
-              ) : (
-                <div className="text-center py-8 text-gray-500">No employee data available</div>
-              )}
-            </CardContent>
-          </Card>
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+        <Card>
+          <CardHeader className="pb-2">
+            <CardDescription>Total Orders</CardDescription>
+            <CardTitle className="text-3xl">{totalOrders}</CardTitle>
+          </CardHeader>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardDescription>Pending Confirmation</CardDescription>
+            <CardTitle className="text-3xl text-yellow-600">{pendingOrders}</CardTitle>
+          </CardHeader>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardDescription>Approved Orders</CardDescription>
+            <CardTitle className="text-3xl text-green-600">{approvedOrders}</CardTitle>
+          </CardHeader>
+        </Card>
+      </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <Card>
-              <CardHeader>
-                <CardTitle>Work Days Distribution</CardTitle>
-              </CardHeader>
-              <CardContent>
-                {employeeStats.length > 0 ? (
-                  <ResponsiveContainer width="100%" height={300}>
-                    <BarChart data={employeeStats}>
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="name" />
-                      <YAxis />
-                      <Tooltip />
-                      <Bar dataKey="workDays" fill="#10b981" name="Work Days" />
-                    </BarChart>
-                  </ResponsiveContainer>
-                ) : (
-                  <div className="text-center py-8 text-gray-500">No work days data available</div>
-                )}
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>Average Daily Sales</CardTitle>
-              </CardHeader>
-              <CardContent>
-                {employeeStats.length > 0 ? (
-                  <ResponsiveContainer width="100%" height={300}>
-                    <BarChart data={employeeStats}>
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="name" />
-                      <YAxis />
-                      <Tooltip />
-                      <Bar dataKey="avgDaily" fill="#f59e0b" name="Avg Daily Sales" />
-                    </BarChart>
-                  </ResponsiveContainer>
-                ) : (
-                  <div className="text-center py-8 text-gray-500">No sales data available</div>
-                )}
-              </CardContent>
-            </Card>
-          </div>
-        </TabsContent>
-
-        {/* Show Analytics Tab */}
-        <TabsContent value="shows" className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>Shows by State</CardTitle>
-              <CardDescription>Show count and daily sales performance by Australian state</CardDescription>
-            </CardHeader>
-            <CardContent>
-              {stateData.length > 0 ? (
-                <ResponsiveContainer width="100%" height={400}>
-                  <BarChart data={stateData}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="state" />
-                    <YAxis yAxisId="left" />
-                    <YAxis yAxisId="right" orientation="right" />
-                    <Tooltip />
-                    <Legend />
-                    <Bar yAxisId="left" dataKey="shows" fill="#3b82f6" name="Number of Shows" />
-                    <Bar yAxisId="right" dataKey="dailySales" fill="#10b981" name="Avg Daily Sales" />
-                  </BarChart>
-                </ResponsiveContainer>
-              ) : (
-                <div className="text-center py-8 text-gray-500">No show data available</div>
-              )}
-            </CardContent>
-          </Card>
-
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <Card>
-              <CardHeader>
-                <CardTitle>2024 vs 2025 Target Comparison</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-4">
-                  <div className="flex justify-between items-center p-4 bg-blue-50 rounded-lg">
-                    <div>
-                      <p className="text-sm text-gray-600">2024 Target</p>
-                      <p className="text-2xl font-bold text-gray-900">{target2024} units</p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-sm text-gray-600">Achieved</p>
-                      <p className="text-2xl font-bold text-green-600">{totalSales2024} units</p>
-                      <p className="text-xs text-gray-500">
-                        {target2024 > 0 ? `${Math.round((totalSales2024 / target2024) * 100)}%` : '0%'}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex justify-between items-center p-4 bg-green-50 rounded-lg">
-                    <div>
-                      <p className="text-sm text-gray-600">2025 Target</p>
-                      <p className="text-2xl font-bold text-gray-900">{target2025} units</p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-sm text-gray-600">Current</p>
-                      <p className="text-2xl font-bold text-blue-600">{totalSales2025} units</p>
-                      <p className="text-xs text-gray-500">
-                        {target2025 > 0 ? `${Math.round((totalSales2025 / target2025) * 100)}%` : '0%'}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>Show Status Overview</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-3">
-                  <div className="flex justify-between items-center p-3 border rounded-lg">
-                    <span className="text-sm font-medium">Completed Shows</span>
-                    <span className="text-lg font-bold text-green-600">{completedShows}</span>
-                  </div>
-                  <div className="flex justify-between items-center p-3 border rounded-lg">
-                    <span className="text-sm font-medium">In Progress</span>
-                    <span className="text-lg font-bold text-blue-600">
-                      {shows.filter(s => s.status === 'In Progress').length}
-                    </span>
-                  </div>
-                  <div className="flex justify-between items-center p-3 border rounded-lg">
-                    <span className="text-sm font-medium">Not Started</span>
-                    <span className="text-lg font-bold text-orange-600">
-                      {shows.filter(s => s.status === 'Not Started').length}
-                    </span>
-                  </div>
-                  <div className="flex justify-between items-center p-3 border rounded-lg">
-                    <span className="text-sm font-medium">Total Registered</span>
-                    <span className="text-lg font-bold text-gray-900">{totalShows}</span>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-        </TabsContent>
-
-        {/* Vehicle Distribution Tab */}
-        <TabsContent value="caravans" className="space-y-6">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <Card>
-              <CardHeader>
-                <CardTitle>Sales by Caravan Type</CardTitle>
-                <CardDescription>Distribution based on chassis number prefix</CardDescription>
-              </CardHeader>
-              <CardContent className="flex justify-center">
-                {vehicleTypeData.length > 0 ? (
-                  <ResponsiveContainer width="100%" height={350}>
-                    <PieChart>
-                      <Pie
-                        data={vehicleTypeData}
-                        cx="50%"
-                        cy="50%"
-                        labelLine={false}
-                        label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
-                        outerRadius={120}
-                        fill="#8884d8"
-                        dataKey="value"
-                      >
-                        {vehicleTypeData.map((entry, index) => (
-                          <Cell key={`cell-${index}`} fill={entry.color} />
-                        ))}
-                      </Pie>
-                      <Tooltip />
-                    </PieChart>
-                  </ResponsiveContainer>
-                ) : (
-                  <div className="text-center py-8 text-gray-500">No vehicle data available</div>
-                )}
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>Caravan Range Comparison</CardTitle>
-                <CardDescription>Units sold per model range</CardDescription>
-              </CardHeader>
-              <CardContent>
-                {vehicleTypeData.length > 0 ? (
-                  <ResponsiveContainer width="100%" height={350}>
-                    <BarChart data={vehicleTypeData}>
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="name" />
-                      <YAxis />
-                      <Tooltip />
-                      <Legend />
-                      <Bar dataKey="value" name="Units">
-                        {vehicleTypeData.map((entry, index) => (
-                          <Cell key={`bar-${entry.name}-${index}`} fill={entry.color} />
-                        ))}
-                      </Bar>
-                    </BarChart>
-                  </ResponsiveContainer>
-                ) : (
-                  <div className="text-center py-8 text-gray-500">No caravan data available</div>
-                )}
-              </CardContent>
-            </Card>
-          </div>
-
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">            
-            <Card>
-              <CardHeader>
-                <CardTitle>Caravan Type Details</CardTitle>
-              </CardHeader>
-              <CardContent>
-                {vehicleTypeData.length > 0 ? (
-                  <div className="space-y-4">
-                    {vehicleTypeData.map((vehicle) => (
-                      <div key={vehicle.name} className="flex items-center justify-between p-3 border rounded-lg">
-                        <div className="flex items-center gap-3">
-                          <div
-                            className="w-4 h-4 rounded-full"
-                            style={{ backgroundColor: vehicle.color }}
-                          />
-                          <span className="font-medium">{vehicle.name}</span>
-                        </div>
-                        <div className="text-right">
-                          <p className="text-lg font-bold">{vehicle.value}</p>
-                          <p className="text-xs text-gray-500">units sold</p>
-                        </div>
+        <Card>
+          <CardHeader>
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <CardTitle>Orders List</CardTitle>
+                <CardDescription>Search and confirm orders across every show</CardDescription>
+              </div>
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
+                <Dialog open={isAddingOrder} onOpenChange={setIsAddingOrder}>
+                  <DialogTrigger asChild>
+                    <Button>
+                      <Plus className="mr-2 h-4 w-4" />
+                      Add Order
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent>
+                    <DialogHeader>
+                      <DialogTitle>Add New Order</DialogTitle>
+                      <DialogDescription>Link a new order to an existing show</DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-4 py-2">
+                      <div className="space-y-2">
+                        <Label>Show *</Label>
+                        <Select
+                          value={newOrder.showId}
+                          onValueChange={(value) => setNewOrder({ ...newOrder, showId: value, salesperson: '' })}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select show" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {shows.map((show) => (
+                              <SelectItem key={show.id} value={show.id}>
+                                {show.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                       </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="text-center py-8 text-gray-500">No caravan data available</div>
-                )}
-              </CardContent>
-            </Card>
 
-            <Card>
-              <CardHeader>
-                <CardTitle>Order Trend</CardTitle>
-                <CardDescription>Monthly order intake across all shows</CardDescription>
-              </CardHeader>
-              <CardContent>
-                {vehicleTrendData.length > 0 ? (
-                  <ResponsiveContainer width="100%" height={300}>
-                    <LineChart data={vehicleTrendData}>
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="month" />
-                      <YAxis />
-                      <Tooltip />
-                      <Line type="monotone" dataKey="value" stroke="#2563eb" strokeWidth={3} name="Orders" />
-                    </LineChart>
-                  </ResponsiveContainer>
-                ) : (
-                  <div className="text-center py-8 text-gray-500">No order trend data available</div>
-                )}
-              </CardContent>
-            </Card>
+                      <div className="space-y-2">
+                        <Label>Chassis Number *</Label>
+                        <Input
+                          value={newOrder.chassisNumber}
+                          onChange={(event) => setNewOrder({ ...newOrder, chassisNumber: event.target.value })}
+                          placeholder="e.g., SRV123456"
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label>Order Type</Label>
+                        <Select
+                          value={newOrder.orderType}
+                          onValueChange={(value) => setNewOrder({ ...newOrder, orderType: value as ShowOrder['orderType'] })}
+                        >
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="New Order">New Order</SelectItem>
+                            <SelectItem value="Transfer from Stock">Transfer from Stock</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label>Salesperson *</Label>
+                        <Popover open={isSalespersonPickerOpen} onOpenChange={setIsSalespersonPickerOpen}>
+                          <PopoverTrigger asChild>
+                            <Button
+                              variant="outline"
+                              role="combobox"
+                              aria-expanded={isSalespersonPickerOpen}
+                              className="w-full justify-between"
+                              disabled={!selectedShow}
+                            >
+                              {newOrder.salesperson || 'Select salesperson'}
+                            </Button>
+                          </PopoverTrigger>
+                          <PopoverContent className="w-[280px] p-0">
+                            <Command>
+                              <CommandInput placeholder="Search team member..." />
+                              <CommandList>
+                                <CommandEmpty>No team member found.</CommandEmpty>
+                                <CommandGroup heading={selectedShow ? 'Team Members' : 'Select a show first'}>
+                                  {showTeamMembers.map((member) => (
+                                    <CommandItem
+                                      key={member.memberId}
+                                      value={member.memberName}
+                                      onSelect={(value) => {
+                                        setNewOrder({ ...newOrder, salesperson: value });
+                                        setIsSalespersonPickerOpen(false);
+                                      }}
+                                    >
+                                      <Check
+                                        className={cn(
+                                          'mr-2 h-4 w-4',
+                                          newOrder.salesperson === member.memberName ? 'opacity-100' : 'opacity-0'
+                                        )}
+                                      />
+                                      <div className="flex flex-col">
+                                        <span>{member.memberName}</span>
+                                        <span className="text-xs text-muted-foreground">{member.role}</span>
+                                      </div>
+                                    </CommandItem>
+                                  ))}
+                                </CommandGroup>
+                              </CommandList>
+                            </Command>
+                          </PopoverContent>
+                        </Popover>
+                        {newOrder.salesperson && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="mt-2"
+                            onClick={() => setNewOrder({ ...newOrder, salesperson: '' })}
+                          >
+                            Clear selection
+                          </Button>
+                        )}
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label>Date *</Label>
+                        <Input
+                          type="date"
+                          value={newOrder.date}
+                          onChange={(event) => setNewOrder({ ...newOrder, date: event.target.value })}
+                        />
+                      </div>
+                    </div>
+                    <DialogFooter>
+                      <Button variant="outline" onClick={() => setIsAddingOrder(false)}>
+                        Cancel
+                      </Button>
+                      <Button onClick={handleAddOrder}>Add Order</Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
+                <div className="flex items-center gap-2">
+                  <Search className="h-4 w-4 text-gray-500" />
+                  <Input
+                    placeholder="Search by chassis, show, salesperson or type"
+                    value={searchTerm}
+                    onChange={(event) => setSearchTerm(event.target.value)}
+                    className="w-full lg:w-72"
+                  />
+                </div>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent>
+          {decoratedOrders.length > 0 ? (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Chassis Number</TableHead>
+                  <TableHead>Show</TableHead>
+                  <TableHead>Type</TableHead>
+                  <TableHead>Salesperson</TableHead>
+                  <TableHead>Date</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Order Status</TableHead>
+                  <TableHead>Handover Dealer</TableHead>
+                  <TableHead>Handover Invoice</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {decoratedOrders.map((order) => {
+                  const rowKey = order.id || `${order.chassisNumber}-${order.date}`;
+                  return (
+                    <TableRow key={rowKey}>
+                      <TableCell className="font-medium">{order.chassisNumber}</TableCell>
+                      <TableCell>{order.showName}</TableCell>
+                      <TableCell>{order.orderType}</TableCell>
+                      <TableCell>{order.salesperson || 'Unassigned'}</TableCell>
+                      <TableCell>{formatDate(order.date)}</TableCell>
+                      <TableCell>
+                        <span className={`rounded-full px-2 py-1 text-xs font-semibold ${statusStyles[order.status]}`}>
+                          {order.status}
+                        </span>
+                      </TableCell>
+                      <TableCell>{order.orderStatus}</TableCell>
+                      <TableCell>{order.handoverDealer}</TableCell>
+                      <TableCell>
+                        {order.handoverInvoice === 'not invoiced' ? (
+                          <span className="text-xs italic text-muted-foreground">not invoiced</span>
+                        ) : (
+                          <span className="inline-flex items-center rounded-full bg-green-100 px-2 py-1 text-xs font-semibold text-green-800">
+                            {order.handoverInvoice}
+                          </span>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          onClick={() => handleConfirmationClick(order)}
+                          disabled={order.status === 'Approved'}
+                        >
+                          Confirmation
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          ) : (
+            <div className="py-10 text-center text-gray-500">No orders found</div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Dialog open={isDialogOpen} onOpenChange={handleDialogOpenChange}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Enter Confirmation Password</DialogTitle>
+            <DialogDescription>Confirming an order requires administrator approval.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-4">
+            <Input
+              type="password"
+              placeholder="Enter password"
+              value={passwordInput}
+              onChange={(event) => setPasswordInput(event.target.value)}
+              onKeyDown={(event) => event.key === 'Enter' && handlePasswordSubmit()}
+            />
+            <p className="text-xs text-gray-500">Password unlocks confirmation actions for 5 minutes.</p>
           </div>
-        </TabsContent>
-      </Tabs>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => handleDialogOpenChange(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handlePasswordSubmit}>
+              <CheckCircle2 className="mr-2 h-4 w-4" />
+              Confirm
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
