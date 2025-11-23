@@ -29,6 +29,7 @@ import { dbGet } from '@/lib/firebase';
 import type { Show, ShowCaravanPick, ShowOrder, TeamMember } from '@/types';
 import { Download, Loader2, Search } from 'lucide-react';
 import { ResponsiveContainer, BarChart, XAxis, YAxis, Tooltip, Bar } from 'recharts';
+import { formatDisplayDate, parseDateString } from '@/lib/date';
 
 const SALES_YEARS = ['2024', '2025', '2026'] as const;
 type SalesYear = (typeof SALES_YEARS)[number];
@@ -38,20 +39,15 @@ const formatCurrency = (value: number) =>
     ? value.toLocaleString('en-AU', { style: 'currency', currency: 'AUD', maximumFractionDigits: 0 })
     : 'N/A';
 
-const formatDate = (value?: string) => {
-  if (!value) return 'N/A';
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return value;
-  return parsed.toLocaleDateString('en-AU', { day: '2-digit', month: 'short', year: 'numeric' });
-};
+const formatDate = (value?: string) => formatDisplayDate(value, 'dd/MM/yyyy');
 
 const calculateDurationDays = (show: Show | null): number => {
   if (!show) return 0;
   if (show.showDuration && show.showDuration > 0) return show.showDuration;
   if (!show.startDate || !show.finishDate) return 0;
-  const start = new Date(show.startDate);
-  const end = new Date(show.finishDate);
-  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return 0;
+  const start = parseDateString(show.startDate);
+  const end = parseDateString(show.finishDate);
+  if (!start || !end) return 0;
   const diff = Math.max(0, end.getTime() - start.getTime());
   return Math.max(1, Math.round(diff / (1000 * 60 * 60 * 24)) + 1);
 };
