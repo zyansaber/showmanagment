@@ -224,6 +224,37 @@ export default function ShowBudgetExpense() {
     [expenseSummary.byCategory]
   );
 
+  const compactSnapshot = useMemo(
+    () =>
+      budget
+        ? (
+            [
+              {
+                label: 'Dealer Operations',
+                budgeted: totalDealerCosts,
+                actual: expenseSummary.byCategory?.['Dealer Operations'] ?? 0,
+              },
+              {
+                label: 'Stand & Venue',
+                budgeted: budget.standCosts,
+                actual: expenseSummary.byCategory?.['Stand & Venue'] ?? 0,
+              },
+              {
+                label: 'Factory',
+                budgeted: totalFactoryCosts,
+                actual: expenseSummary.byCategory?.Factory ?? 0,
+              },
+              {
+                label: 'Other',
+                budgeted: 0,
+                actual: expenseSummary.byCategory?.Other ?? 0,
+              },
+            ] as const
+          )
+        : [],
+    [budget, expenseSummary.byCategory, totalDealerCosts, totalFactoryCosts]
+  );
+
   const handleBudgetChange = (key: keyof ShowBudgetProfile, value: number) => {
     if (!budget) return;
     setBudget({ ...budget, [key]: value });
@@ -363,6 +394,68 @@ export default function ShowBudgetExpense() {
 
       {budget && selectedShow && !loading && (
         <>
+          <div className="lg:flex lg:justify-end">
+            <Card className="w-full shadow-md lg:max-w-xl">
+              <CardHeader className="pb-4">
+                <CardTitle>Executive Expense Snapshot</CardTitle>
+                <CardDescription>
+                  Compact financial-summary view showing category totals, overall spend, and budget variance.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <div>
+                    <p className="text-xs uppercase text-slate-500">Total budget</p>
+                    <p className="text-lg font-semibold text-slate-900">{formatCurrency(totalBudget)}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs uppercase text-slate-500">Total expense</p>
+                    <p className="text-lg font-semibold text-slate-900">{formatCurrency(expenseSummary.total)}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs uppercase text-slate-500">Budget balance</p>
+                    <p className={`text-lg font-semibold ${variance >= 0 ? 'text-emerald-700' : 'text-amber-700'}`}>
+                      {formatCurrency(variance)}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="overflow-hidden rounded-xl border">
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="bg-slate-50/80">
+                        <TableHead className="w-1/2">Cost bucket</TableHead>
+                        <TableHead className="text-right">Budget</TableHead>
+                        <TableHead className="text-right">Actual</TableHead>
+                        <TableHead className="text-right">Variance</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {compactSnapshot.map((row) => (
+                        <TableRow key={row.label}>
+                          <TableCell className="font-medium">{row.label}</TableCell>
+                          <TableCell className="text-right">{formatCurrency(row.budgeted)}</TableCell>
+                          <TableCell className="text-right">{formatCurrency(row.actual)}</TableCell>
+                          <TableCell className="text-right">{formatCurrency(row.budgeted - row.actual)}</TableCell>
+                        </TableRow>
+                      ))}
+                      <TableRow className="bg-slate-50/80 font-semibold">
+                        <TableCell>Totals</TableCell>
+                        <TableCell className="text-right">{formatCurrency(totalBudget)}</TableCell>
+                        <TableCell className="text-right">{formatCurrency(expenseSummary.total)}</TableCell>
+                        <TableCell className="text-right">{formatCurrency(variance)}</TableCell>
+                      </TableRow>
+                    </TableBody>
+                  </Table>
+                </div>
+
+                <p className="text-xs text-slate-500">
+                  Right-aligned for leadership visibility: a concise, ledger-like rollup mirroring professional financial reports.
+                </p>
+              </CardContent>
+            </Card>
+          </div>
+
           <Card className="shadow-sm">
             <CardHeader>
               <CardTitle>Statement of Expenditure Position</CardTitle>
