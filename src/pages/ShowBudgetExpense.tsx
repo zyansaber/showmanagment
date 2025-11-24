@@ -127,6 +127,13 @@ export default function ShowBudgetExpense() {
   const [error, setError] = useState<string | null>(null);
   const [isPickerOpen, setIsPickerOpen] = useState(false);
 
+  const [quickUpload, setQuickUpload] = useState({
+    showId: '',
+    standCosts: 0,
+    dealerCostsTransport: 0,
+    factoryTravelCosts: 0,
+  });
+
   const [newExpense, setNewExpense] = useState<Partial<BudgetExpenseItem>>({
     category: 'Dealer Operations',
     description: '',
@@ -294,6 +301,50 @@ export default function ShowBudgetExpense() {
     }
   };
 
+  const handleQuickUpload = async () => {
+    const trimmedShowId = quickUpload.showId.trim();
+    if (!trimmedShowId) {
+      toast.error('Enter a valid show ID to upload costs.');
+      return;
+    }
+
+    const baseShow = shows.find((item) => item.id === trimmedShowId) ?? null;
+    const defaultSalesTarget =
+      toSafeNumber(baseShow?.target2025) ||
+      toSafeNumber(baseShow?.target2024) ||
+      toSafeNumber(baseShow?.target2026) ||
+      0;
+    const durationDays = baseShow ? calculateDurationDays(baseShow) : 0;
+    const existingBudget = existingBudgets[trimmedShowId];
+
+    const payload: ShowBudgetProfile = {
+      showId: trimmedShowId,
+      durationDays: durationDays || existingBudget?.durationDays || 0,
+      salesTarget: defaultSalesTarget || existingBudget?.salesTarget || 0,
+      standCosts: toSafeNumber(quickUpload.standCosts),
+      dealerCostsTransport: toSafeNumber(quickUpload.dealerCostsTransport),
+      factoryTravelCosts: toSafeNumber(quickUpload.factoryTravelCosts),
+      expenses: existingBudget?.expenses ?? [],
+      lastUpdated: new Date().toISOString(),
+    };
+
+    try {
+      setSaving(true);
+      await dbSet(`showBudgets/${trimmedShowId}`, payload as unknown as Record<string, unknown>);
+      setExistingBudgets((prev) => ({ ...prev, [trimmedShowId]: payload }));
+      if (selectedShowId === trimmedShowId) {
+        setBudget(payload);
+      }
+      toast.success('Quick costs uploaded for this show.');
+      setQuickUpload({ showId: trimmedShowId, standCosts: 0, dealerCostsTransport: 0, factoryTravelCosts: 0 });
+    } catch (err) {
+      console.error('Failed to upload quick costs', err);
+      toast.error('Upload failed. Please retry.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const selectedShow = useMemo(
     () => shows.find((item) => item.id === selectedShowId) ?? null,
     [selectedShowId, shows]
@@ -376,6 +427,73 @@ export default function ShowBudgetExpense() {
               </div>
             </div>
           )}
+        </CardContent>
+      </Card>
+
+      <Card className="shadow-sm">
+        <CardHeader>
+          <CardTitle>Quick cost upload by Show ID</CardTitle>
+          <CardDescription>
+            Temporary entry pad to push Stand Costs, Dealer Costs + Transport, and Factory Travel Costs directly to the
+            database when you only have the show ID.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+            <div className="space-y-2">
+              <Label htmlFor="quick-show-id">Show ID</Label>
+              <Input
+                id="quick-show-id"
+                placeholder="Enter show ID"
+                value={quickUpload.showId}
+                onChange={(e) => setQuickUpload((prev) => ({ ...prev, showId: e.target.value }))}
+              />
+              <p className="text-xs text-slate-500">Matches the ID used in the shows list.</p>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="quick-stand">Stand Costs</Label>
+              <Input
+                id="quick-stand"
+                type="number"
+                value={quickUpload.standCosts}
+                onChange={(e) => setQuickUpload((prev) => ({ ...prev, standCosts: toSafeNumber(e.target.value) }))}
+                placeholder="e.g., 15000"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="quick-dealer">Dealer Costs + Transport</Label>
+              <Input
+                id="quick-dealer"
+                type="number"
+                value={quickUpload.dealerCostsTransport}
+                onChange={(e) =>
+                  setQuickUpload((prev) => ({ ...prev, dealerCostsTransport: toSafeNumber(e.target.value) }))
+                }
+                placeholder="e.g., 8000"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="quick-factory">Factory Travel Costs</Label>
+              <Input
+                id="quick-factory"
+                type="number"
+                value={quickUpload.factoryTravelCosts}
+                onChange={(e) =>
+                  setQuickUpload((prev) => ({ ...prev, factoryTravelCosts: toSafeNumber(e.target.value) }))
+                }
+                placeholder="e.g., 6000"
+              />
+            </div>
+          </div>
+          <div className="flex flex-col gap-2 rounded-lg bg-slate-50/80 p-4 text-sm text-slate-700 md:flex-row md:items-center md:justify-between">
+            <p className="max-w-3xl">
+              Saves costs straight to <code>showBudgets</code> with any existing expenses preserved. If the show exists, duration
+              and targets will be back-filled automatically next time you load it.
+            </p>
+            <Button onClick={handleQuickUpload} disabled={saving} className="w-full gap-2 md:w-auto">
+              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} Upload costs
+            </Button>
+          </div>
         </CardContent>
       </Card>
 
