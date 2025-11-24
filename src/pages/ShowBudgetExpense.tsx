@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Card,
   CardContent,
@@ -124,6 +124,7 @@ export default function ShowBudgetExpense() {
   const [existingBudgets, setExistingBudgets] = useState<Record<string, ShowBudgetProfile>>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [importing, setImporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isPickerOpen, setIsPickerOpen] = useState(false);
 
@@ -141,6 +142,8 @@ export default function ShowBudgetExpense() {
     date: '',
     notes: '',
   });
+
+  const excelInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     const loadData = async () => {
@@ -307,26 +310,12 @@ export default function ShowBudgetExpense() {
       toast.error('Enter a valid show ID to upload costs.');
       return;
     }
-
-    const baseShow = shows.find((item) => item.id === trimmedShowId) ?? null;
-    const defaultSalesTarget =
-      toSafeNumber(baseShow?.target2025) ||
-      toSafeNumber(baseShow?.target2024) ||
-      toSafeNumber(baseShow?.target2026) ||
-      0;
-    const durationDays = baseShow ? calculateDurationDays(baseShow) : 0;
-    const existingBudget = existingBudgets[trimmedShowId];
-
-    const payload: ShowBudgetProfile = {
-      showId: trimmedShowId,
-      durationDays: durationDays || existingBudget?.durationDays || 0,
-      salesTarget: defaultSalesTarget || existingBudget?.salesTarget || 0,
-      standCosts: toSafeNumber(quickUpload.standCosts),
-      dealerCostsTransport: toSafeNumber(quickUpload.dealerCostsTransport),
-      factoryTravelCosts: toSafeNumber(quickUpload.factoryTravelCosts),
-      expenses: existingBudget?.expenses ?? [],
-      lastUpdated: new Date().toISOString(),
-    };
+    const payload = buildQuickPayload(
+      trimmedShowId,
+      quickUpload.standCosts,
+      quickUpload.dealerCostsTransport,
+      quickUpload.factoryTravelCosts
+    );
 
     try {
       setSaving(true);
@@ -344,6 +333,110 @@ export default function ShowBudgetExpense() {
       setSaving(false);
     }
   };
+
+  const buildQuickPayload = (
+    showId: string,
+    standCosts: number,
+    dealerCostsTransport: number,
+    factoryTravelCosts: number
+  ): ShowBudgetProfile => {
+    const trimmedShowId = showId.trim();
+    const baseShow = shows.find((item) => item.id === trimmedShowId) ?? null;
+    const defaultSalesTarget =
+      toSafeNumber(baseShow?.target2025) ||
+      toSafeNumber(baseShow?.target2024) ||
+      toSafeNumber(baseShow?.target2026) ||
+      0;
+    const durationDays = baseShow ? calculateDurationDays(baseShow) : 0;
+    const existingBudget = existingBudgets[trimmedShowId];
+
+    return {
+      showId: trimmedShowId,
+      durationDays: durationDays || existingBudget?.durationDays || 0,
+      salesTarget: defaultSalesTarget || existingBudget?.salesTarget || 0,
+      standCosts: toSafeNumber(standCosts),
+      dealerCostsTransport: toSafeNumber(dealerCostsTransport),
+      factoryTravelCosts: toSafeNumber(factoryTravelCosts),
+      expenses: existingBudget?.expenses ?? [],
+      lastUpdated: new Date().toISOString(),
+    };
+  };
+
+  const normaliseHeaders = (header: string) => header.replace(/"/g, '').trim().toLowerCase();
+
+  const handleExcelUpload = async (file: File) => {
+    try {
+      setImporting(true);
+      const text = await file.text();
+      const cleanedLines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+
+      if (!cleanedLines.length) {
+        toast.error('Upload appears to be empty. Please check the file.');
+        return;
+      }
+
+      const delimiter = cleanedLines[0].includes('\t') ? '\t' : ',';
+      const headers = cleanedLines[0].split(delimiter).map(normaliseHeaders);
+      const showIdIdx = headers.findIndex((item) => ['show id', 'showid', 'id'].includes(item));
+      const standIdx = headers.findIndex((item) => item.includes('stand'));
+      const dealerIdx = headers.findIndex((item) => item.includes('dealer'));
+      const factoryIdx = headers.findIndex((item) => item.includes('factory'));
+
+      if (showIdIdx === -1) {
+        toast.error('Could not find a "Show ID" column in the uploaded sheet.');
+        return;
+      }
+
+      let updatedCount = 0;
+      const updates: Record<string, ShowBudgetProfile> = {};
+
+      cleanedLines.slice(1).forEach((line) => {
+        const cells = line
+          .split(delimiter)
+          .map((cell) => cell.replace(/^"|"$/g, '').trim())
+          .filter((cell, index) => index <= Math.max(showIdIdx, standIdx, dealerIdx, factoryIdx));
+
+        const showId = cells[showIdIdx];
+        if (!showId) return;
+
+        const payload = buildQuickPayload(
+          showId,
+          standIdx >= 0 ? toSafeNumber(cells[standIdx]) : 0,
+          dealerIdx >= 0 ? toSafeNumber(cells[dealerIdx]) : 0,
+          factoryIdx >= 0 ? toSafeNumber(cells[factoryIdx]) : 0
+        );
+
+        updates[payload.showId] = payload;
+        updatedCount += 1;
+      });
+
+      if (!updatedCount) {
+        toast.error('No valid rows were found. Please ensure Show ID and costs are filled.');
+        return;
+      }
+
+      setSaving(true);
+      for (const payload of Object.values(updates)) {
+        // eslint-disable-next-line no-await-in-loop
+        await dbSet(`showBudgets/${payload.showId}`, payload as unknown as Record<string, unknown>);
+      }
+
+      setExistingBudgets((prev) => ({ ...prev, ...updates }));
+      if (updates[selectedShowId]) {
+        setBudget(updates[selectedShowId]);
+      }
+
+      toast.success(`Uploaded ${updatedCount} budget rows from the Excel sheet.`);
+    } catch (err) {
+      console.error('Failed to import Excel costs', err);
+      toast.error('Import failed. Please use the template headers and try again.');
+    } finally {
+      setSaving(false);
+      setImporting(false);
+    }
+  };
+
+  const triggerExcelInput = () => excelInputRef.current?.click();
 
   const selectedShow = useMemo(
     () => shows.find((item) => item.id === selectedShowId) ?? null,
@@ -435,7 +528,8 @@ export default function ShowBudgetExpense() {
           <CardTitle>Quick cost upload by Show ID</CardTitle>
           <CardDescription>
             Temporary entry pad to push Stand Costs, Dealer Costs + Transport, and Factory Travel Costs directly to the
-            database when you only have the show ID.
+            database when you only have the show ID. Upload an Excel/CSV export with headers: Show ID, Stand Costs, Dealer
+            Costs + Transport, Factory Travel Costs.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -485,14 +579,48 @@ export default function ShowBudgetExpense() {
               />
             </div>
           </div>
-          <div className="flex flex-col gap-2 rounded-lg bg-slate-50/80 p-4 text-sm text-slate-700 md:flex-row md:items-center md:justify-between">
-            <p className="max-w-3xl">
-              Saves costs straight to <code>showBudgets</code> with any existing expenses preserved. If the show exists, duration
-              and targets will be back-filled automatically next time you load it.
-            </p>
-            <Button onClick={handleQuickUpload} disabled={saving} className="w-full gap-2 md:w-auto">
-              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} Upload costs
-            </Button>
+          <div className="flex flex-col gap-4 rounded-lg bg-slate-50/80 p-4 text-sm text-slate-700">
+            <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+              <p className="max-w-3xl">
+                Saves costs straight to <code>showBudgets</code> with any existing expenses preserved. If the show exists,
+                duration and targets will be back-filled automatically next time you load it.
+              </p>
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <Button onClick={handleQuickUpload} disabled={saving || importing} className="w-full gap-2 sm:w-auto">
+                  {saving && !importing ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Save className="h-4 w-4" />
+                  )}
+                  Upload typed costs
+                </Button>
+                <Button variant="outline" onClick={triggerExcelInput} disabled={saving || importing} className="gap-2">
+                  {importing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                  Upload Excel sheet
+                </Button>
+                <input
+                  ref={excelInputRef}
+                  type="file"
+                  accept=".csv, application/vnd.ms-excel, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                  className="hidden"
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    if (file) {
+                      handleExcelUpload(file);
+                      event.target.value = '';
+                    }
+                  }}
+                />
+              </div>
+            </div>
+            <div className="rounded-md border border-dashed border-slate-200 bg-white/70 p-3 text-xs leading-relaxed text-slate-600">
+              <p className="font-semibold text-slate-800">Excel template</p>
+              <p>
+                Include columns: <strong>Show ID</strong>, <strong>Stand Costs</strong>, <strong>Dealer Costs + Transport</strong>,
+                <strong>Factory Travel Costs</strong>. Save or export from Excel as CSV if needed; headers are matched
+                case-insensitively.
+              </p>
+            </div>
           </div>
         </CardContent>
       </Card>
