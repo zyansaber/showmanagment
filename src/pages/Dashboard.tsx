@@ -123,20 +123,50 @@ export default function Dashboard() {
   }));
 
   // Calculate overall statistics (skip N/A values)
-  const totalShows = shows.length;
-  const completedShows = shows.filter(s => s.status === 'Completed').length;
+  const getYear = (date: string) => {
+    const parsed = new Date(date);
+    return Number.isNaN(parsed.getTime()) ? null : parsed.getFullYear();
+  };
+
+  const showsByYear = shows.reduce((acc, show) => {
+    const year = getYear(show.startDate);
+    if (!year) return acc;
+    if (!acc[year]) {
+      acc[year] = [];
+    }
+    acc[year].push(show);
+    return acc;
+  }, {} as Record<number, Show[]>);
+
+  const shows2026 = showsByYear[2026] || [];
+  const shows2025 = showsByYear[2025] || [];
+
+  const totalShows = shows2026.length;
+  const completedShows = shows2026.filter(s => s.status === 'Completed').length;
+
+  const showYearById = shows.reduce((acc, show) => {
+    const year = getYear(show.startDate);
+    if (year) {
+      acc[show.id] = year;
+    }
+    return acc;
+  }, {} as Record<string, number>);
+
+  const totalSales2026 = orders.reduce((sum, order) => {
+    const year = showYearById[order.showId];
+    return year === 2026 ? sum + 1 : sum;
+  }, 0);
 
   // Only sum non-zero (non-N/A) values
-  const totalSales2026 = shows.reduce((sum, s) => sum + (s.sales2026 > 0 ? s.sales2026 : 0), 0);
-  const target2026 = shows.reduce((sum, s) => sum + (s.target2026 > 0 ? s.target2026 : 0), 0);
+  const target2026 = shows2026.reduce((sum, s) => sum + (s.target2026 > 0 ? s.target2026 : 0), 0);
   const totalSales2025 = shows.reduce((sum, s) => sum + (s.sales2025 > 0 ? s.sales2025 : 0), 0);
-  const target2025 = shows.reduce((sum, s) => sum + (s.target2025 > 0 ? s.target2025 : 0), 0);
+  const target2025 = shows2025.reduce((sum, s) => sum + (s.target2025 > 0 ? s.target2025 : 0), 0);
   const totalSales2024 = shows.reduce((sum, s) => sum + (s.sales2024 > 0 ? s.sales2024 : 0), 0);
   const target2024 = shows.reduce((sum, s) => sum + (s.target2024 > 0 ? s.target2024 : 0), 0);
 
-  const completedShowIds = new Set(shows.filter(show => show.status === 'Completed').map(show => show.id));
+  const completedShowIds = new Set(shows2026.filter(show => show.status === 'Completed').map(show => show.id));
   const completedShowOrders = orders.filter(order => completedShowIds.has(order.showId));
-  const completedShowTarget2026 = shows.reduce(
+  const completedShowTarget2026 = shows2026.reduce(
     (sum, show) => sum + (show.status === 'Completed' && show.target2026 > 0 ? show.target2026 : 0),
     0
   );
@@ -284,7 +314,7 @@ export default function Dashboard() {
 
         {/* Show Analytics Tab */}
         <TabsContent value="shows" className="space-y-6">
-           <Card>
+          <Card>
             <CardHeader>
               <CardTitle>Shows by State</CardTitle>
               <CardDescription>Show count and daily sales performance by Australian state</CardDescription>
