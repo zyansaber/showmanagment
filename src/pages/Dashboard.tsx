@@ -123,13 +123,27 @@ export default function Dashboard() {
   }));
 
   // Calculate overall statistics (skip N/A values)
-  const getYear = (date: string) => {
+  const getYear = (date?: string) => {
+    if (!date) return null;
     const parsed = new Date(date);
     return Number.isNaN(parsed.getTime()) ? null : parsed.getFullYear();
   };
 
+  const getShowYear = (show: Show) => {
+    const startYear = getYear(show.startDate);
+    if (startYear) return startYear;
+
+    const finishYear = getYear(show.finishDate);
+    if (finishYear) return finishYear;
+
+    if (show.target2026 > 0) return 2026;
+    if (show.target2025 > 0) return 2025;
+    if (show.target2024 > 0) return 2024;
+    return null;
+  };
+
   const showsByYear = shows.reduce((acc, show) => {
-    const year = getYear(show.startDate);
+    const year = getShowYear(show);
     if (!year) return acc;
     if (!acc[year]) {
       acc[year] = [];
@@ -141,11 +155,12 @@ export default function Dashboard() {
   const shows2026 = showsByYear[2026] || [];
   const shows2025 = showsByYear[2025] || [];
 
-  const totalShows = shows2026.length;
+  const totalShows2026 = shows2026.length;
+  const totalShowsAll = shows.length;
   const completedShows = shows2026.filter(s => s.status === 'Completed').length;
 
   const showYearById = shows.reduce((acc, show) => {
-    const year = getYear(show.startDate);
+    const year = getShowYear(show);
     if (year) {
       acc[show.id] = year;
     }
@@ -178,7 +193,7 @@ export default function Dashboard() {
   const stats = [
     {
       title: 'Total Shows 2026',
-      value: totalShows.toString(),
+      value: totalShows2026.toString(),
       description: `${completedShows} completed`,
       icon: Calendar,
       color: 'text-blue-600',
