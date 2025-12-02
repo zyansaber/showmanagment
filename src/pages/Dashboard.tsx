@@ -16,7 +16,7 @@ import {
   LineChart,
   Line,
 } from 'recharts';
-import { Users, TrendingUp, Calendar, Target } from 'lucide-react';
+import { TrendingUp, Calendar, Target } from 'lucide-react';
 import { dbGet } from '@/lib/firebase';
 import type { Show, TeamMember, ShowOrder } from '@/types';
 import { format as formatDate } from 'date-fns';
@@ -125,41 +125,54 @@ export default function Dashboard() {
   // Calculate overall statistics (skip N/A values)
   const totalShows = shows.length;
   const completedShows = shows.filter(s => s.status === 'Completed').length;
-  
+
   // Only sum non-zero (non-N/A) values
+  const totalSales2026 = shows.reduce((sum, s) => sum + (s.sales2026 > 0 ? s.sales2026 : 0), 0);
+  const target2026 = shows.reduce((sum, s) => sum + (s.target2026 > 0 ? s.target2026 : 0), 0);
   const totalSales2025 = shows.reduce((sum, s) => sum + (s.sales2025 > 0 ? s.sales2025 : 0), 0);
   const target2025 = shows.reduce((sum, s) => sum + (s.target2025 > 0 ? s.target2025 : 0), 0);
   const totalSales2024 = shows.reduce((sum, s) => sum + (s.sales2024 > 0 ? s.sales2024 : 0), 0);
   const target2024 = shows.reduce((sum, s) => sum + (s.target2024 > 0 ? s.target2024 : 0), 0);
 
+  const completedShowIds = new Set(shows.filter(show => show.status === 'Completed').map(show => show.id));
+  const completedShowOrders = orders.filter(order => completedShowIds.has(order.showId));
+  const completedShowTarget2026 = shows.reduce(
+    (sum, show) => sum + (show.status === 'Completed' && show.target2026 > 0 ? show.target2026 : 0),
+    0
+  );
+  const completedAchievement = completedShowTarget2026 > 0
+    ? Math.round((completedShowOrders.length / completedShowTarget2026) * 100)
+    : 0;
+  const overallAchievement = target2026 > 0 ? Math.round((totalSales2026 / target2026) * 100) : 0;
+
   const stats = [
     {
-      title: 'Total Shows 2025',
+      title: 'Total Shows 2026',
       value: totalShows.toString(),
       description: `${completedShows} completed`,
       icon: Calendar,
       color: 'text-blue-600',
     },
     {
-      title: 'Total Sales 2025',
-      value: totalSales2025.toString(),
-      description: `Target: ${target2025}`,
+      title: 'Total Target 2026',
+      value: target2026.toString(),
+      description: `Completed target: ${completedShowTarget2026 || 0}`,
       icon: TrendingUp,
       color: 'text-green-600',
     },
     {
-      title: 'Active Team Members',
-      value: teamMembers.filter(m => m.activeFlag === 1).length.toString(),
-      description: `${shows.filter(s => s.status === 'In Progress').length} shows in progress`,
-      icon: Users,
-      color: 'text-purple-600',
-    },
-    {
-      title: 'Target Achievement',
-      value: target2025 > 0 ? `${Math.round((totalSales2025 / target2025) * 100)}%` : '0%',
-      description: `2025 target: ${target2025} units`,
+      title: 'Total Sales 2026',
+      value: totalSales2026.toString(),
+      description: `Achievement: ${overallAchievement}% of target`,
       icon: Target,
       color: 'text-orange-600',
+    },
+    {
+      title: 'Total Sales 2025',
+      value: totalSales2025.toString(),
+      description: `Target: ${target2025}`,
+      icon: TrendingUp,
+      color: 'text-purple-600',
     },
   ];
 
@@ -271,7 +284,7 @@ export default function Dashboard() {
 
         {/* Show Analytics Tab */}
         <TabsContent value="shows" className="space-y-6">
-          <Card>
+           <Card>
             <CardHeader>
               <CardTitle>Shows by State</CardTitle>
               <CardDescription>Show count and daily sales performance by Australian state</CardDescription>
@@ -293,6 +306,34 @@ export default function Dashboard() {
               ) : (
                 <div className="text-center py-8 text-gray-500">No show data available</div>
               )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Target Achievement (YTD)</CardTitle>
+              <CardDescription>
+                Progress based on completed shows in 2026 compared to their targets and the overall annual target
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="p-4 border rounded-lg">
+                  <p className="text-sm text-gray-600">Completed Shows</p>
+                  <p className="text-2xl font-bold text-gray-900">{completedShows}</p>
+                  <p className="text-xs text-gray-500">Orders received: {completedShowOrders.length}</p>
+                </div>
+                <div className="p-4 border rounded-lg">
+                  <p className="text-sm text-gray-600">Completed Show Target</p>
+                  <p className="text-2xl font-bold text-blue-600">{completedShowTarget2026}</p>
+                  <p className="text-xs text-gray-500">Achievement: {completedAchievement}%</p>
+                </div>
+                <div className="p-4 border rounded-lg">
+                  <p className="text-sm text-gray-600">Overall 2026 Target</p>
+                  <p className="text-2xl font-bold text-green-600">{target2026}</p>
+                  <p className="text-xs text-gray-500">Current achievement: {overallAchievement}%</p>
+                </div>
+              </div>
             </CardContent>
           </Card>
 
