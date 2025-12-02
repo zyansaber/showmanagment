@@ -156,7 +156,7 @@ export default function Dashboard() {
   const shows2025 = showsByYear[2025] || [];
 
   const totalShows2026 = shows2026.length;
-  const totalShowsAll = shows.length;
+  const totalShows = shows.length;
   const completedShows = shows2026.filter(s => s.status === 'Completed').length;
 
   const showYearById = shows.reduce((acc, show) => {
@@ -443,7 +443,7 @@ export default function Dashboard() {
                   </div>
                   <div className="flex justify-between items-center p-3 border rounded-lg">
                     <span className="text-sm font-medium">Total Registered</span>
-                    <span className="text-lg font-bold text-gray-900">{totalShows}</span>
+                      <span className="text-lg font-bold text-gray-900">{totalShows}</span>
                   </div>
                 </div>
               </CardContent>
