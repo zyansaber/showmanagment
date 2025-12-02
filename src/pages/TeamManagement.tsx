@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -7,14 +7,16 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import { UserPlus, Edit, Trash2, Lock } from 'lucide-react';
+import { UserPlus, Edit, Lock } from 'lucide-react';
 import { dbGet, dbSet, dbUpdate } from '@/lib/firebase';
-import type { TeamMember, UserRole } from '@/types';
+import type { TeamMember, UserRole, Show, ShowOrder } from '@/types';
 
 export default function TeamManagement() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [password, setPassword] = useState('');
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
+  const [shows, setShows] = useState<Show[]>([]);
+  const [orders, setOrders] = useState<ShowOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [isAddingMember, setIsAddingMember] = useState(false);
 
@@ -27,14 +29,21 @@ export default function TeamManagement() {
 
   useEffect(() => {
     if (isAuthenticated) {
-      loadTeamMembers();
+      loadTeamData();
     }
   }, [isAuthenticated]);
 
-  const loadTeamMembers = async () => {
+  const loadTeamData = async () => {
     try {
-      const membersData = await dbGet('teamMembers');
+      const [membersData, showsData, ordersData] = await Promise.all([
+        dbGet('teamMembers'),
+        dbGet('shows'),
+        dbGet('showOrders')
+      ]);
+
       setTeamMembers(membersData ? Object.values(membersData) : []);
+      setShows(showsData ? Object.values(showsData) : []);
+      setOrders(ordersData ? Object.values(ordersData) : []);
     } catch (error) {
       console.error('Error loading team members:', error);
     } finally {
@@ -101,6 +110,25 @@ export default function TeamManagement() {
         return 'bg-gray-500';
     }
   };
+
+  const orderCountMap = useMemo(() => {
+    const counts: Record<string, number> = {};
+    orders.forEach(order => {
+      if (!order.salesperson) return;
+      counts[order.salesperson] = (counts[order.salesperson] || 0) + 1;
+    });
+    return counts;
+  }, [orders]);
+
+  const showParticipationMap = useMemo(() => {
+    const counts: Record<string, number> = {};
+    shows.forEach(show => {
+      show.teamMembers?.forEach(memberName => {
+        counts[memberName] = (counts[memberName] || 0) + 1;
+      });
+    });
+    return counts;
+  }, [shows]);
 
   if (!isAuthenticated) {
     return (
@@ -229,7 +257,7 @@ export default function TeamManagement() {
                   <TableHead>Email</TableHead>
                   <TableHead>Role</TableHead>
                   <TableHead>Total Sales</TableHead>
-                  <TableHead>Work Days</TableHead>
+                  <TableHead>Shows Participated</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Actions</TableHead>
                 </TableRow>
@@ -243,8 +271,8 @@ export default function TeamManagement() {
                     <TableCell>
                       <Badge className={getRoleBadgeColor(member.role)}>{member.role}</Badge>
                     </TableCell>
-                    <TableCell>{member.totalSales || 0}</TableCell>
-                    <TableCell>{member.totalWorkDays || 0}</TableCell>
+                    <TableCell>{orderCountMap[member.memberName] || 0}</TableCell>
+                    <TableCell>{showParticipationMap[member.memberName] || 0}</TableCell>
                     <TableCell>
                       <Badge variant={member.activeFlag === 1 ? 'default' : 'secondary'}>
                         {member.activeFlag === 1 ? 'Active' : 'Inactive'}
