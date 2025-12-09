@@ -148,6 +148,7 @@ export default function ShowDetail() {
 
   const [newOrder, setNewOrder] = useState<Partial<ShowOrder>>({
     chassisNumber: '',
+    customerName: '',
     model: '',
     orderType: 'New Order',
     salesperson: '',
@@ -502,7 +503,7 @@ export default function ShowDetail() {
   const handleAddOrder = async () => {
     const requiresHandoverDealer = orders.length === 0 && !show?.handoverDealer;
     try {
-      if (!newOrder.salesperson) {
+      if (!newOrder.salesperson || !newOrder.customerName?.trim()) {
         toast.error('Please fill in all required fields');
         return;
       }
@@ -525,6 +526,7 @@ export default function ShowDetail() {
         id: `ORD-${Date.now()}`,
         showId: id || '',
         chassisNumber: newOrder.chassisNumber || '',
+        customerName: newOrder.customerName?.trim() || '',
         model: selectedModel || '',
         orderType: newOrder.orderType as 'New Order' | 'Transfer from Stock',
         salesperson: newOrder.salesperson || '',
@@ -546,6 +548,7 @@ export default function ShowDetail() {
       setIsAddingOrder(false);
       setNewOrder({
         chassisNumber: '',
+        customerName: '',
         model: '',
         orderType: 'New Order',
         salesperson: '',
@@ -2099,6 +2102,16 @@ export default function ShowDetail() {
                       )}
                     </div>
                     <div>
+                      <Label>Customer Name *</Label>
+                      <Input
+                        placeholder="Enter customer name"
+                        value={newOrder.customerName || ''}
+                        onChange={(event) =>
+                          setNewOrder({ ...newOrder, customerName: event.target.value })
+                        }
+                      />
+                    </div>
+                    <div>
                       <Label>Order Type</Label>
                       <Select
                           value={newOrder.orderType}
@@ -2194,6 +2207,7 @@ export default function ShowDetail() {
                     <TableRow>
                       <TableHead>Order ID</TableHead>
                       <TableHead>Model</TableHead>
+                      <TableHead>Customer</TableHead>
                       <TableHead>Type</TableHead>
                       <TableHead>Salesperson</TableHead>
                       <TableHead>Date</TableHead>
@@ -2207,6 +2221,7 @@ export default function ShowDetail() {
                       <TableRow key={order.id}>
                         <TableCell className="font-medium">{order.id}</TableCell>
                         <TableCell>{order.model || 'Not set'}</TableCell>
+                        <TableCell>{order.customerName || 'Not set'}</TableCell>
                         <TableCell>{order.orderType}</TableCell>
                         <TableCell>{order.salesperson}</TableCell>
                         <TableCell>{order.date}</TableCell>
