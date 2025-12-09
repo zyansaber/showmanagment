@@ -20,9 +20,7 @@ const CONFIRMATION_DURATION_MS = 5 * 60 * 1000; // 5 minutes
 
 interface DecoratedOrder extends ShowOrder {
   showName: string;
-  orderStatus: string;
   handoverDealer: string;
-  handoverInvoice: string;
 }
 
 
@@ -49,8 +47,7 @@ export default function OrdersAndSales() {
   const [orders, setOrders] = useState<ShowOrder[]>([]);
   const [shows, setShows] = useState<Show[]>([]);
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
-  const [scheduleOrders, setScheduleOrders] = useState<Record<string, ScheduleOrder>>({});
-  const [invoiceByChassis, setInvoiceByChassis] = useState<Record<string, string>>({});
+  const [dealerOptions, setDealerOptions] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
@@ -60,6 +57,7 @@ export default function OrdersAndSales() {
   const [authExpiry, setAuthExpiry] = useState<number | null>(null);
   const [isAddingOrder, setIsAddingOrder] = useState(false);
   const [isSalespersonPickerOpen, setIsSalespersonPickerOpen] = useState(false);
+  const [selectedHandoverDealer, setSelectedHandoverDealer] = useState('');
   const [newOrder, setNewOrder] = useState<Partial<ShowOrder>>({
     chassisNumber: '',
     orderType: 'New Order',
@@ -70,29 +68,6 @@ export default function OrdersAndSales() {
   });
 
   const requiresPassword = !authExpiry || authExpiry <= Date.now();
-
-  const normaliseChassis = (value?: string | null) => value?.trim().toUpperCase() || '';
-  const extractInvoiceDate = (invoiceEntry: unknown): string | null => {
-    if (typeof invoiceEntry === 'string') return invoiceEntry;
-    if (!invoiceEntry || typeof invoiceEntry !== 'object') return null;
-
-    const entryObj = invoiceEntry as Record<string, unknown>;
-    if (typeof entryObj.invoiceDate === 'string') return entryObj.invoiceDate;
-
-    const source = entryObj._source;
-    if (source && typeof source === 'object' && typeof (source as Record<string, unknown>).invoiceDate === 'string') {
-      return (source as Record<string, unknown>).invoiceDate;
-    }
-
-    const dateKeys = Object.keys(entryObj).filter(
-      (key) => !Number.isNaN(new Date(key).getTime()) && Number.isFinite(new Date(key).getTime())
-    );
-    if (dateKeys.length === 0) return null;
-
-    return dateKeys
-      .slice()
-      .sort((a, b) => new Date(b).getTime() - new Date(a).getTime())[0];
-  };
 
 
   useEffect(() => {
@@ -109,48 +84,33 @@ export default function OrdersAndSales() {
   useEffect(() => {
     const loadData = async () => {
       try {
-        const [ordersData, showsData, teamData, scheduleData, invoicesData] = await Promise.all([
+        const [ordersData, showsData, teamData, scheduleData] = await Promise.all([
           dbGet('showOrders'),
           dbGet('shows'),
           dbGet('teamMembers'),
           schedulingDbGet('schedule'),
-          schedulingDbGet('yardnewvaninvoice'),
         ]);
 
         setOrders(ordersData ? Object.values(ordersData) : []);
-        setShows(showsData ? Object.values(showsData) : []);
+        const showList = showsData ? Object.values(showsData) : [];
+        setShows(showList);
         setTeamMembers(teamData ? Object.values(teamData) : []);
+
         if (scheduleData) {
-          const map = Object.values(scheduleData as Record<string, ScheduleOrder>).reduce(
-            (acc, order) => {
-              const key = normaliseChassis(order.Chassis);
-              if (key) {
-                acc[key] = order;
-              }
-              return acc;
-            },
-            {} as Record<string, ScheduleOrder>
-          );
-          setScheduleOrders(map);
+          const dealers = Array.from(
+            new Set(
+              Object.values(scheduleData as Record<string, ScheduleOrder>)
+                .map((order) => order.Dealer?.trim())
+                .filter((name): name is string => Boolean(name))
+            )
+          ).sort((a, b) => a.localeCompare(b));
+          setDealerOptions(dealers);
         }
 
-        if (invoicesData) {
-          const invoiceMap: Record<string, string> = {};
-          Object.values(invoicesData as Record<string, unknown>).forEach((warehouse) => {
-            if (!warehouse || typeof warehouse !== 'object') return;
-
-            Object.entries(warehouse as Record<string, unknown>).forEach(([chassis, invoiceEntry]) => {
-              const chassisKey = normaliseChassis(chassis);
-              if (!chassisKey) return;
-              const invoiceDate = extractInvoiceDate(invoiceEntry);
-              if (invoiceDate) {
-                invoiceMap[chassisKey] = invoiceDate;
-              }
-            });
-          });
-
-          setInvoiceByChassis(invoiceMap);
+        if (!scheduleData) {
+          setDealerOptions([]);
         }
+
         setError(null);
       } catch (err) {
         console.error('Error loading orders:', err);
@@ -163,14 +123,16 @@ export default function OrdersAndSales() {
     loadData();
   }, []);
 
-  const showLookup = useMemo(() =>
-    shows.reduce((acc, show) => {
-      if (show.id) {
-        acc[show.id] = show.name || 'Unnamed Show';
-      }
-      return acc;
-    }, {} as Record<string, string>),
-  [shows]);
+  const showLookup = useMemo(
+    () =>
+      shows.reduce((acc, show) => {
+        if (show.id) {
+          acc[show.id] = show;
+        }
+        return acc;
+      }, {} as Record<string, Show>),
+    [shows]
+  );
 
   const decoratedOrders: DecoratedOrder[] = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
@@ -183,12 +145,14 @@ export default function OrdersAndSales() {
       })
       .filter((order) => {
         if (!term) return true;
+        const matchedShow = showLookup[order.showId];
         const haystack = [
           order.chassisNumber,
           order.orderType,
           order.salesperson,
           order.id,
-          showLookup[order.showId],
+          matchedShow?.name,
+          matchedShow?.handoverDealer,
         ]
           .filter(Boolean)
           .join(' ')
@@ -197,15 +161,10 @@ export default function OrdersAndSales() {
       })
       .map((order) => ({
         ...order,
-        showName: showLookup[order.showId] || 'Unknown Show',
-        orderStatus: scheduleOrders[normaliseChassis(order.chassisNumber)]?.['Regent Production']?.trim() || 'N/A',
-        handoverDealer: scheduleOrders[normaliseChassis(order.chassisNumber)]?.Dealer?.trim() || 'Unknown',
-        handoverInvoice:
-          invoiceByChassis[normaliseChassis(order.chassisNumber)]
-            ? formatDate(invoiceByChassis[normaliseChassis(order.chassisNumber)])
-            : 'not invoiced',
+        showName: showLookup[order.showId]?.name || 'Unknown Show',
+        handoverDealer: showLookup[order.showId]?.handoverDealer || 'Not set',
       }));
-  }, [invoiceByChassis, orders, scheduleOrders, searchTerm, showLookup]);
+  }, [orders, searchTerm, showLookup]);
 
   const totalOrders = orders.length;
   const pendingOrders = orders.filter((order) => order.status === 'Pending').length;
@@ -218,6 +177,30 @@ export default function OrdersAndSales() {
     const memberIds = selectedShow.teamMembers || [];
     return teamMembers.filter((member) => memberIds.includes(member.memberId));
   }, [selectedShow, teamMembers]);
+
+  const ordersByShow = useMemo(
+    () =>
+      orders.reduce((acc, order) => {
+        if (!order.showId) return acc;
+        acc[order.showId] = (acc[order.showId] || 0) + 1;
+        return acc;
+      }, {} as Record<string, number>),
+    [orders]
+  );
+
+  const requiresHandoverDealer = useMemo(() => {
+    if (!selectedShow) return false;
+    const orderCount = ordersByShow[selectedShow.id] ?? 0;
+    return orderCount === 0 && !selectedShow.handoverDealer;
+  }, [ordersByShow, selectedShow]);
+
+  useEffect(() => {
+    if (selectedShow?.handoverDealer) {
+      setSelectedHandoverDealer(selectedShow.handoverDealer);
+    } else {
+      setSelectedHandoverDealer('');
+    }
+  }, [selectedShow]);
 
   const persistAuthExpiry = (expiresAt: number) => {
     setAuthExpiry(expiresAt);
@@ -294,8 +277,13 @@ export default function OrdersAndSales() {
   };
 
   const handleAddOrder = async () => {
-    if (!newOrder.chassisNumber || !newOrder.salesperson || !newOrder.showId || !newOrder.date) {
+    if (!newOrder.salesperson || !newOrder.showId || !newOrder.date) {
       toast.error('Please fill in all required fields');
+      return;
+    }
+
+    if (requiresHandoverDealer && !selectedHandoverDealer) {
+      toast.error('Please select a handover dealer for this show');
       return;
     }
 
@@ -303,7 +291,7 @@ export default function OrdersAndSales() {
       const order: ShowOrder = {
         id: `ORD-${Date.now()}`,
         showId: newOrder.showId,
-        chassisNumber: newOrder.chassisNumber,
+        chassisNumber: newOrder.chassisNumber || '',
         orderType: (newOrder.orderType as ShowOrder['orderType']) || 'New Order',
         salesperson: newOrder.salesperson,
         date: newOrder.date,
@@ -311,6 +299,14 @@ export default function OrdersAndSales() {
       };
 
       await dbSet(`showOrders/${order.id}`, order as unknown as Record<string, unknown>);
+      if (requiresHandoverDealer && selectedHandoverDealer) {
+        await dbUpdate(`shows/${order.showId}`, { handoverDealer: selectedHandoverDealer });
+        setShows((prev) =>
+          prev.map((show) =>
+            show.id === order.showId ? { ...show, handoverDealer: selectedHandoverDealer } : show
+          )
+        );
+      }
       setOrders((prev) => [...prev, order]);
       setIsAddingOrder(false);
       setNewOrder({
@@ -321,6 +317,7 @@ export default function OrdersAndSales() {
         showId: '',
         date: new Date().toISOString().split('T')[0],
       });
+      setSelectedHandoverDealer('');
       toast.success('Order added successfully');
     } catch (err) {
       console.error('Error adding order:', err);
@@ -417,14 +414,31 @@ export default function OrdersAndSales() {
                         </Select>
                       </div>
 
-                      <div className="space-y-2">
-                        <Label>Chassis Number *</Label>
-                        <Input
-                          value={newOrder.chassisNumber}
-                          onChange={(event) => setNewOrder({ ...newOrder, chassisNumber: event.target.value })}
-                          placeholder="e.g., SRV123456"
-                        />
-                      </div>
+                      {requiresHandoverDealer && (
+                        <div className="space-y-2">
+                          <Label>Handover Dealer *</Label>
+                          <Select
+                            value={selectedHandoverDealer}
+                            onValueChange={(value) => setSelectedHandoverDealer(value)}
+                          >
+                            <SelectTrigger>
+                              <SelectValue placeholder="Select handover dealer" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {dealerOptions.map((dealer) => (
+                                <SelectItem key={dealer} value={dealer}>
+                                  {dealer}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          {dealerOptions.length === 0 && (
+                            <p className="text-xs text-muted-foreground">
+                              Dealer list unavailable. Please try again after schedule sync.
+                            </p>
+                          )}
+                        </div>
+                      )}
 
                       <div className="space-y-2">
                         <Label>Order Type</Label>
@@ -540,9 +554,7 @@ export default function OrdersAndSales() {
                   <TableHead>Salesperson</TableHead>
                   <TableHead>Date</TableHead>
                   <TableHead>Status</TableHead>
-                  <TableHead>Order Status</TableHead>
                   <TableHead>Handover Dealer</TableHead>
-                  <TableHead>Handover Invoice</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
@@ -561,17 +573,7 @@ export default function OrdersAndSales() {
                           {order.status}
                         </span>
                       </TableCell>
-                      <TableCell>{order.orderStatus}</TableCell>
                       <TableCell>{order.handoverDealer}</TableCell>
-                      <TableCell>
-                        {order.handoverInvoice === 'not invoiced' ? (
-                          <span className="text-xs italic text-muted-foreground">not invoiced</span>
-                        ) : (
-                          <span className="inline-flex items-center rounded-full bg-green-100 px-2 py-1 text-xs font-semibold text-green-800">
-                            {order.handoverInvoice}
-                          </span>
-                        )}
-                      </TableCell>
                       <TableCell className="text-right">
                         <Button
                           size="sm"
