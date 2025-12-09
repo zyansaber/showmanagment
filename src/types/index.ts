@@ -22,6 +22,7 @@ export interface Show {
   siteLocation: SiteLocation;
   dealership: string;
   startDate: string;
+  handoverDealer?: string;
   finishDate: string;
   showDuration?: number;
   target2024: number;
