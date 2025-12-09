@@ -63,6 +63,7 @@ export default function OrdersAndSales() {
   const [newOrder, setNewOrder] = useState<Partial<ShowOrder>>({
     chassisNumber: '',
     model: '',
+    customerName: '',
     orderType: 'New Order',
     salesperson: '',
     status: 'Pending',
@@ -156,6 +157,7 @@ export default function OrdersAndSales() {
         const haystack = [
           order.chassisNumber,
           order.orderType,
+          order.customerName,
           order.salesperson,
           order.model,
           order.id,
@@ -290,7 +292,7 @@ export default function OrdersAndSales() {
   };
 
   const handleAddOrder = async () => {
-    if (!newOrder.salesperson || !newOrder.showId || !newOrder.date) {
+    if (!newOrder.salesperson || !newOrder.showId || !newOrder.date || !newOrder.customerName?.trim()) {
       toast.error('Please fill in all required fields');
       return;
     }
@@ -310,6 +312,7 @@ export default function OrdersAndSales() {
         id: `ORD-${Date.now()}`,
         showId: newOrder.showId,
         chassisNumber: newOrder.chassisNumber || '',
+        customerName: newOrder.customerName?.trim() || '',
         model: newOrder.model || '',
         orderType: (newOrder.orderType as ShowOrder['orderType']) || 'New Order',
         salesperson: newOrder.salesperson,
@@ -331,6 +334,7 @@ export default function OrdersAndSales() {
       setNewOrder({
         chassisNumber: '',
         orderType: 'New Order',
+        customerName: '',        
         salesperson: '',
         status: 'Pending',
         showId: '',
@@ -537,6 +541,17 @@ export default function OrdersAndSales() {
                       </div>
 
                       <div className="space-y-2">
+                        <Label>Customer Name *</Label>
+                        <Input
+                          placeholder="Enter customer name"
+                          value={newOrder.customerName || ''}
+                          onChange={(event) =>
+                            setNewOrder({ ...newOrder, customerName: event.target.value })
+                          }
+                        />
+                      </div>
+                      
+                      <div className="space-y-2">
                         <Label>Order Type</Label>
                         <Select
                           value={newOrder.orderType}
@@ -630,7 +645,7 @@ export default function OrdersAndSales() {
                 <div className="flex items-center gap-2">
                   <Search className="h-4 w-4 text-gray-500" />
                   <Input
-                    placeholder="Search by order ID, show, model, salesperson or type"
+                    placeholder="Search by order ID, show, model, customer, salesperson or type"
                     value={searchTerm}
                     onChange={(event) => setSearchTerm(event.target.value)}
                     className="w-full lg:w-72"
@@ -640,58 +655,60 @@ export default function OrdersAndSales() {
             </div>
           </CardHeader>
           <CardContent>
-          {decoratedOrders.length > 0 ? (
-            <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Order ID</TableHead>
-                      <TableHead>Model</TableHead>
-                      <TableHead>Show</TableHead>
-                      <TableHead>Type</TableHead>
-                      <TableHead>Salesperson</TableHead>
-                  <TableHead>Date</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Handover Dealer</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                    {decoratedOrders.map((order) => {
-                      const rowKey = order.id || `${order.showId}-${order.date}`;
-                      return (
-                        <TableRow key={rowKey}>
-                          <TableCell className="font-medium">{order.id || 'N/A'}</TableCell>
-                          <TableCell>{order.model || 'Not set'}</TableCell>
-                          <TableCell>{order.showName}</TableCell>
-                          <TableCell>{order.orderType}</TableCell>
-                          <TableCell>{order.salesperson || 'Unassigned'}</TableCell>
-                      <TableCell>{formatDate(order.date)}</TableCell>
-                      <TableCell>
-                        <span className={`rounded-full px-2 py-1 text-xs font-semibold ${statusStyles[order.status]}`}>
-                          {order.status}
-                        </span>
-                      </TableCell>
-                      <TableCell>{order.handoverDealer}</TableCell>
-                      <TableCell className="text-right">
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          onClick={() => handleConfirmationClick(order)}
-                          disabled={order.status === 'Approved'}
-                        >
-                          Confirmation
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
-          ) : (
-            <div className="py-10 text-center text-gray-500">No orders found</div>
-          )}
-        </CardContent>
-      </Card>
+            {decoratedOrders.length > 0 ? (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Order ID</TableHead>
+                    <TableHead>Model</TableHead>
+                    <TableHead>Customer</TableHead>
+                    <TableHead>Show</TableHead>
+                    <TableHead>Type</TableHead>
+                    <TableHead>Salesperson</TableHead>
+                    <TableHead>Date</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Handover Dealer</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {decoratedOrders.map((order) => {
+                    const rowKey = order.id || `${order.showId}-${order.date}`;
+                    return (
+                      <TableRow key={rowKey}>
+                        <TableCell className="font-medium">{order.id || 'N/A'}</TableCell>
+                        <TableCell>{order.model || 'Not set'}</TableCell>
+                        <TableCell>{order.customerName || 'Not set'}</TableCell>
+                        <TableCell>{order.showName}</TableCell>
+                        <TableCell>{order.orderType}</TableCell>
+                        <TableCell>{order.salesperson || 'Unassigned'}</TableCell>
+                        <TableCell>{formatDate(order.date)}</TableCell>
+                        <TableCell>
+                          <span className={`rounded-full px-2 py-1 text-xs font-semibold ${statusStyles[order.status]}`}>
+                            {order.status}
+                          </span>
+                        </TableCell>
+                        <TableCell>{order.handoverDealer}</TableCell>
+                        <TableCell className="text-right">
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            onClick={() => handleConfirmationClick(order)}
+                            disabled={order.status === 'Approved'}
+                          >
+                            Confirmation
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            ) : (
+              <div className="py-10 text-center text-gray-500">No orders found</div>
+            )}
+          </CardContent>
+        </Card>
 
       <Dialog open={isDialogOpen} onOpenChange={handleDialogOpenChange}>
         <DialogContent>
