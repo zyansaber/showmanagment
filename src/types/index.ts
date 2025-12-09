@@ -1,164 +1,223 @@
-export type UserRole = 'Show Team' | 'Show Manager' | 'Headquarter Management';
+import { useEffect, useMemo, useState } from "react";
+import { useParams } from "react-router-dom";
+import { toast } from "sonner";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import Sidebar from "@/components/Sidebar";
+import { prettifyDealerName, normalizeDealerSlug } from "@/lib/dealerUtils";
+import { dealerNameToSlug } from "@/lib/firebase";
+import { subscribeToShows, subscribeToShowOrders, updateShowOrder } from "@/lib/showDatabase";
+import type { ShowOrder } from "@/types/showOrder";
+import type { ShowRecord } from "@/types/show";
+import { CheckCircle2, Clock3 } from "lucide-react";
 
-export interface User {
-  uid: string;
-  email: string;
-  role: UserRole;
-  name: string;
-}
+export default function ShowManagement() {
+  const { dealerSlug: rawDealerSlug } = useParams<{ dealerSlug: string }>();
+  const dealerSlug = normalizeDealerSlug(rawDealerSlug);
+  const dealerDisplayName = prettifyDealerName(dealerSlug);
 
-export interface SiteLocation {
-  number: string;
-  street: string;
-  suburb: string;
-  postcode: string;
-  state: string;
-  country: string;
-}
+  const [orders, setOrders] = useState<ShowOrder[]>([]);
+  const [shows, setShows] = useState<ShowRecord[]>([]);
+  const [ordersLoading, setOrdersLoading] = useState(true);
+  const [showsLoading, setShowsLoading] = useState(true);
+  const [savingOrderId, setSavingOrderId] = useState<string | null>(null);
+  const [chassisDrafts, setChassisDrafts] = useState<Record<string, string>>({});
 
-export interface Show {
-  id: string;
-  name: string;
-  siteLocation: SiteLocation;
-  dealership: string;
-  startDate: string;
-  handoverDealer?: string;
-  finishDate: string;
-  showDuration?: number;
-  target2024: number;
-  sales2024: number;
-  target2025: number;
-  sales2025: number;
-  target2026: number;
-  sales2026: number;
-  eventOrganiser: string;
-  caravansOnDisplay: number;
-  standSize: string;
-  layoutAddress: string;
-  status: 'Not Started' | 'In Progress' | 'Completed';
-  teamMembers?: string[];
-  biUrl?: string;
-}
+  useEffect(() => {
+    const unsub = subscribeToShowOrders((data) => {
+      setOrders(data);
+      setOrdersLoading(false);
+    });
+    return unsub;
+  }, []);
 
-export interface ShowCaravanPick {
-  id: string;
-  showId: string;
-  chassis: string;
-  model: string;
-  dealer: string;
-  productionStatus: string;
-  requestDeliveryDate?: string;
-}
+  useEffect(() => {
+    const unsub = subscribeToShows((data) => {
+      setShows(data);
+      setShowsLoading(false);
+    });
+    return unsub;
+  }, []);
 
+  const showMap = useMemo(() => {
+    const map: Record<string, ShowRecord> = {};
+    shows.forEach((show) => {
+      if (show.id) {
+        map[show.id] = show;
+      }
+    });
+    return map;
+  }, [shows]);
 
-export interface TeamMember {
-  memberId: string;
-  memberName: string;
-  role: UserRole;
-  email: string;
-  activeFlag: 0 | 1;
-  totalSales?: number;
-  totalWorkDays?: number;
-}
+  const getShowDealerSlug = (show?: ShowRecord) => {
+    const preferredDealer = (show?.handoverDealer ?? "").trim();
+    const fallbackDealer = (show?.dealership ?? "").trim();
+    return dealerNameToSlug(preferredDealer || fallbackDealer);
+  };
 
-export interface ShowOrder {
-  id: string;
-  showId: string;
-  chassisNumber: string;
-  customerName?: string;
-  model?: string;
-  orderType: 'New Order' | 'Transfer from Stock';
-  salesperson: string;
-  date: string;
-  status: 'Pending' | 'Approved' | 'Rejected';
-  approvedBy?: string;
-}
+  const ordersForDealer = useMemo(() => {
+    return orders.filter((order) => {
+      if (!order.orderId) return false;
+      const show = showMap[order.showId];
+      const showDealerSlug = normalizeDealerSlug(getShowDealerSlug(show));
+      return !!showDealerSlug && showDealerSlug === dealerSlug;
+    });
+  }, [dealerSlug, orders, showMap]);
 
-export interface ShowTask {
-  taskId: string;
-  eventId: string;
-  taskName: string;
-  responsiblePeople: string[];
-  stage: 'Design' | 'Booking' | 'Logistics' | 'Marketing';
-  status: 'Not Started' | 'In Progress' | 'Blocked' | 'Done';
-  startDate: string;
-  dueDate: string;
-  percentComplete: number;
-  costBudget: number;
-  costActual: number;
-  attachmentUrl: string;
-  notes: string;
-}
+  const pendingConfirmationCount = useMemo(
+    () => ordersForDealer.filter((order) => !order.dealerConfirm).length,
+    [ordersForDealer]
+  );
 
-export interface ProcessTemplateTask {
-  id: string;
-  taskName: string;
-  stage: ShowTask['stage'];
-  durationDays: number;
-  leadTimeDays: number;
-  notes?: string;
-}
+  const handleConfirm = async (order: ShowOrder) => {
+    setSavingOrderId(order.orderId);
+    try {
+      await updateShowOrder(order.orderId, { dealerConfirm: true });
+      toast.success("Order confirmed for dealer");
+    } catch (error) {
+      console.error(error);
+      toast.error("Failed to confirm order");
+    } finally {
+      setSavingOrderId(null);
+    }
+  };
 
-export interface ProcessTemplate {
-  id: string;
-  name: string;
-  description?: string;
-  tasks: ProcessTemplateTask[];
-}
+  const handleChassisSave = async (order: ShowOrder) => {
+    const chassisNumber = chassisDrafts[order.orderId] ?? order.chassisNumber ?? "";
+    setSavingOrderId(order.orderId);
+    try {
+      await updateShowOrder(order.orderId, { chassisNumber });
+      toast.success("Chassis number updated");
+    } catch (error) {
+      console.error(error);
+      toast.error("Failed to update chassis number");
+    } finally {
+      setSavingOrderId(null);
+    }
+  };
 
-export interface DashboardStats {
-  totalShows: number;
-  completedShows: number;
-  totalSales: number;
-  avgDailySales: number;
-  topSalesperson: string;
-  topSales: number;
-}
+  const isLoading = ordersLoading || showsLoading;
 
-export interface ScheduleOrder {
-  Chassis: string;
-  Customer: string;
-  Dealer: string;
-  'Forecast Production Date': string;
-  Index1: number;
-  Model: string;
-  'Model Year': string;
-  'Order Received Date': string;
-  'Order Sent to Longtree': string;
-  'Plans Sent to Dealer': string;
-  'Price Date': string;
-  'Purchase Order Sent': string;
-  Rank1: number;
-  Rank2: number;
-  'Regent Production': string;
-  'Request Delivery Date': string;
-  Shipment: string;
-  'Signed Plans Received': string;
-}
+  return (
+    <div className="flex min-h-screen bg-slate-50">
+      <Sidebar
+        orders={[]}
+        selectedDealer={dealerDisplayName}
+        onDealerSelect={() => {}}
+        hideOtherDealers
+        currentDealerName={dealerDisplayName}
+        showStats={false}
+        showManagementPending={pendingConfirmationCount}
+      />
 
-export interface Dealership {
-  name: string;
-  orders: ScheduleOrder[];
-}
+      <main className="flex-1 p-6">
+        <div className="mb-6">
+          <h1 className="text-2xl font-semibold text-slate-900">Show Management</h1>
+          <p className="text-slate-600">Manage show orders assigned to {dealerDisplayName}.</p>
+        </div>
 
-export type ExpenseCategory = 'Dealer Operations' | 'Factory' | 'Stand & Venue' | 'Other';
-
-export interface BudgetExpenseItem {
-  id: string;
-  description: string;
-  category: ExpenseCategory;
-  amount: number;
-  date: string;
-  notes?: string;
-}
-
-export interface ShowBudgetProfile {
-  showId: string;
-  durationDays: number;
-  salesTarget: number;
-  standCosts: number;
-  dealerCostsTransport: number;
-  factoryTravelCosts: number;
-  expenses: BudgetExpenseItem[];
-  lastUpdated?: string;
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between">
+            <CardTitle className="text-lg">Orders</CardTitle>
+            <Badge variant="outline" className="text-slate-700">
+              Pending dealer confirmations: {pendingConfirmationCount}
+            </Badge>
+          </CardHeader>
+          <CardContent>
+            {isLoading ? (
+              <div className="flex items-center gap-2 text-slate-600">
+                <Clock3 className="h-4 w-4 animate-spin" /> Loading orders...
+              </div>
+            ) : ordersForDealer.length === 0 ? (
+              <div className="py-10 text-center text-slate-500">No show orders found.</div>
+            ) : (
+              <div className="overflow-x-auto">
+                <Table className="min-w-[1100px] text-sm">
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="font-semibold">Order ID</TableHead>
+                      <TableHead className="font-semibold">Show</TableHead>
+                      <TableHead className="font-semibold">Show Dealer Slug</TableHead>
+                      <TableHead className="font-semibold">Date</TableHead>
+                      <TableHead className="font-semibold">Model</TableHead>
+                      <TableHead className="font-semibold">Salesperson</TableHead>
+                      <TableHead className="font-semibold">Order Type</TableHead>
+                      <TableHead className="font-semibold">Show Manager Confirmation</TableHead>
+                      <TableHead className="font-semibold">Dealer Confirmation</TableHead>
+                      <TableHead className="font-semibold">Chassis Number</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {ordersForDealer.map((order) => {
+                      const show = showMap[order.showId];
+                      const showDealerSlug = getShowDealerSlug(show);
+                      const normalizedShowDealerSlug = normalizeDealerSlug(showDealerSlug);
+                      const chassisValue = chassisDrafts[order.orderId] ?? order.chassisNumber ?? "";
+                      return (
+                        <TableRow key={order.orderId}>
+                          <TableCell className="font-semibold text-slate-900">{order.orderId}</TableCell>
+                          <TableCell>{show?.name || order.showId || "Unknown show"}</TableCell>
+                          <TableCell className="text-slate-700">{normalizedShowDealerSlug || "-"}</TableCell>
+                          <TableCell>{order.date || "-"}</TableCell>
+                          <TableCell>{order.model || "-"}</TableCell>
+                          <TableCell>{order.salesperson || "-"}</TableCell>
+                          <TableCell>{order.orderType || "-"}</TableCell>
+                          <TableCell>
+                            <div className="flex items-center gap-2">
+                              <Badge variant="secondary" className="bg-slate-100 text-slate-800">
+                                {order.status || "Pending"}
+                              </Badge>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            {order.dealerConfirm ? (
+                              <div className="flex items-center gap-2 text-emerald-700">
+                                <CheckCircle2 className="h-4 w-4" /> Confirmed
+                              </div>
+                            ) : (
+                              <Button
+                                size="sm"
+                                onClick={() => handleConfirm(order)}
+                                disabled={savingOrderId === order.orderId}
+                                className="h-8 rounded px-2 text-xs bg-emerald-600 hover:bg-emerald-700"
+                              >
+                                {savingOrderId === order.orderId ? "Saving..." : "Order confirmation"}
+                              </Button>
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex items-center gap-2">
+                              <Input
+                                value={chassisValue}
+                                onChange={(e) =>
+                                  setChassisDrafts((prev) => ({ ...prev, [order.orderId]: e.target.value }))
+                                }
+                                placeholder="Enter chassis number"
+                                className="w-48"
+                              />
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => handleChassisSave(order)}
+                                disabled={savingOrderId === order.orderId}
+                              >
+                                {savingOrderId === order.orderId ? "Saving..." : "Save"}
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </main>
+    </div>
+  );
 }
