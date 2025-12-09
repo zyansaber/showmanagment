@@ -143,9 +143,12 @@ export default function ShowDetail() {
   const [currentShowKey, setCurrentShowKey] = useState<string | null>(null);
   const [handoverDealerOptions, setHandoverDealerOptions] = useState<string[]>([]);
   const [selectedHandoverDealer, setSelectedHandoverDealer] = useState('');
+  const [modelOptions, setModelOptions] = useState<string[]>([]);
+  const [isModelPickerOpen, setIsModelPickerOpen] = useState(false);
 
   const [newOrder, setNewOrder] = useState<Partial<ShowOrder>>({
     chassisNumber: '',
+    model: '',
     orderType: 'New Order',
     salesperson: '',
     status: 'Pending',
@@ -177,7 +180,7 @@ export default function ShowDetail() {
       setSelectedHandoverDealer(show.handoverDealer);
     }
   }, [show?.handoverDealer]);
-  
+
   const normaliseTemplate = (template: ProcessTemplate): ProcessTemplate => {
     const timestamp = Date.now();
     const rawTasks = Array.isArray(template.tasks)
@@ -284,6 +287,10 @@ export default function ShowDetail() {
             new Set(values.map((order) => order.Dealer?.trim()).filter((dealer): dealer is string => Boolean(dealer)))
           ).sort((a, b) => a.localeCompare(b));
           setHandoverDealerOptions(dealers);
+          const models = Array.from(
+            new Set(values.map((order) => order.Model?.trim()).filter((model): model is string => Boolean(model)))
+          ).sort((a, b) => a.localeCompare(b));
+          setModelOptions(models);
           const filtered = values.filter((order) => {
             const dealer = order.Dealer?.trim();
             const production = order['Regent Production']?.trim();
@@ -292,6 +299,7 @@ export default function ShowDetail() {
           setAvailableCaravans(filtered);
         } else {
           setHandoverDealerOptions([]);
+          setModelOptions([]);
           setAvailableCaravans([]);
         }
       } catch (error) {
@@ -504,10 +512,20 @@ export default function ShowDetail() {
         return;
       }
 
+      const selectedModel = newOrder.model?.trim();
+      const isValidModel = selectedModel
+        ? modelOptions.some((option) => option.toLowerCase() === selectedModel.toLowerCase())
+        : false;
+      if (!isValidModel) {
+        toast.error('Please select a model from the schedule list');
+        return;
+      }
+
       const order: ShowOrder = {
         id: `ORD-${Date.now()}`,
         showId: id || '',
         chassisNumber: newOrder.chassisNumber || '',
+        model: selectedModel || '',
         orderType: newOrder.orderType as 'New Order' | 'Transfer from Stock',
         salesperson: newOrder.salesperson || '',
         date: new Date().toISOString().split('T')[0],
@@ -528,6 +546,7 @@ export default function ShowDetail() {
       setIsAddingOrder(false);
       setNewOrder({
         chassisNumber: '',
+        model: '',
         orderType: 'New Order',
         salesperson: '',
         status: 'Pending',
@@ -2021,6 +2040,65 @@ export default function ShowDetail() {
                       </div>
                     )}
                     <div>
+                      <Label>Model *</Label>
+                      <Popover open={isModelPickerOpen} onOpenChange={setIsModelPickerOpen}>
+                        <PopoverTrigger asChild>
+                          <Button
+                            variant="outline"
+                            role="combobox"
+                            aria-expanded={isModelPickerOpen}
+                            className="w-full justify-between"
+                            disabled={modelOptions.length === 0}
+                          >
+                            {newOrder.model ? newOrder.model : 'Select model'}
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-[320px] p-0">
+                          <Command>
+                            <CommandInput placeholder="Search model..." />
+                            <CommandList>
+                              <CommandEmpty>No model found.</CommandEmpty>
+                              <CommandGroup heading="Schedule models">
+                                {modelOptions.map((model) => (
+                                  <CommandItem
+                                    key={model}
+                                    value={model}
+                                    onSelect={(value) => {
+                                      setNewOrder({ ...newOrder, model: value });
+                                      setIsModelPickerOpen(false);
+                                    }}
+                                  >
+                                    <Check
+                                      className={cn(
+                                        'mr-2 h-4 w-4',
+                                        newOrder.model === model ? 'opacity-100' : 'opacity-0'
+                                      )}
+                                    />
+                                    {model}
+                                  </CommandItem>
+                                ))}
+                              </CommandGroup>
+                            </CommandList>
+                          </Command>
+                        </PopoverContent>
+                      </Popover>
+                      {newOrder.model && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="mt-2"
+                          onClick={() => setNewOrder({ ...newOrder, model: '' })}
+                        >
+                          Clear selection
+                        </Button>
+                      )}
+                      {modelOptions.length === 0 && (
+                        <p className="text-xs text-muted-foreground mt-1">
+                          Model list unavailable. Please refresh after schedule sync.
+                        </p>
+                      )}
+                    </div>
+                    <div>
                       <Label>Order Type</Label>
                       <Select
                           value={newOrder.orderType}
@@ -2115,7 +2193,7 @@ export default function ShowDetail() {
                   <TableHeader>
                     <TableRow>
                       <TableHead>Order ID</TableHead>
-                      <TableHead>Chassis Number</TableHead>
+                      <TableHead>Model</TableHead>
                       <TableHead>Type</TableHead>
                       <TableHead>Salesperson</TableHead>
                       <TableHead>Date</TableHead>
@@ -2128,7 +2206,7 @@ export default function ShowDetail() {
                     {orders.map((order) => (
                       <TableRow key={order.id}>
                         <TableCell className="font-medium">{order.id}</TableCell>
-                        <TableCell>{order.chassisNumber}</TableCell>
+                        <TableCell>{order.model || 'Not set'}</TableCell>
                         <TableCell>{order.orderType}</TableCell>
                         <TableCell>{order.salesperson}</TableCell>
                         <TableCell>{order.date}</TableCell>
