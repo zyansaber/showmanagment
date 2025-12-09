@@ -141,6 +141,8 @@ export default function ShowDetail() {
   const [loadingCaravans, setLoadingCaravans] = useState<boolean>(false);
   const [caravanSearch, setCaravanSearch] = useState('');
   const [currentShowKey, setCurrentShowKey] = useState<string | null>(null);
+  const [handoverDealerOptions, setHandoverDealerOptions] = useState<string[]>([]);
+  const [selectedHandoverDealer, setSelectedHandoverDealer] = useState('');
 
   const [newOrder, setNewOrder] = useState<Partial<ShowOrder>>({
     chassisNumber: '',
@@ -170,6 +172,12 @@ export default function ShowDetail() {
     loadShowData();
   }, [id]);
 
+  useEffect(() => {
+    if (show?.handoverDealer) {
+      setSelectedHandoverDealer(show.handoverDealer);
+    }
+  }, [show?.handoverDealer]);
+  
   const normaliseTemplate = (template: ProcessTemplate): ProcessTemplate => {
     const timestamp = Date.now();
     const rawTasks = Array.isArray(template.tasks)
@@ -219,6 +227,7 @@ export default function ShowDetail() {
       setShow(currentShow || null);
       setEditedShow(currentShow || {});
       setSelectedTeamMembers(currentShow?.teamMembers || []);
+      setSelectedHandoverDealer(currentShow?.handoverDealer || '');
 
       const allOrders: ShowOrder[] = ordersData ? Object.values(ordersData) : [];
       setOrders(allOrders.filter(o => o.showId === id));
@@ -271,6 +280,10 @@ export default function ShowDetail() {
         const scheduleData = await schedulingDbGet('schedule');
         if (scheduleData) {
           const values = Object.values(scheduleData as Record<string, ScheduleOrder>);
+          const dealers = Array.from(
+            new Set(values.map((order) => order.Dealer?.trim()).filter((dealer): dealer is string => Boolean(dealer)))
+          ).sort((a, b) => a.localeCompare(b));
+          setHandoverDealerOptions(dealers);
           const filtered = values.filter((order) => {
             const dealer = order.Dealer?.trim();
             const production = order['Regent Production']?.trim();
@@ -278,6 +291,7 @@ export default function ShowDetail() {
           });
           setAvailableCaravans(filtered);
         } else {
+          setHandoverDealerOptions([]);
           setAvailableCaravans([]);
         }
       } catch (error) {
@@ -478,9 +492,15 @@ export default function ShowDetail() {
   };
 
   const handleAddOrder = async () => {
+    const requiresHandoverDealer = orders.length === 0 && !show?.handoverDealer;
     try {
-      if (!newOrder.chassisNumber || !newOrder.salesperson) {
+      if (!newOrder.salesperson) {
         toast.error('Please fill in all required fields');
+        return;
+      }
+
+      if (requiresHandoverDealer && !selectedHandoverDealer) {
+        toast.error('Please choose a handover dealer for this show');
         return;
       }
 
@@ -495,6 +515,15 @@ export default function ShowDetail() {
       };
 
       await dbSet(`showOrders/${order.id}`, order as unknown as Record<string, unknown>);
+      if (requiresHandoverDealer && selectedHandoverDealer) {
+        const firebaseKey = currentShowKey || id;
+        if (!firebaseKey) {
+          toast.error('Unable to update show with selected dealer.');
+          return;
+        }
+        await dbUpdate(`shows/${firebaseKey}`, { handoverDealer: selectedHandoverDealer });
+        setShow((prev) => (prev ? { ...prev, handoverDealer: selectedHandoverDealer } : prev));
+      }
       setOrders((prev) => [...prev, order]);
       setIsAddingOrder(false);
       setNewOrder({
@@ -503,6 +532,9 @@ export default function ShowDetail() {
         salesperson: '',
         status: 'Pending',
       });
+      if (requiresHandoverDealer) {
+        setSelectedHandoverDealer('');
+      }
       toast.success('Order added successfully');
     } catch (error) {
       console.error('Error adding order:', error);
@@ -1958,22 +1990,39 @@ export default function ShowDetail() {
                     </Button>
                   </DialogTrigger>
                   <DialogContent>
-                    <DialogHeader>
-                      <DialogTitle>Add New Order</DialogTitle>
-                      <DialogDescription>Enter order details</DialogDescription>
-                    </DialogHeader>
-                    <div className="space-y-4 py-4">
+                  <DialogHeader>
+                    <DialogTitle>Add New Order</DialogTitle>
+                    <DialogDescription>Enter order details</DialogDescription>
+                  </DialogHeader>
+                  <div className="space-y-4 py-4">
+                    {orders.length === 0 && !show?.handoverDealer && (
                       <div>
-                        <Label>Chassis Number *</Label>
-                        <Input
-                          value={newOrder.chassisNumber}
-                          onChange={(e) => setNewOrder({ ...newOrder, chassisNumber: e.target.value })}
-                          placeholder="e.g., SRV123456"
-                        />
-                      </div>
-                      <div>
-                        <Label>Order Type</Label>
+                        <Label>Handover Dealer *</Label>
                         <Select
+                          value={selectedHandoverDealer}
+                          onValueChange={(value) => setSelectedHandoverDealer(value)}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select handover dealer" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {handoverDealerOptions.map((dealer) => (
+                              <SelectItem key={dealer} value={dealer}>
+                                {dealer}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        {handoverDealerOptions.length === 0 && (
+                          <p className="text-xs text-muted-foreground mt-1">
+                            Dealer list unavailable. Please refresh after schedule sync.
+                          </p>
+                        )}
+                      </div>
+                    )}
+                    <div>
+                      <Label>Order Type</Label>
+                      <Select
                           value={newOrder.orderType}
                           onValueChange={(value) => setNewOrder({ ...newOrder, orderType: value as ShowOrder['orderType'] })}
                         >
@@ -2070,6 +2119,7 @@ export default function ShowDetail() {
                       <TableHead>Type</TableHead>
                       <TableHead>Salesperson</TableHead>
                       <TableHead>Date</TableHead>
+                      <TableHead>Handover Dealer</TableHead>
                       <TableHead>Status</TableHead>
                       <TableHead>Actions</TableHead>
                     </TableRow>
@@ -2082,6 +2132,7 @@ export default function ShowDetail() {
                         <TableCell>{order.orderType}</TableCell>
                         <TableCell>{order.salesperson}</TableCell>
                         <TableCell>{order.date}</TableCell>
+                        <TableCell>{show?.handoverDealer || 'Not set'}</TableCell>
                         <TableCell>
                           <div className="flex items-center gap-2">
                             {getStatusIcon(order.status)}
