@@ -48,6 +48,7 @@ export default function OrdersAndSales() {
   const [shows, setShows] = useState<Show[]>([]);
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
   const [dealerOptions, setDealerOptions] = useState<string[]>([]);
+  const [modelOptions, setModelOptions] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
@@ -57,15 +58,18 @@ export default function OrdersAndSales() {
   const [authExpiry, setAuthExpiry] = useState<number | null>(null);
   const [isAddingOrder, setIsAddingOrder] = useState(false);
   const [isSalespersonPickerOpen, setIsSalespersonPickerOpen] = useState(false);
+  const [isModelPickerOpen, setIsModelPickerOpen] = useState(false);
   const [selectedHandoverDealer, setSelectedHandoverDealer] = useState('');
   const [newOrder, setNewOrder] = useState<Partial<ShowOrder>>({
     chassisNumber: '',
+    model: '',
     orderType: 'New Order',
     salesperson: '',
     status: 'Pending',
     showId: '',
     date: new Date().toISOString().split('T')[0],
   });
+  const [statusFilter, setStatusFilter] = useState<'All' | ShowOrder['status']>('All');
 
   const requiresPassword = !authExpiry || authExpiry <= Date.now();
 
@@ -97,18 +101,20 @@ export default function OrdersAndSales() {
         setTeamMembers(teamData ? Object.values(teamData) : []);
 
         if (scheduleData) {
+          const values = Object.values(scheduleData as Record<string, ScheduleOrder>);
           const dealers = Array.from(
-            new Set(
-              Object.values(scheduleData as Record<string, ScheduleOrder>)
-                .map((order) => order.Dealer?.trim())
-                .filter((name): name is string => Boolean(name))
-            )
+            new Set(values.map((order) => order.Dealer?.trim()).filter((name): name is string => Boolean(name)))
+          ).sort((a, b) => a.localeCompare(b));
+          const models = Array.from(
+            new Set(values.map((order) => order.Model?.trim()).filter((name): name is string => Boolean(name)))
           ).sort((a, b) => a.localeCompare(b));
           setDealerOptions(dealers);
+          setModelOptions(models);
         }
 
         if (!scheduleData) {
           setDealerOptions([]);
+          setModelOptions([]);
         }
 
         setError(null);
@@ -144,12 +150,14 @@ export default function OrdersAndSales() {
         return Number.isNaN(dateB) ? -1 : Number.isNaN(dateA) ? 1 : dateB - dateA;
       })
       .filter((order) => {
+        if (statusFilter !== 'All' && order.status !== statusFilter) return false;
         if (!term) return true;
         const matchedShow = showLookup[order.showId];
         const haystack = [
           order.chassisNumber,
           order.orderType,
           order.salesperson,
+          order.model,
           order.id,
           matchedShow?.name,
           matchedShow?.handoverDealer,
@@ -164,7 +172,7 @@ export default function OrdersAndSales() {
         showName: showLookup[order.showId]?.name || 'Unknown Show',
         handoverDealer: showLookup[order.showId]?.handoverDealer || 'Not set',
       }));
-  }, [orders, searchTerm, showLookup]);
+  }, [orders, searchTerm, showLookup, statusFilter]);
 
   const totalOrders = orders.length;
   const pendingOrders = orders.filter((order) => order.status === 'Pending').length;
@@ -193,6 +201,11 @@ export default function OrdersAndSales() {
     const orderCount = ordersByShow[selectedShow.id] ?? 0;
     return orderCount === 0 && !selectedShow.handoverDealer;
   }, [ordersByShow, selectedShow]);
+
+  const isValidModelSelection = (value: string | undefined) => {
+    if (!value) return false;
+    return modelOptions.some((option) => option.toLowerCase() === value.trim().toLowerCase());
+  };
 
   useEffect(() => {
     if (selectedShow?.handoverDealer) {
@@ -287,11 +300,17 @@ export default function OrdersAndSales() {
       return;
     }
 
+    if (!isValidModelSelection(newOrder.model)) {
+      toast.error('Please select a model from the schedule list');
+      return;
+    }
+
     try {
       const order: ShowOrder = {
         id: `ORD-${Date.now()}`,
         showId: newOrder.showId,
         chassisNumber: newOrder.chassisNumber || '',
+        model: newOrder.model || '',
         orderType: (newOrder.orderType as ShowOrder['orderType']) || 'New Order',
         salesperson: newOrder.salesperson,
         date: newOrder.date,
@@ -316,6 +335,7 @@ export default function OrdersAndSales() {
         status: 'Pending',
         showId: '',
         date: new Date().toISOString().split('T')[0],
+        model: '',
       });
       setSelectedHandoverDealer('');
       toast.success('Order added successfully');
@@ -354,19 +374,40 @@ export default function OrdersAndSales() {
       )}
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-        <Card>
+        <Card
+          role="button"
+          tabIndex={0}
+          onClick={() => setStatusFilter('All')}
+          onKeyDown={(event) => event.key === 'Enter' && setStatusFilter('All')}
+          className={cn('cursor-pointer transition shadow-sm', statusFilter === 'All' ? 'ring-2 ring-blue-500' : '')}
+        >
           <CardHeader className="pb-2">
             <CardDescription>Total Orders</CardDescription>
             <CardTitle className="text-3xl">{totalOrders}</CardTitle>
           </CardHeader>
         </Card>
-        <Card>
+        <Card
+          role="button"
+          tabIndex={0}
+          onClick={() => setStatusFilter('Pending')}
+          onKeyDown={(event) => event.key === 'Enter' && setStatusFilter('Pending')}
+          className={cn(
+            'cursor-pointer transition shadow-sm',
+            statusFilter === 'Pending' ? 'ring-2 ring-yellow-500' : ''
+          )}
+        >
           <CardHeader className="pb-2">
             <CardDescription>Pending Confirmation</CardDescription>
             <CardTitle className="text-3xl text-yellow-600">{pendingOrders}</CardTitle>
           </CardHeader>
         </Card>
-        <Card>
+        <Card
+          role="button"
+          tabIndex={0}
+          onClick={() => setStatusFilter('Approved')}
+          onKeyDown={(event) => event.key === 'Enter' && setStatusFilter('Approved')}
+          className={cn('cursor-pointer transition shadow-sm', statusFilter === 'Approved' ? 'ring-2 ring-green-500' : '')}
+        >
           <CardHeader className="pb-2">
             <CardDescription>Approved Orders</CardDescription>
             <CardTitle className="text-3xl text-green-600">{approvedOrders}</CardTitle>
@@ -439,6 +480,61 @@ export default function OrdersAndSales() {
                           )}
                         </div>
                       )}
+
+                      <div className="space-y-2">
+                        <Label>Model *</Label>
+                        <Popover open={isModelPickerOpen} onOpenChange={setIsModelPickerOpen}>
+                          <PopoverTrigger asChild>
+                            <Button
+                              variant="outline"
+                              role="combobox"
+                              aria-expanded={isModelPickerOpen}
+                              className="w-full justify-between"
+                              disabled={modelOptions.length === 0}
+                            >
+                              {newOrder.model || 'Select model'}
+                            </Button>
+                          </PopoverTrigger>
+                          <PopoverContent className="w-[320px] p-0">
+                            <Command>
+                              <CommandInput placeholder="Search model..." />
+                              <CommandList>
+                                <CommandEmpty>No model found.</CommandEmpty>
+                                <CommandGroup heading="Schedule models">
+                                  {modelOptions.map((model) => (
+                                    <CommandItem
+                                      key={model}
+                                      value={model}
+                                      onSelect={(value) => {
+                                        setNewOrder({ ...newOrder, model: value });
+                                        setIsModelPickerOpen(false);
+                                      }}
+                                    >
+                                      <Check
+                                        className={cn('mr-2 h-4 w-4', newOrder.model === model ? 'opacity-100' : 'opacity-0')}
+                                      />
+                                      {model}
+                                    </CommandItem>
+                                  ))}
+                                </CommandGroup>
+                              </CommandList>
+                            </Command>
+                          </PopoverContent>
+                        </Popover>
+                        {newOrder.model && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="mt-2"
+                            onClick={() => setNewOrder({ ...newOrder, model: '' })}
+                          >
+                            Clear selection
+                          </Button>
+                        )}
+                        {modelOptions.length === 0 && (
+                          <p className="text-xs text-muted-foreground">Model list unavailable. Please try again after schedule sync.</p>
+                        )}
+                      </div>
 
                       <div className="space-y-2">
                         <Label>Order Type</Label>
@@ -534,7 +630,7 @@ export default function OrdersAndSales() {
                 <div className="flex items-center gap-2">
                   <Search className="h-4 w-4 text-gray-500" />
                   <Input
-                    placeholder="Search by order ID, show, salesperson or type"
+                    placeholder="Search by order ID, show, model, salesperson or type"
                     value={searchTerm}
                     onChange={(event) => setSearchTerm(event.target.value)}
                     className="w-full lg:w-72"
@@ -546,12 +642,13 @@ export default function OrdersAndSales() {
           <CardContent>
           {decoratedOrders.length > 0 ? (
             <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Order ID</TableHead>
-                  <TableHead>Show</TableHead>
-                  <TableHead>Type</TableHead>
-                  <TableHead>Salesperson</TableHead>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Order ID</TableHead>
+                      <TableHead>Model</TableHead>
+                      <TableHead>Show</TableHead>
+                      <TableHead>Type</TableHead>
+                      <TableHead>Salesperson</TableHead>
                   <TableHead>Date</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Handover Dealer</TableHead>
@@ -559,14 +656,15 @@ export default function OrdersAndSales() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {decoratedOrders.map((order) => {
-                  const rowKey = order.id || `${order.showId}-${order.date}`;
-                  return (
-                    <TableRow key={rowKey}>
-                      <TableCell className="font-medium">{order.id || 'N/A'}</TableCell>
-                      <TableCell>{order.showName}</TableCell>
-                      <TableCell>{order.orderType}</TableCell>
-                      <TableCell>{order.salesperson || 'Unassigned'}</TableCell>
+                    {decoratedOrders.map((order) => {
+                      const rowKey = order.id || `${order.showId}-${order.date}`;
+                      return (
+                        <TableRow key={rowKey}>
+                          <TableCell className="font-medium">{order.id || 'N/A'}</TableCell>
+                          <TableCell>{order.model || 'Not set'}</TableCell>
+                          <TableCell>{order.showName}</TableCell>
+                          <TableCell>{order.orderType}</TableCell>
+                          <TableCell>{order.salesperson || 'Unassigned'}</TableCell>
                       <TableCell>{formatDate(order.date)}</TableCell>
                       <TableCell>
                         <span className={`rounded-full px-2 py-1 text-xs font-semibold ${statusStyles[order.status]}`}>
