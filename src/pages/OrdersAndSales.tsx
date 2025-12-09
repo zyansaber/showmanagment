@@ -534,7 +534,7 @@ export default function OrdersAndSales() {
                 <div className="flex items-center gap-2">
                   <Search className="h-4 w-4 text-gray-500" />
                   <Input
-                    placeholder="Search by chassis, show, salesperson or type"
+                    placeholder="Search by order ID, show, salesperson or type"
                     value={searchTerm}
                     onChange={(event) => setSearchTerm(event.target.value)}
                     className="w-full lg:w-72"
@@ -548,7 +548,7 @@ export default function OrdersAndSales() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Chassis Number</TableHead>
+                  <TableHead>Order ID</TableHead>
                   <TableHead>Show</TableHead>
                   <TableHead>Type</TableHead>
                   <TableHead>Salesperson</TableHead>
@@ -560,10 +560,10 @@ export default function OrdersAndSales() {
               </TableHeader>
               <TableBody>
                 {decoratedOrders.map((order) => {
-                  const rowKey = order.id || `${order.chassisNumber}-${order.date}`;
+                  const rowKey = order.id || `${order.showId}-${order.date}`;
                   return (
                     <TableRow key={rowKey}>
-                      <TableCell className="font-medium">{order.chassisNumber}</TableCell>
+                      <TableCell className="font-medium">{order.id || 'N/A'}</TableCell>
                       <TableCell>{order.showName}</TableCell>
                       <TableCell>{order.orderType}</TableCell>
                       <TableCell>{order.salesperson || 'Unassigned'}</TableCell>
