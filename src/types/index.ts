@@ -65,6 +65,7 @@ export interface ShowOrder {
   id: string;
   showId: string;
   chassisNumber: string;
+  model?: string;
   orderType: 'New Order' | 'Transfer from Stock';
   salesperson: string;
   date: string;
