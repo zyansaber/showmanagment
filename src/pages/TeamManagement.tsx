@@ -7,7 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import { UserPlus, Edit, Lock, BarChart3, Eye } from 'lucide-react';
+import { UserPlus, Edit, Lock, BarChart3 } from 'lucide-react';
 import { dbGet, dbSet, dbUpdate } from '@/lib/firebase';
 import type { TeamMember, UserRole, Show, ShowOrder } from '@/types';
 
@@ -416,7 +416,7 @@ export default function TeamManagement() {
                           size="sm"
                           onClick={() => setSelectedMember(member)}
                         >
-                          <Eye className="h-4 w-4" />
+                          Show performance
                         </Button>
                       </div>
                     </TableCell>
@@ -473,7 +473,7 @@ export default function TeamManagement() {
       </Card>
 
       <Dialog open={!!selectedMember} onOpenChange={(open) => !open && setSelectedMember(null)}>
-        <DialogContent className="max-w-4xl">
+        <DialogContent className="w-[95vw] max-w-3xl max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <BarChart3 className="h-5 w-5 text-blue-600" />
@@ -487,7 +487,7 @@ export default function TeamManagement() {
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <Card className="shadow-sm">
                   <CardHeader className="py-3">
-                    <CardDescription>Cars Sold</CardDescription>
+                    <CardDescription>Caravans Sold</CardDescription>
                     <CardTitle className="text-2xl">{selectedInsight.totalCarsSold}</CardTitle>
                   </CardHeader>
                 </Card>
@@ -499,7 +499,7 @@ export default function TeamManagement() {
                 </Card>
                 <Card className="shadow-sm">
                   <CardHeader className="py-3">
-                    <CardDescription>Average per Day</CardDescription>
+                    <CardDescription>Average Caravans per Day</CardDescription>
                     <CardTitle className="text-2xl">{selectedInsight.avgDailySales.toFixed(2)}</CardTitle>
                   </CardHeader>
                 </Card>
@@ -549,8 +549,8 @@ export default function TeamManagement() {
 
                 <Card className="shadow-sm">
                   <CardHeader className="pb-2">
-                    <CardTitle className="text-lg">Models Sold</CardTitle>
-                    <CardDescription>Counts from their recorded orders</CardDescription>
+                    <CardTitle className="text-lg">Caravan Models Sold</CardTitle>
+                    <CardDescription>Counts from their recorded caravan orders</CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-2">
                     {Object.keys(selectedInsight.modelCounts).length ? (
@@ -562,7 +562,7 @@ export default function TeamManagement() {
                         ))}
                       </div>
                     ) : (
-                      <div className="text-sm text-gray-500">No recorded vehicle sales</div>
+                      <div className="text-sm text-gray-500">No recorded caravan sales</div>
                     )}
                   </CardContent>
                 </Card>
@@ -596,7 +596,7 @@ export default function TeamManagement() {
                 <Card className="shadow-sm">
                   <CardHeader className="pb-2">
                     <CardTitle className="text-lg">Order History</CardTitle>
-                    <CardDescription>Orders attributed to this member</CardDescription>
+                    <CardDescription>Caravan orders attributed to this member</CardDescription>
                   </CardHeader>
                   <CardContent>
                     {selectedInsight.memberOrders.length ? (
@@ -606,7 +606,7 @@ export default function TeamManagement() {
                             <TableHead>Order ID</TableHead>
                             <TableHead>Show</TableHead>
                             <TableHead>Date</TableHead>
-                            <TableHead>Model</TableHead>
+                            <TableHead>Caravan Model</TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
