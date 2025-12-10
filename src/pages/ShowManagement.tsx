@@ -336,6 +336,7 @@ export default function ShowManagement() {
         caravansOnDisplay: 0,
         standSize: '',
         layoutAddress: '',
+        sapExpenseCode: '',
         status: 'Not Started',
         teamMembers: [],
       };
@@ -375,6 +376,7 @@ export default function ShowManagement() {
     'Caravans On Display',
     'Stand Size',
     'Layout Address',
+    'SAP Expense Code',
     'Status',
   ];
 
@@ -417,6 +419,7 @@ export default function ShowManagement() {
         show.caravansOnDisplay,
         show.standSize,
         show.layoutAddress,
+        show.sapExpenseCode,
         show.status,
       ]);
 
@@ -576,6 +579,7 @@ export default function ShowManagement() {
             parseNumberCell(getCell('Caravans On Display', cells)) ?? existing.caravansOnDisplay,
           standSize: getUpdatedText('Stand Size', cells, existing.standSize),
           layoutAddress: getUpdatedText('Layout Address', cells, existing.layoutAddress),
+          sapExpenseCode: getUpdatedText('SAP Expense Code', cells, existing.sapExpenseCode),
           status: (getUpdatedText('Status', cells, existing.status) as Show['status']) || existing.status,
         };
 
