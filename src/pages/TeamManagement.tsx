@@ -7,7 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import { UserPlus, Edit, Lock } from 'lucide-react';
+import { UserPlus, Edit, Lock, BarChart3, Eye } from 'lucide-react';
 import { dbGet, dbSet, dbUpdate } from '@/lib/firebase';
 import type { TeamMember, UserRole, Show, ShowOrder } from '@/types';
 
@@ -19,6 +19,7 @@ export default function TeamManagement() {
   const [orders, setOrders] = useState<ShowOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [isAddingMember, setIsAddingMember] = useState(false);
+  const [selectedMember, setSelectedMember] = useState<TeamMember | null>(null);
 
   const [newMember, setNewMember] = useState<Partial<TeamMember>>({
     memberName: '',
@@ -129,6 +130,129 @@ export default function TeamManagement() {
     });
     return counts;
   }, [shows]);
+
+  const getShowDuration = (show: Show) => {
+    if (!show.startDate || !show.finishDate) return 0;
+    const start = new Date(show.startDate);
+    const end = new Date(show.finishDate);
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return 0;
+    const diff = end.getTime() - start.getTime();
+    return Math.max(1, Math.ceil(diff / (1000 * 60 * 60 * 24)) + 1);
+  };
+
+  const formatMonthKey = (date: Date) => {
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+  };
+
+  const getShowDaysByMonth = (show: Show) => {
+    if (!show.startDate || !show.finishDate) return {} as Record<string, number>;
+    const start = new Date(show.startDate);
+    const end = new Date(show.finishDate);
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end < start) return {} as Record<string, number>;
+
+    const monthMap: Record<string, number> = {};
+    const cursor = new Date(start);
+
+    while (cursor <= end) {
+      const key = formatMonthKey(cursor);
+      monthMap[key] = (monthMap[key] || 0) + 1;
+      cursor.setDate(cursor.getDate() + 1);
+    }
+
+    return monthMap;
+  };
+
+  const buildMemberInsight = (member: TeamMember | null) => {
+    if (!member) return null;
+
+    const memberShows = shows.filter((show) => {
+      const participants = show.teamMembers || [];
+      return participants.includes(member.memberId) || participants.includes(member.memberName);
+    });
+
+    const memberOrders = orders.filter((order) => {
+      return order.salesperson === member.memberName || order.salesperson === member.memberId;
+    });
+
+    const totalCarsSold = memberOrders.length;
+    const participationDays = memberShows.reduce((sum, show) => sum + getShowDuration(show), 0);
+    const avgDailySales = participationDays > 0 ? totalCarsSold / participationDays : 0;
+
+    const modelCounts = memberOrders.reduce<Record<string, number>>((acc, order) => {
+      if (!order.model) return acc;
+      acc[order.model] = (acc[order.model] || 0) + 1;
+      return acc;
+    }, {});
+
+    const orderTrendByMonth = memberOrders.reduce<Record<string, number>>((acc, order) => {
+      if (!order.date) return acc;
+      const parsed = new Date(order.date);
+      if (Number.isNaN(parsed.getTime())) return acc;
+      const key = formatMonthKey(parsed);
+      acc[key] = (acc[key] || 0) + 1;
+      return acc;
+    }, {});
+
+    const participationDaysByMonth = memberShows.reduce<Record<string, number>>((acc, show) => {
+      const monthMap = getShowDaysByMonth(show);
+      Object.entries(monthMap).forEach(([month, days]) => {
+        acc[month] = (acc[month] || 0) + days;
+      });
+      return acc;
+    }, {});
+
+    const months = Array.from(new Set([...Object.keys(orderTrendByMonth), ...Object.keys(participationDaysByMonth)])).sort();
+
+    const avgDailyTrend = months.map((month) => {
+      const ordersCount = orderTrendByMonth[month] || 0;
+      const days = participationDaysByMonth[month] || 0;
+      return { month, value: days > 0 ? ordersCount / days : 0 };
+    });
+
+    const salesTrend = months.map((month) => ({ month, value: orderTrendByMonth[month] || 0 }));
+    const participationTrend = months.map((month) => ({ month, value: participationDaysByMonth[month] || 0 }));
+
+    return {
+      memberShows,
+      memberOrders,
+      modelCounts,
+      totalCarsSold,
+      participationDays,
+      avgDailySales,
+      avgDailyTrend,
+      salesTrend,
+      participationTrend,
+    };
+  };
+
+  const selectedInsight = buildMemberInsight(selectedMember);
+
+  const renderSparkBars = (data: { month: string; value: number }[], label: string) => {
+    if (!data.length) return <div className="text-sm text-gray-500">No {label} data yet</div>;
+
+    const maxValue = Math.max(...data.map((item) => item.value), 1);
+
+    return (
+      <div className="space-y-2">
+        <div className="flex items-center justify-between text-xs text-gray-500">
+          <span>{label}</span>
+          <span>Last {data.length} months</span>
+        </div>
+        <div className="flex items-end gap-2">
+          {data.map((item) => (
+            <div key={item.month} className="flex flex-col items-center gap-1 text-[10px] text-gray-600">
+              <div
+                className="w-8 rounded bg-blue-100"
+                style={{ height: `${(item.value / maxValue) * 64}px` }}
+                title={`${item.month}: ${item.value.toFixed(2)}`}
+              />
+              <span>{item.month}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  };
 
   if (!isAuthenticated) {
     return (
@@ -280,12 +404,19 @@ export default function TeamManagement() {
                     </TableCell>
                     <TableCell>
                       <div className="flex gap-2">
-                        <Button 
-                          variant="ghost" 
+                        <Button
+                          variant="ghost"
                           size="sm"
                           onClick={() => handleToggleActive(member.memberId, member.activeFlag)}
                         >
                           <Edit className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setSelectedMember(member)}
+                        >
+                          <Eye className="h-4 w-4" />
                         </Button>
                       </div>
                     </TableCell>
@@ -340,6 +471,168 @@ export default function TeamManagement() {
           </div>
         </CardContent>
       </Card>
+
+      <Dialog open={!!selectedMember} onOpenChange={(open) => !open && setSelectedMember(null)}>
+        <DialogContent className="max-w-4xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <BarChart3 className="h-5 w-5 text-blue-600" />
+              {selectedMember?.memberName || 'Team Member Insight'}
+            </DialogTitle>
+            <DialogDescription>Show participation and sales performance breakdown</DialogDescription>
+          </DialogHeader>
+
+          {selectedMember && selectedInsight && (
+            <div className="space-y-6 py-2">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <Card className="shadow-sm">
+                  <CardHeader className="py-3">
+                    <CardDescription>Cars Sold</CardDescription>
+                    <CardTitle className="text-2xl">{selectedInsight.totalCarsSold}</CardTitle>
+                  </CardHeader>
+                </Card>
+                <Card className="shadow-sm">
+                  <CardHeader className="py-3">
+                    <CardDescription>Total Show Days</CardDescription>
+                    <CardTitle className="text-2xl">{selectedInsight.participationDays}</CardTitle>
+                  </CardHeader>
+                </Card>
+                <Card className="shadow-sm">
+                  <CardHeader className="py-3">
+                    <CardDescription>Average per Day</CardDescription>
+                    <CardTitle className="text-2xl">{selectedInsight.avgDailySales.toFixed(2)}</CardTitle>
+                  </CardHeader>
+                </Card>
+                <Card className="shadow-sm">
+                  <CardHeader className="py-3">
+                    <CardDescription>Shows Joined</CardDescription>
+                    <CardTitle className="text-2xl">{selectedInsight.memberShows.length}</CardTitle>
+                  </CardHeader>
+                </Card>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <Card className="shadow-sm">
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-lg">Shows Participated</CardTitle>
+                    <CardDescription>Based on show team assignments</CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-2">
+                    {selectedInsight.memberShows.length ? (
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Show</TableHead>
+                            <TableHead>Dates</TableHead>
+                            <TableHead className="text-right">Days</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {selectedInsight.memberShows.map((show) => (
+                            <TableRow key={show.id || show.name}>
+                              <TableCell className="font-medium">{show.name || show.id}</TableCell>
+                              <TableCell>
+                                {show.startDate && show.finishDate
+                                  ? `${show.startDate} - ${show.finishDate}`
+                                  : 'Dates not set'}
+                              </TableCell>
+                              <TableCell className="text-right">{getShowDuration(show)}</TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    ) : (
+                      <div className="text-sm text-gray-500">No assigned shows yet</div>
+                    )}
+                  </CardContent>
+                </Card>
+
+                <Card className="shadow-sm">
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-lg">Models Sold</CardTitle>
+                    <CardDescription>Counts from their recorded orders</CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-2">
+                    {Object.keys(selectedInsight.modelCounts).length ? (
+                      <div className="flex flex-wrap gap-2">
+                        {Object.entries(selectedInsight.modelCounts).map(([model, count]) => (
+                          <Badge key={model} variant="outline" className="px-3 py-1 text-sm">
+                            {model}: {count}
+                          </Badge>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="text-sm text-gray-500">No recorded vehicle sales</div>
+                    )}
+                  </CardContent>
+                </Card>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <Card className="shadow-sm">
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-lg">Average Daily Trend</CardTitle>
+                    <CardDescription>Orders per active show day</CardDescription>
+                  </CardHeader>
+                  <CardContent>{renderSparkBars(selectedInsight.avgDailyTrend, 'Average/day')}</CardContent>
+                </Card>
+                <Card className="shadow-sm">
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-lg">Sales Trend</CardTitle>
+                    <CardDescription>Orders per month</CardDescription>
+                  </CardHeader>
+                  <CardContent>{renderSparkBars(selectedInsight.salesTrend, 'Sales')}</CardContent>
+                </Card>
+                <Card className="shadow-sm">
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-lg">Participation Trend</CardTitle>
+                    <CardDescription>Show days per month</CardDescription>
+                  </CardHeader>
+                  <CardContent>{renderSparkBars(selectedInsight.participationTrend, 'Participation')}</CardContent>
+                </Card>
+              </div>
+
+              <div>
+                <Card className="shadow-sm">
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-lg">Order History</CardTitle>
+                    <CardDescription>Orders attributed to this member</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    {selectedInsight.memberOrders.length ? (
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Order ID</TableHead>
+                            <TableHead>Show</TableHead>
+                            <TableHead>Date</TableHead>
+                            <TableHead>Model</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {selectedInsight.memberOrders.map((order) => {
+                            const show = shows.find((s) => s.id === order.showId);
+                            return (
+                              <TableRow key={order.orderId}>
+                                <TableCell className="font-medium">{order.orderId}</TableCell>
+                                <TableCell>{show?.name || order.showId || 'Unknown show'}</TableCell>
+                                <TableCell>{order.date || '-'}</TableCell>
+                                <TableCell>{order.model || '-'}</TableCell>
+                              </TableRow>
+                            );
+                          })}
+                        </TableBody>
+                      </Table>
+                    ) : (
+                      <div className="text-sm text-gray-500">No orders linked to this member</div>
+                    )}
+                  </CardContent>
+                </Card>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
