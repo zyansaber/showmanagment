@@ -23,9 +23,51 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { dbGet, dbSet } from '@/lib/firebase';
-import type { BudgetExpenseItem, ExpenseCategory, Show, ShowBudgetProfile } from '@/types';
 import { Check, Loader2, Plus, Save, Search, XCircle } from 'lucide-react';
 import { toast } from 'sonner';
+
+type ExpenseCategory =
+  | 'Travel Expense'
+  | 'Commission & Day Rates'
+  | 'Site & Activation Expense'
+  | 'Other';
+
+type BudgetExpenseItem = {
+  id: string;
+  description: string;
+  category: ExpenseCategory;
+  amount: number;
+  date: string;
+  notes?: string;
+};
+
+type SiteLocation = {
+  state?: string;
+};
+
+type Show = {
+  id: string;
+  name: string;
+  siteLocation?: SiteLocation;
+  showDuration?: number;
+  startDate?: string;
+  finishDate?: string;
+  target2024?: number;
+  target2025?: number;
+  target2026?: number;
+  sapExpenseCode?: string;
+};
+
+type ShowBudgetProfile = {
+  showId: string;
+  durationDays: number;
+  salesTarget: number;
+  standCosts: number;
+  dealerCostsTransport: number;
+  factoryTravelCosts: number;
+  expenses: BudgetExpenseItem[];
+  lastUpdated?: string;
+};
 
 const formatCurrency = (value: number) =>
   value.toLocaleString('en-AU', {
@@ -70,13 +112,22 @@ const normaliseExpense = (expense: Partial<BudgetExpenseItem> | undefined): Budg
       ? safe.description.trim()
       : 'Unspecified';
 
+  const translatedCategory =
+    safe.category === 'Dealer Operations'
+      ? 'Commission & Day Rates'
+      : safe.category === 'Factory'
+        ? 'Travel Expense'
+        : safe.category === 'Stand & Venue'
+          ? 'Site & Activation Expense'
+          : safe.category;
+
   const category: ExpenseCategory =
-    safe.category === 'Dealer Operations' ||
-    safe.category === 'Factory' ||
-    safe.category === 'Stand & Venue' ||
-    safe.category === 'Other'
-      ? safe.category
-      : 'Other';
+    translatedCategory === 'Travel Expense' ||
+    translatedCategory === 'Commission & Day Rates' ||
+    translatedCategory === 'Site & Activation Expense' ||
+    translatedCategory === 'Other'
+      ? translatedCategory
+      : 'Travel Expense';
 
   const date = typeof safe.date === 'string' && safe.date.trim().length > 0 ? safe.date : '';
 
@@ -128,7 +179,7 @@ export default function ShowBudgetExpense() {
   const [isPickerOpen, setIsPickerOpen] = useState(false);
 
   const [newExpense, setNewExpense] = useState<Partial<BudgetExpenseItem>>({
-    category: 'Dealer Operations',
+    category: 'Travel Expense',
     description: '',
     amount: 0,
     date: '',
@@ -168,31 +219,42 @@ export default function ShowBudgetExpense() {
 
   const dealerDayRates = useMemo(() => (budget ? budget.durationDays * 500 * 6 : 0), [budget]);
   const dealerCommission = useMemo(() => (budget ? budget.salesTarget * 1000 : 0), [budget]);
-  const totalDealerCosts = useMemo(
-    () =>
-      budget
-        ? budget.standCosts + dealerDayRates + dealerCommission + budget.dealerCostsTransport
-        : 0,
-    [budget, dealerCommission, dealerDayRates]
+  const factoryCommission = useMemo(() => (budget ? budget.salesTarget * 500 : 0), [budget]);
+
+  const commissionBudget = useMemo(
+    () => (budget ? dealerDayRates + dealerCommission + factoryCommission : 0),
+    [budget, dealerCommission, dealerDayRates, factoryCommission]
   );
 
-  const factoryCommission = useMemo(() => (budget ? budget.salesTarget * 500 : 0), [budget]);
-  const totalFactoryCosts = useMemo(
-    () => (budget ? budget.factoryTravelCosts + factoryCommission : 0),
-    [budget, factoryCommission]
+  const travelBudget = useMemo(
+    () => (budget ? budget.dealerCostsTransport + budget.factoryTravelCosts : 0),
+    [budget]
   );
+
+  const siteActivationBudget = useMemo(() => (budget ? budget.standCosts : 0), [budget]);
 
   const totalBudget = useMemo(
-    () => totalDealerCosts + totalFactoryCosts,
-    [totalDealerCosts, totalFactoryCosts]
+    () => commissionBudget + travelBudget + siteActivationBudget,
+    [commissionBudget, siteActivationBudget, travelBudget]
+  );
+
+  const dealerAllocation = useMemo(
+    () =>
+      budget ? siteActivationBudget + dealerDayRates + dealerCommission + budget.dealerCostsTransport : 0,
+    [budget, dealerCommission, dealerDayRates, siteActivationBudget]
+  );
+
+  const factoryAllocation = useMemo(
+    () => (budget ? budget.factoryTravelCosts + factoryCommission : 0),
+    [budget, factoryCommission]
   );
 
   const expenseSummary = useMemo(() => {
     if (!budget) return { total: 0, byCategory: {} as Record<ExpenseCategory, number> };
     const byCategory: Record<ExpenseCategory, number> = {
-      'Dealer Operations': 0,
-      Factory: 0,
-      'Stand & Venue': 0,
+      'Travel Expense': 0,
+      'Commission & Day Rates': 0,
+      'Site & Activation Expense': 0,
       Other: 0,
     };
 
@@ -211,16 +273,18 @@ export default function ShowBudgetExpense() {
     [expenseSummary.total, totalBudget]
   );
 
-  const actualDealerSpend = useMemo(
-    () =>
-      (expenseSummary.byCategory?.['Dealer Operations'] ?? 0) +
-      (expenseSummary.byCategory?.['Stand & Venue'] ?? 0) +
-      (expenseSummary.byCategory?.Other ?? 0),
+  const actualTravelSpend = useMemo(
+    () => expenseSummary.byCategory?.['Travel Expense'] ?? 0,
     [expenseSummary.byCategory]
   );
 
-  const actualFactorySpend = useMemo(
-    () => expenseSummary.byCategory?.Factory ?? 0,
+  const actualCommissionSpend = useMemo(
+    () => expenseSummary.byCategory?.['Commission & Day Rates'] ?? 0,
+    [expenseSummary.byCategory]
+  );
+
+  const actualSiteSpend = useMemo(
+    () => expenseSummary.byCategory?.['Site & Activation Expense'] ?? 0,
     [expenseSummary.byCategory]
   );
 
@@ -230,19 +294,19 @@ export default function ShowBudgetExpense() {
         ? (
             [
               {
-                label: 'Dealer Operations',
-                budgeted: totalDealerCosts,
-                actual: expenseSummary.byCategory?.['Dealer Operations'] ?? 0,
+                label: 'Travel Expense',
+                budgeted: travelBudget,
+                actual: expenseSummary.byCategory?.['Travel Expense'] ?? 0,
               },
               {
-                label: 'Stand & Venue',
-                budgeted: budget.standCosts,
-                actual: expenseSummary.byCategory?.['Stand & Venue'] ?? 0,
+                label: 'Commission & Day Rates',
+                budgeted: commissionBudget,
+                actual: expenseSummary.byCategory?.['Commission & Day Rates'] ?? 0,
               },
               {
-                label: 'Factory',
-                budgeted: totalFactoryCosts,
-                actual: expenseSummary.byCategory?.Factory ?? 0,
+                label: 'Site & Activation Expense',
+                budgeted: siteActivationBudget,
+                actual: expenseSummary.byCategory?.['Site & Activation Expense'] ?? 0,
               },
               {
                 label: 'Other',
@@ -252,7 +316,7 @@ export default function ShowBudgetExpense() {
             ] as const
           )
         : [],
-    [budget, expenseSummary.byCategory, totalDealerCosts, totalFactoryCosts]
+    [budget, commissionBudget, expenseSummary.byCategory, siteActivationBudget, travelBudget]
   );
 
   const handleBudgetChange = (key: keyof ShowBudgetProfile, value: number) => {
@@ -265,7 +329,7 @@ export default function ShowBudgetExpense() {
     const entry = normaliseExpense(newExpense);
     setBudget({ ...budget, expenses: [...budget.expenses, entry] });
     setNewExpense({
-      category: newExpense.category || 'Dealer Operations',
+      category: newExpense.category || 'Travel Expense',
       description: '',
       amount: 0,
       date: '',
@@ -351,7 +415,12 @@ export default function ShowBudgetExpense() {
                           className={`mr-2 h-4 w-4 ${selectedShowId === item.id ? 'opacity-100' : 'opacity-0'}`}
                         />
                         <span className="flex-1">{item.name}</span>
-                        <Badge variant="secondary">{item.siteLocation?.state || 'N/A'}</Badge>
+                        <div className="flex items-center gap-2">
+                          {item.sapExpenseCode && (
+                            <Badge variant="outline">SAP: {item.sapExpenseCode}</Badge>
+                          )}
+                          <Badge variant="secondary">{item.siteLocation?.state || 'N/A'}</Badge>
+                        </div>
                       </CommandItem>
                     ))}
                   </CommandGroup>
@@ -361,7 +430,7 @@ export default function ShowBudgetExpense() {
           </Popover>
 
           {selectedShow && budget && (
-            <div className="grid w-full gap-4 rounded-xl bg-slate-50/80 p-4 text-sm text-slate-700 md:grid-cols-3">
+            <div className="grid w-full gap-4 rounded-xl bg-slate-50/80 p-4 text-sm text-slate-700 md:grid-cols-4">
               <div>
                 <p className="text-xs uppercase text-slate-500">Duration (days)</p>
                 <p className="text-lg font-semibold">{budget.durationDays || 'Not set'}</p>
@@ -373,6 +442,10 @@ export default function ShowBudgetExpense() {
               <div>
                 <p className="text-xs uppercase text-slate-500">Last updated</p>
                 <p className="text-lg font-semibold">{budget.lastUpdated ? new Date(budget.lastUpdated).toLocaleString() : 'Not saved'}</p>
+              </div>
+              <div>
+                <p className="text-xs uppercase text-slate-500">SAP Expense Code</p>
+                <p className="text-lg font-semibold">{selectedShow.sapExpenseCode || 'Not set'}</p>
               </div>
             </div>
           )}
@@ -466,7 +539,7 @@ export default function ShowBudgetExpense() {
             <CardContent className="space-y-4">
               <div className="grid gap-3 sm:grid-cols-3">
                 <div>
-                  <p className="text-xs uppercase text-slate-500">Budgeted total (Dealer + Factory)</p>
+                  <p className="text-xs uppercase text-slate-500">Budgeted total (all categories)</p>
                   <p className="text-xl font-semibold text-slate-900">{formatCurrency(totalBudget)}</p>
                 </div>
                 <div>
@@ -493,16 +566,22 @@ export default function ShowBudgetExpense() {
                   </TableHeader>
                   <TableBody>
                     <TableRow>
-                      <TableCell className="font-medium">Dealer Costs</TableCell>
-                      <TableCell className="text-right">{formatCurrency(totalDealerCosts)}</TableCell>
-                      <TableCell className="text-right">{formatCurrency(actualDealerSpend)}</TableCell>
-                      <TableCell className="text-right">{formatCurrency(totalDealerCosts - actualDealerSpend)}</TableCell>
+                      <TableCell className="font-medium">Travel Expense</TableCell>
+                      <TableCell className="text-right">{formatCurrency(travelBudget)}</TableCell>
+                      <TableCell className="text-right">{formatCurrency(actualTravelSpend)}</TableCell>
+                      <TableCell className="text-right">{formatCurrency(travelBudget - actualTravelSpend)}</TableCell>
                     </TableRow>
                     <TableRow>
-                      <TableCell className="font-medium">Factory Costs</TableCell>
-                      <TableCell className="text-right">{formatCurrency(totalFactoryCosts)}</TableCell>
-                      <TableCell className="text-right">{formatCurrency(actualFactorySpend)}</TableCell>
-                      <TableCell className="text-right">{formatCurrency(totalFactoryCosts - actualFactorySpend)}</TableCell>
+                      <TableCell className="font-medium">Commission &amp; Day Rates</TableCell>
+                      <TableCell className="text-right">{formatCurrency(commissionBudget)}</TableCell>
+                      <TableCell className="text-right">{formatCurrency(actualCommissionSpend)}</TableCell>
+                      <TableCell className="text-right">{formatCurrency(commissionBudget - actualCommissionSpend)}</TableCell>
+                    </TableRow>
+                    <TableRow>
+                      <TableCell className="font-medium">Site &amp; Activation Expense</TableCell>
+                      <TableCell className="text-right">{formatCurrency(siteActivationBudget)}</TableCell>
+                      <TableCell className="text-right">{formatCurrency(actualSiteSpend)}</TableCell>
+                      <TableCell className="text-right">{formatCurrency(siteActivationBudget - actualSiteSpend)}</TableCell>
                     </TableRow>
                     <TableRow className="bg-slate-50/70 font-semibold">
                       <TableCell>Totals</TableCell>
@@ -536,20 +615,22 @@ export default function ShowBudgetExpense() {
 
           <Card className="shadow-sm">
             <CardHeader>
-              <CardTitle>Dealer Budget Sheet</CardTitle>
-              <CardDescription>Auto-calculates Dealer Day Rates and commissions with transparent formulas.</CardDescription>
+              <CardTitle>Commission &amp; Site Budget Sheet</CardTitle>
+              <CardDescription>Break down site, travel, and commission allocations for the show.</CardDescription>
             </CardHeader>
             <CardContent>
               <div className="grid gap-4 lg:grid-cols-2">
                 <div className="space-y-3">
-                  <Label>Stand Costs</Label>
+                  <Label>Site &amp; Activation Expense</Label>
                   <Input
                     type="number"
                     value={budget.standCosts}
                     onChange={(e) => handleBudgetChange('standCosts', toSafeNumber(e.target.value))}
-                    placeholder="Enter stand costs"
+                    placeholder="Enter site build, venue, activation costs"
                   />
-                  <p className="text-xs text-slate-500">Provided by on-site team; includes venue, build, and fixed costs.</p>
+                  <p className="text-xs text-slate-500">
+                    Provided by on-site team; includes venue, build, activation, and fixed costs.
+                  </p>
                 </div>
                 <div className="space-y-3">
                   <Label>Sales Target (adjustable)</Label>
@@ -574,7 +655,7 @@ export default function ShowBudgetExpense() {
                   </TableHeader>
                   <TableBody>
                     <TableRow>
-                      <TableCell className="font-medium">Stand Costs</TableCell>
+                      <TableCell className="font-medium">Site &amp; Activation Expense</TableCell>
                       <TableCell>Manual input</TableCell>
                       <TableCell className="text-right">{formatCurrency(budget.standCosts)}</TableCell>
                     </TableRow>
@@ -587,12 +668,12 @@ export default function ShowBudgetExpense() {
                       <TableCell className="text-right">{formatCurrency(dealerDayRates)}</TableCell>
                     </TableRow>
                     <TableRow>
-                      <TableCell className="font-medium">Dealer Commission</TableCell>
+                      <TableCell className="font-medium">Commission</TableCell>
                       <TableCell>Sales Target × 1000</TableCell>
                       <TableCell className="text-right">{formatCurrency(dealerCommission)}</TableCell>
                     </TableRow>
                     <TableRow>
-                      <TableCell className="font-medium">Dealer Costs + Transport</TableCell>
+                      <TableCell className="font-medium">Travel (Dealer)</TableCell>
                       <TableCell>
                         <Input
                           type="number"
@@ -604,8 +685,8 @@ export default function ShowBudgetExpense() {
                       <TableCell className="text-right">{formatCurrency(budget.dealerCostsTransport)}</TableCell>
                     </TableRow>
                     <TableRow className="bg-slate-50/70 font-semibold">
-                      <TableCell colSpan={2}>TOTAL Dealer Costs</TableCell>
-                      <TableCell className="text-right">{formatCurrency(totalDealerCosts)}</TableCell>
+                      <TableCell colSpan={2}>TOTAL Budget (Site + Commission + Dealer Travel)</TableCell>
+                      <TableCell className="text-right">{formatCurrency(dealerAllocation)}</TableCell>
                     </TableRow>
                   </TableBody>
                 </Table>
@@ -615,8 +696,8 @@ export default function ShowBudgetExpense() {
 
           <Card className="shadow-sm">
             <CardHeader>
-              <CardTitle>Factory Budget Sheet</CardTitle>
-              <CardDescription>Calculates factory commissions from the sales target and combines travel for a total.</CardDescription>
+              <CardTitle>Travel &amp; Commission Uplift</CardTitle>
+              <CardDescription>Captures remaining travel and commission components for the event.</CardDescription>
             </CardHeader>
             <CardContent>
               <div className="space-y-3">
@@ -651,8 +732,8 @@ export default function ShowBudgetExpense() {
                       <TableCell className="text-right">{formatCurrency(budget.factoryTravelCosts)}</TableCell>
                     </TableRow>
                     <TableRow className="bg-slate-50/70 font-semibold">
-                      <TableCell colSpan={2}>TOTAL Factory Costs</TableCell>
-                      <TableCell className="text-right">{formatCurrency(totalFactoryCosts)}</TableCell>
+                      <TableCell colSpan={2}>TOTAL Budget (Travel + Commission Uplift)</TableCell>
+                      <TableCell className="text-right">{formatCurrency(factoryAllocation)}</TableCell>
                     </TableRow>
                   </TableBody>
                 </Table>
@@ -668,18 +749,16 @@ export default function ShowBudgetExpense() {
             <CardContent className="space-y-4">
               <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
                 <div className="rounded-lg border bg-slate-50/60 p-4">
-                  <p className="text-xs uppercase text-slate-500">Dealer Total Budget</p>
-                  <p className="text-xl font-semibold">{formatCurrency(totalDealerCosts)}</p>
+                  <p className="text-xs uppercase text-slate-500">Travel Expense Budget</p>
+                  <p className="text-xl font-semibold">{formatCurrency(travelBudget)}</p>
                 </div>
                 <div className="rounded-lg border bg-slate-50/60 p-4">
-                  <p className="text-xs uppercase text-slate-500">Factory Total Budget</p>
-                  <p className="text-xl font-semibold">{formatCurrency(totalFactoryCosts)}</p>
+                  <p className="text-xs uppercase text-slate-500">Commission &amp; Day Rates Budget</p>
+                  <p className="text-xl font-semibold">{formatCurrency(commissionBudget)}</p>
                 </div>
                 <div className="rounded-lg border bg-slate-50/60 p-4">
-                  <p className="text-xs uppercase text-slate-500">Actual Expenses</p>
-                  <p className={`text-xl font-semibold ${expenseSummary.total > totalBudget ? 'text-red-600' : 'text-emerald-700'}`}>
-                    {formatCurrency(expenseSummary.total)}
-                  </p>
+                  <p className="text-xs uppercase text-slate-500">Site &amp; Activation Budget</p>
+                  <p className="text-xl font-semibold">{formatCurrency(siteActivationBudget)}</p>
                 </div>
                 <div className="rounded-lg border bg-slate-50/60 p-4">
                   <p className="text-xs uppercase text-slate-500">Variance (Budget - Actual)</p>
@@ -701,24 +780,28 @@ export default function ShowBudgetExpense() {
                   </TableHeader>
                   <TableBody>
                     <TableRow>
-                      <TableCell className="font-medium">Dealer Related</TableCell>
-                      <TableCell>{formatCurrency(totalDealerCosts)}</TableCell>
-                      <TableCell>{formatCurrency(expenseSummary.byCategory['Dealer Operations'])}</TableCell>
+                      <TableCell className="font-medium">Travel Expense</TableCell>
+                      <TableCell>{formatCurrency(travelBudget)}</TableCell>
+                      <TableCell>{formatCurrency(expenseSummary.byCategory['Travel Expense'])}</TableCell>
+                      <TableCell>{formatCurrency(travelBudget - expenseSummary.byCategory['Travel Expense'])}</TableCell>
+                    </TableRow>
+                    <TableRow>
+                      <TableCell className="font-medium">Commission &amp; Day Rates</TableCell>
+                      <TableCell>{formatCurrency(commissionBudget)}</TableCell>
+                      <TableCell>{formatCurrency(expenseSummary.byCategory['Commission & Day Rates'])}</TableCell>
                       <TableCell>
-                        {formatCurrency(totalDealerCosts - expenseSummary.byCategory['Dealer Operations'])}
+                        {formatCurrency(commissionBudget - expenseSummary.byCategory['Commission & Day Rates'])}
                       </TableCell>
                     </TableRow>
                     <TableRow>
-                      <TableCell className="font-medium">Factory Related</TableCell>
-                      <TableCell>{formatCurrency(totalFactoryCosts)}</TableCell>
-                      <TableCell>{formatCurrency(expenseSummary.byCategory.Factory)}</TableCell>
-                      <TableCell>{formatCurrency(totalFactoryCosts - expenseSummary.byCategory.Factory)}</TableCell>
-                    </TableRow>
-                    <TableRow>
-                      <TableCell className="font-medium">Stand & Venue</TableCell>
-                      <TableCell>{formatCurrency(budget.standCosts)}</TableCell>
-                      <TableCell>{formatCurrency(expenseSummary.byCategory['Stand & Venue'])}</TableCell>
-                      <TableCell>{formatCurrency(budget.standCosts - expenseSummary.byCategory['Stand & Venue'])}</TableCell>
+                      <TableCell className="font-medium">Site &amp; Activation Expense</TableCell>
+                      <TableCell>{formatCurrency(siteActivationBudget)}</TableCell>
+                      <TableCell>{formatCurrency(expenseSummary.byCategory['Site & Activation Expense'])}</TableCell>
+                      <TableCell>
+                        {formatCurrency(
+                          siteActivationBudget - expenseSummary.byCategory['Site & Activation Expense']
+                        )}
+                      </TableCell>
                     </TableRow>
                     <TableRow>
                       <TableCell className="font-medium">Other / Unclassified</TableCell>
@@ -755,9 +838,9 @@ export default function ShowBudgetExpense() {
                       setNewExpense((prev) => ({ ...prev, category: e.target.value as ExpenseCategory }))
                     }
                   >
-                    <option value="Dealer Operations">Dealer Operations</option>
-                    <option value="Factory">Factory</option>
-                    <option value="Stand & Venue">Stand & Venue</option>
+                    <option value="Travel Expense">Travel Expense</option>
+                    <option value="Commission & Day Rates">Commission &amp; Day Rates</option>
+                    <option value="Site & Activation Expense">Site &amp; Activation Expense</option>
                     <option value="Other">Other</option>
                   </select>
                 </div>
