@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Download, MapPin, Plus, Search, SortAsc, SortDesc, Trash2, Upload } from 'lucide-react';
+import { CalendarClock, Download, MapPin, Plus, Search, SortAsc, SortDesc, Trash2, Upload } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
 import { dbGet, dbRemove, dbSet, dbUpdate } from '@/lib/firebase';
 import type { Show } from '@/types';
@@ -76,6 +76,10 @@ export default function ShowManagement() {
   const [searchTerm, setSearchTerm] = useState('');
   const [sortKey, setSortKey] = useState<'name' | 'startDate'>('startDate');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
+  const [showDealerMappings, setShowDealerMappings] = useState<Record<string, unknown> | null>(null);
+  const [dealerSlugFilter, setDealerSlugFilter] = useState('dealer');
+  const [showDealerError, setShowDealerError] = useState<string | null>(null);
+  const [showDealerLoading, setShowDealerLoading] = useState(true);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
@@ -93,6 +97,23 @@ export default function ShowManagement() {
     };
 
     loadShows();
+  }, []);
+
+  useEffect(() => {
+    const loadShowDealerMappings = async () => {
+      try {
+        const mappings = await dbGet('showDealerMappings');
+        setShowDealerMappings(mappings ?? {});
+        setShowDealerError(null);
+      } catch (err) {
+        console.error('Error loading show dealer mappings:', err);
+        setShowDealerError('无法载入 showDealerMappings 数据');
+      } finally {
+        setShowDealerLoading(false);
+      }
+    };
+
+    loadShowDealerMappings();
   }, []);
 
   const determineStatus = (show: Show): Show['status'] => {
@@ -202,6 +223,72 @@ export default function ShowManagement() {
       return acc;
     }, {} as Record<string, StateStats>);
   }, [validShows]);
+
+  const normaliseDealerSlug = (value: string | undefined | null) => {
+    if (!value) return '';
+    return value
+      .toString()
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, '-')
+      .replace(/[^a-z0-9-]/g, '');
+  };
+
+  const dealerMappings = useMemo(() => {
+    if (!showDealerMappings) return [] as Array<{ id: string; dealerSlug: string; showId?: string }>;
+
+    return Object.entries(showDealerMappings)
+      .map(([id, raw]) => {
+        const mapping = raw as Record<string, unknown>;
+        const dealerSlug = normaliseDealerSlug(
+          String(
+            (mapping.dealerSlug as string) ||
+              (mapping.dealer as string) ||
+              (mapping.dealershipSlug as string) ||
+              (mapping.dealership as string) ||
+              ''
+          )
+        );
+        const showId = (mapping.showId as string) || (mapping.showID as string) || (mapping.show as string);
+
+        if (!dealerSlug) return null;
+        return { id, dealerSlug, showId };
+      })
+      .filter((entry): entry is { id: string; dealerSlug: string; showId?: string } => Boolean(entry?.dealerSlug));
+  }, [showDealerMappings]);
+
+  const dealerShows = useMemo(() => {
+    const filterSlug = normaliseDealerSlug(dealerSlugFilter);
+    const filteredMappings = dealerMappings.filter((mapping) =>
+      filterSlug ? mapping.dealerSlug.includes(filterSlug) : true
+    );
+
+    const seen = new Set<string>();
+
+    return filteredMappings.reduce(
+      (acc, mapping) => {
+        const matchedShow = shows.find((show) => show.id === mapping.showId);
+
+        if (matchedShow && (!matchedShow.id || !seen.has(matchedShow.id))) {
+          if (matchedShow.id) seen.add(matchedShow.id);
+          acc.push({ mapping, show: matchedShow });
+          return acc;
+        }
+
+        const fallbackShow = shows.find(
+          (show) => normaliseDealerSlug(show.dealership) === mapping.dealerSlug
+        );
+
+        if (fallbackShow && (!fallbackShow.id || !seen.has(fallbackShow.id))) {
+          if (fallbackShow.id) seen.add(fallbackShow.id);
+          acc.push({ mapping, show: fallbackShow });
+        }
+
+        return acc;
+      },
+      [] as Array<{ mapping: { id: string; dealerSlug: string; showId?: string }; show: Show }>
+    );
+  }, [dealerMappings, dealerSlugFilter, shows]);
 
   const filteredShows = useMemo(() => {
     if (selectedState === 'All') return validShows;
@@ -658,9 +745,6 @@ export default function ShowManagement() {
               <Button onClick={handleAddShow} disabled={isCreatingShow}>
                 <Plus className="mr-2 h-4 w-4" /> {isCreatingShow ? 'Creating...' : 'Add Show'}
               </Button>
-              <Button variant="outline" size="sm" onClick={handleDownloadCsv} disabled={isExporting}>
-                <Download className="mr-2 h-4 w-4" /> Export CSV
-              </Button>
               <Button variant="outline" size="sm" onClick={handleUploadClick} disabled={isImporting}>
                 <Upload className="mr-2 h-4 w-4" /> Import & Overwrite
               </Button>
@@ -682,6 +766,94 @@ export default function ShowManagement() {
             onStateClick={handleStateSelect}
             selectedState={selectedState}
           />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <div className="flex flex-wrap items-end justify-between gap-4">
+            <div>
+              <CardTitle>Dealer Show Connections</CardTitle>
+              <p className="mt-1 text-sm text-gray-500">
+                通过 <code>showDealerMappings</code> 匹配经销商 slug 与 show 记录，并展示对应的展会时间。
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="relative w-64">
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                <Input
+                  value={dealerSlugFilter}
+                  onChange={(event) => setDealerSlugFilter(event.target.value)}
+                  placeholder="输入 dealer slug，如 dealer"
+                  className="pl-9"
+                />
+              </div>
+              <Badge variant="secondary" className="bg-slate-100 text-slate-700">
+                {dealerShows.length} shows
+              </Badge>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {showDealerLoading ? (
+            <div className="py-8 text-sm text-gray-600">载入 show-dealer 映射数据中...</div>
+          ) : showDealerError ? (
+            <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+              {showDealerError}
+            </div>
+          ) : dealerShows.length === 0 ? (
+            <div className="py-10 text-center text-sm text-gray-500">
+              当前 slug 没有关联的 show，试试其他筛选关键词。
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+              {dealerShows.map(({ mapping, show }) => {
+                const location = [show.siteLocation?.suburb, show.siteLocation?.state]
+                  .map((value) => value?.trim())
+                  .filter(Boolean)
+                  .join(', ');
+
+                return (
+                  <div
+                    key={`${mapping.id}-${show.id ?? show.name}`}
+                    className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="space-y-1">
+                        <div className="text-sm font-semibold text-gray-900">{show.name || 'Unnamed Show'}</div>
+                        <div className="flex flex-wrap items-center gap-2 text-xs text-gray-600">
+                          <Badge variant="outline" className="border-slate-200 bg-slate-50 text-slate-700">
+                            {mapping.dealerSlug || 'dealer'}
+                          </Badge>
+                          {show.dealership && (
+                            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-700">
+                              {show.dealership}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <Badge variant="secondary" className="bg-emerald-50 text-emerald-700">
+                        Linked
+                      </Badge>
+                    </div>
+
+                    <div className="mt-3 space-y-2 text-sm text-gray-700">
+                      <div className="flex items-center gap-2">
+                        <CalendarClock className="h-4 w-4 text-gray-400" />
+                        <span>
+                          {formatDate(show.startDate)} — {formatDate(show.finishDate)}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <MapPin className="h-4 w-4 text-gray-400" />
+                        <span>{location || 'Location N/A'}</span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </CardContent>
       </Card>
 
