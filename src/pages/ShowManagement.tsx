@@ -1,900 +1,835 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { useParams } from "react-router-dom";
-import { toast } from "sonner";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import Sidebar from "@/components/Sidebar";
-import { prettifyDealerName, normalizeDealerSlug } from "@/lib/dealerUtils";
-import { dealerNameToSlug, subscribeShowDealerMappings } from "@/lib/firebase";
-import {
-  fetchShowOrderById,
-  fetchTeamMembers,
-  formatShowDate,
-  parseFlexibleDateToDate,
-  subscribeToShows,
-  subscribeToShowOrders,
-  updateShowOrder,
-} from "@/lib/showDatabase";
-import { sendDealerConfirmationEmail } from "@/lib/email";
-import type { ShowOrder } from "@/types/showOrder";
-import type { ShowRecord } from "@/types/show";
-import type { TeamMember } from "@/types/teamMember";
-import type { ShowDealerMapping } from "@/lib/firebase";
-import { CheckCircle2, Clock3 } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import AustraliaMap from '@/components/AustraliaMap';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Download, MapPin, Plus, Search, SortAsc, SortDesc, Trash2, Upload } from 'lucide-react';
+import { v4 as uuidv4 } from 'uuid';
+import { dbGet, dbRemove, dbSet, dbUpdate } from '@/lib/firebase';
+import type { Show } from '@/types';
+import { toast } from 'sonner';
 
-declare global {
-  interface Window {
-    jspdf?: any;
-    jsPDF?: any;
+type StateStats = {
+  shows: number;
+  totalSales: number;
+  totalDays: number;
+};
+
+const parseMetric = (value: number | string | undefined | null): number => {
+  if (value === undefined || value === null) return 0;
+  if (typeof value === 'number') {
+    return Number.isFinite(value) && value > 0 ? value : 0;
   }
-}
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return 0;
+    const normalised = trimmed.toLowerCase();
+    if (normalised === 'n/a' || normalised === 'na') return 0;
+    const parsed = Number(trimmed);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+  }
+  return 0;
+};
 
-const loadScript = (src: string) =>
-  new Promise<void>((resolve, reject) => {
-    const existing = Array.from(document.querySelectorAll("script")).find((s) => s.src.includes(src));
-    if (existing) return resolve();
-    const s = document.createElement("script");
-    s.src = src;
-    s.async = true;
-    s.crossOrigin = "anonymous";
-    s.onload = () => resolve();
-    s.onerror = () => reject(new Error(`Failed to load script: ${src}`));
-    document.head.appendChild(s);
+const normaliseState = (state: string | undefined | null): string | null => {
+  if (!state || typeof state !== 'string') return null;
+  const trimmed = state.trim();
+  if (!trimmed) return null;
+  const normalised = trimmed.toLowerCase();
+  if (normalised === 'n/a' || normalised === 'na') return null;
+  return trimmed.toUpperCase();
+};
+
+const formatCurrency = (value: number) =>
+  value > 0 ? value.toLocaleString('en-AU', { maximumFractionDigits: 0 }) : 'N/A';
+
+const formatNumber = (value: number) =>
+  value > 0 ? value.toLocaleString('en-AU', { maximumFractionDigits: 0 }) : 'N/A';
+
+const formatDate = (value: string | undefined) => {
+  if (!value) return 'N/A';
+  const trimmed = value.trim();
+  if (!trimmed) return 'N/A';
+  const normalised = trimmed.toLowerCase();
+  if (normalised === 'n/a' || normalised === 'na') return 'N/A';
+  const parsed = new Date(trimmed);
+  if (Number.isNaN(parsed.getTime())) return trimmed;
+  return parsed.toLocaleDateString('en-AU', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
   });
-
-const ensureJsPdf = async (): Promise<any> => {
-  if (window.jspdf?.jsPDF) return window.jspdf.jsPDF;
-  if (window.jsPDF) return window.jsPDF;
-  throw new Error("jsPDF not available after loading");
-};
-
-let cachedLogoDataUrl: string | undefined;
-
-const loadLogoDataUrl = async () => {
-  if (cachedLogoDataUrl) return cachedLogoDataUrl;
-
-  try {
-    const response = await fetch("/favicon.svg");
-    const svgText = await response.text();
-    const svgBlob = new Blob([svgText], { type: "image/svg+xml" });
-    const svgUrl = URL.createObjectURL(svgBlob);
-
-    const image = new Image();
-    image.src = svgUrl;
-
-    await new Promise<void>((resolve, reject) => {
-      image.onload = () => resolve();
-      image.onerror = () => reject(new Error("Failed to load logo"));
-    });
-
-    const canvas = document.createElement("canvas");
-    const targetWidth = 260;
-    const ratio = image.width ? targetWidth / image.width : 1;
-    canvas.width = targetWidth;
-    canvas.height = Math.max(120, image.height * ratio || 140);
-    const ctx = canvas.getContext("2d");
-    if (!ctx) throw new Error("Unable to render logo");
-
-    ctx.fillStyle = "#f8fafc";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
-    URL.revokeObjectURL(svgUrl);
-
-    cachedLogoDataUrl = canvas.toDataURL("image/png");
-  } catch (error) {
-    console.warn("Unable to embed logo in PDF", error);
-  }
-
-  return cachedLogoDataUrl;
-};
-
-const sanitizeOrderIdForBarcode = (orderId?: string | null) => {
-  return (orderId || "").toUpperCase().replace(/[^0-9A-Z\-\.\/\+% ]/g, "-");
-};
-
-const code39Patterns: Record<string, string> = {
-  "0": "nnnwwnwnn",
-  "1": "wnnwnnnnw",
-  "2": "nnwwnnnnw",
-  "3": "wnwwnnnnn",
-  "4": "nnnwwnnnw",
-  "5": "wnnwwnnnn",
-  "6": "nnwwwnnnn",
-  "7": "nnnwnnwnw",
-  "8": "wnnwnnwnn",
-  "9": "nnwwnnwnn",
-  A: "wnnnnwnnw",
-  B: "nnwnnwnnw",
-  C: "wnwnnwnnn",
-  D: "nnnnwwnnw",
-  E: "wnnnwwnnn",
-  F: "nnwnwwnnn",
-  G: "nnnnnwwnw",
-  H: "wnnnnwwnn",
-  I: "nnwnnwwnn",
-  J: "nnnnwwwnn",
-  K: "wnnnnnnww",
-  L: "nnwnnnnww",
-  M: "wnwnnnnwn",
-  N: "nnnnwnnww",
-  O: "wnnnwnnwn",
-  P: "nnwnwnnwn",
-  Q: "nnnnnnwww",
-  R: "wnnnnnwwn",
-  S: "nnwnnnwwn",
-  T: "nnnnwnwwn",
-  U: "wwnnnnnnw",
-  V: "nwwnnnnnw",
-  W: "wwwnnnnnn",
-  X: "nwnnwnnnw",
-  Y: "wwnnwnnnn",
-  Z: "nwwnwnnnn",
-  "-": "nwnnnnwnw",
-  ".": "wwnnnnwnn",
-  " ": "nwwnnnwnn",
-  "$": "nwnwnwnnn",
-  "/": "nwnwnnnwn",
-  "+": "nwnnnwnwn",
-  "%": "nnnwnwnwn",
-  "*": "nwnnwnwnn",
-};
-
-type RgbColor = { r: number; g: number; b: number };
-
-const estimateCode39Width = (orderId: string, barWidth: number) => {
-  const cleanValue = `*${sanitizeOrderIdForBarcode(orderId)}*`;
-  let total = 0;
-
-  for (const char of cleanValue) {
-    const pattern = code39Patterns[char];
-    if (!pattern) continue;
-
-    pattern.split("").forEach((token) => {
-      const width = token === "w" ? barWidth * 3 : barWidth;
-      total += width;
-    });
-
-    total += barWidth; // inter-character gap
-  }
-
-  return total;
-};
-
-const pickBarcodeBarWidth = (orderId: string, maxWidth: number) => {
-  let bw = 1.0;
-  while (bw > 0.6 && estimateCode39Width(orderId, bw) > maxWidth) {
-    bw -= 0.05;
-  }
-  return Math.max(0.6, bw);
-};
-
-const drawBarcode = (
-  doc: any,
-  params: { orderId: string; x: number; y: number; height: number; barWidth?: number; color: RgbColor }
-) => {
-  const { orderId, x, y, height, barWidth = 1.0, color } = params;
-  const cleanValue = `*${sanitizeOrderIdForBarcode(orderId)}*`;
-  let cursor = x;
-
-  doc.setFillColor(color.r, color.g, color.b);
-
-  for (const char of cleanValue) {
-    const pattern = code39Patterns[char];
-    if (!pattern) continue;
-
-    pattern.split("").forEach((token, index) => {
-      const width = token === "w" ? barWidth * 3 : barWidth;
-      const isBar = index % 2 === 0;
-      if (isBar) {
-        doc.rect(cursor, y, width, height, "F");
-      }
-      cursor += width;
-    });
-
-    cursor += barWidth; // inter-character gap
-  }
-
-  return cursor - x;
 };
 
 export default function ShowManagement() {
-  const { dealerSlug: rawDealerSlug } = useParams<{ dealerSlug: string }>();
-  const dealerSlug = normalizeDealerSlug(rawDealerSlug);
-  const dealerDisplayName = prettifyDealerName(dealerSlug);
-
-  const [orders, setOrders] = useState<ShowOrder[]>([]);
-  const [shows, setShows] = useState<ShowRecord[]>([]);
-  const [ordersLoading, setOrdersLoading] = useState(true);
-  const [showsLoading, setShowsLoading] = useState(true);
-  const [mappingsLoading, setMappingsLoading] = useState(true);
-  const [teamMembersLoading, setTeamMembersLoading] = useState(true);
-  const [savingOrderId, setSavingOrderId] = useState<string | null>(null);
-  const [chassisDrafts, setChassisDrafts] = useState<Record<string, string>>({});
-  const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
-  const [showMappings, setShowMappings] = useState<Record<string, ShowDealerMapping>>({});
+  const navigate = useNavigate();
+  const [shows, setShows] = useState<Show[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [selectedState, setSelectedState] = useState<string>('All');
+  const [isExporting, setIsExporting] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
+  const [isCreatingShow, setIsCreatingShow] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [sortKey, setSortKey] = useState<'name' | 'startDate'>('startDate');
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
-    const unsub = subscribeToShowOrders((data) => {
-      setOrders(data);
-      setOrdersLoading(false);
-    });
-    return unsub;
-  }, []);
-
-  useEffect(() => {
-    const unsub = subscribeToShows((data) => {
-      setShows(data);
-      setShowsLoading(false);
-    });
-    return unsub;
-  }, []);
-
-  useEffect(() => {
-    const unsub = subscribeShowDealerMappings((data) => {
-      setShowMappings(data || {});
-      setMappingsLoading(false);
-    });
-    return unsub;
-  }, []);
-
-  useEffect(() => {
-    const loadTeamMembers = async () => {
+    const loadShows = async () => {
       try {
-        const data = await fetchTeamMembers();
-        setTeamMembers(data);
-      } catch (error) {
-        console.error(error);
-        toast.error("Failed to load team members");
+        const showsData = await dbGet('shows');
+        setShows(showsData ? Object.values(showsData) : []);
+        setError(null);
+      } catch (err) {
+        console.error('Error loading shows:', err);
+        setError('Failed to load show data. Please try again later.');
       } finally {
-        setTeamMembersLoading(false);
+        setLoading(false);
       }
     };
 
-    void loadTeamMembers();
+    loadShows();
   }, []);
 
-  const showMap = useMemo(() => {
-    const map: Record<string, ShowRecord> = {};
-    shows.forEach((show) => {
-      if (show.id) {
-        map[show.id] = show;
+  const determineStatus = (show: Show): Show['status'] => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const start = show.startDate ? new Date(show.startDate) : null;
+    const finish = show.finishDate ? new Date(show.finishDate) : null;
+
+    if (start && !Number.isNaN(start.getTime())) start.setHours(0, 0, 0, 0);
+    if (finish && !Number.isNaN(finish.getTime())) finish.setHours(0, 0, 0, 0);
+
+    if (start && !Number.isNaN(start.getTime()) && today < start) {
+      return 'Not Started';
+    }
+
+    if (finish && !Number.isNaN(finish.getTime()) && today > finish) {
+      return 'Finished';
+    }
+
+    if (
+      start &&
+      !Number.isNaN(start.getTime()) &&
+      finish &&
+      !Number.isNaN(finish.getTime()) &&
+      today >= start &&
+      today <= finish
+    ) {
+      return 'In Progress';
+    }
+
+    if (start && !Number.isNaN(start.getTime()) && !finish) {
+      return today >= start ? 'In Progress' : 'Not Started';
+    }
+
+    if (finish && !Number.isNaN(finish.getTime()) && !start) {
+      return today > finish ? 'Finished' : 'In Progress';
+    }
+
+    return 'Not Started';
+  };
+
+  useEffect(() => {
+    const syncStatuses = async () => {
+      if (shows.length === 0) return;
+
+      const updatedShows: Show[] = [];
+      const statusUpdates: { id: string; status: Show['status'] }[] = [];
+
+      for (const show of shows) {
+        const computedStatus = determineStatus(show);
+        if (computedStatus !== show.status && show.id) {
+          statusUpdates.push({ id: show.id, status: computedStatus });
+          updatedShows.push({ ...show, status: computedStatus });
+        } else {
+          updatedShows.push(show);
+        }
       }
-    });
-    return map;
+
+      if (statusUpdates.length === 0) return;
+
+      setShows(updatedShows);
+
+      await Promise.all(
+        statusUpdates.map(({ id, status }) =>
+          dbUpdate(`shows/${id}`, { status } as unknown as Record<string, unknown>)
+        )
+      );
+    };
+
+    syncStatuses();
   }, [shows]);
 
-  const getShowDealerSlug = (show?: ShowRecord) => {
-    const preferredDealer = (show?.handoverDealer ?? "").trim();
-    const fallbackDealer = (show?.dealership ?? "").trim();
-    return dealerNameToSlug(preferredDealer || fallbackDealer);
-  };
-
-  const resolveShowDealer = useCallback(
-    (show?: ShowRecord) => {
-      if (!show) return { slug: "", source: "none" as const };
-
-      const mappingKey = dealerNameToSlug(show.dealership || "");
-      const mappedSlug = mappingKey && showMappings[mappingKey]?.dealerSlug;
-      if (mappedSlug) {
-        return { slug: normalizeDealerSlug(mappedSlug), source: "mapping" as const };
-      }
-
-      const inferredSlug = normalizeDealerSlug(getShowDealerSlug(show));
-      if (inferredSlug) {
-        return { slug: inferredSlug, source: "inferred" as const };
-      }
-
-      return { slug: "", source: "none" as const };
-    },
-    [showMappings]
+  const validShows = useMemo(
+    () =>
+      shows.filter((show) => {
+        try {
+          return Boolean(show && show.name && normaliseState(show.siteLocation?.state));
+        } catch {
+          return false;
+        }
+      }),
+    [shows]
   );
 
-  const ordersForDealer = useMemo(() => {
-    return orders.filter((order) => {
-      if (!order.orderId) return false;
-      const show = showMap[order.showId];
-      const showDealerSlug = resolveShowDealer(show).slug;
-      return !!showDealerSlug && showDealerSlug === dealerSlug;
-    });
-  }, [dealerSlug, orders, resolveShowDealer, showMap]);
+  const stateStats = useMemo(() => {
+    return validShows.reduce((acc, show) => {
+      const state = normaliseState(show.siteLocation?.state);
+      if (!state) return acc;
 
-  const showsForDealer = useMemo(() => {
-    return shows
-      .map((show) => {
-        const match = resolveShowDealer(show);
-        const startDate = parseFlexibleDateToDate(show.startDate)?.getTime() ?? Number.MAX_SAFE_INTEGER;
-        const finishDate = parseFlexibleDateToDate(show.finishDate)?.getTime() ?? startDate;
-
-        return { show, match, startDate, finishDate };
-      })
-      .filter((item) => item.match.slug && item.match.slug === dealerSlug)
-      .sort((a, b) => a.startDate - b.startDate);
-  }, [dealerSlug, resolveShowDealer, shows]);
-
-  const pendingConfirmationCount = useMemo(
-    () => ordersForDealer.filter((order) => !order.dealerConfirm).length,
-    [ordersForDealer]
-  );
-
-  const findSalesperson = (name?: string | null) => {
-    if (!name) return null;
-    const normalizedName = name.trim().toLowerCase();
-    return teamMembers.find((member) => member.memberName.trim().toLowerCase() === normalizedName) || null;
-  };
-
-
-  const buildOrderPdf = async (params: {
-    order: ShowOrder;
-    show?: ShowRecord;
-    dealerName: string;
-    recipient: TeamMember;
-  }) => {
-    const { order, show, dealerName, recipient } = params;
-    const JsPDF = await ensureJsPdf();
-    const doc = new JsPDF("p", "pt", "a4");
-
-    const pageWidth = doc.internal.pageSize.getWidth();
-    const pageHeight = doc.internal.pageSize.getHeight();
-    const margin = 48;
-    const accent: RgbColor = { r: 33, g: 46, b: 71 };
-    const softAccent: RgbColor = { r: 224, g: 237, b: 250 };
-    const slate: RgbColor = { r: 64, g: 73, b: 86 };
-    const lightSlate: RgbColor = { r: 120, g: 130, b: 145 };
-
-    let cursorY = margin;
-
-    const ensureSpace = (heightNeeded: number) => {
-      if (cursorY + heightNeeded > pageHeight - margin) {
-        doc.addPage();
-        cursorY = margin;
+      if (!acc[state]) {
+        acc[state] = { shows: 0, totalSales: 0, totalDays: 0 } as StateStats;
       }
-    };
 
-    // ---------------------------
-    // Header (更稳的视觉结构)
-    // ---------------------------
-    const headerHeight = 150;
-    ensureSpace(headerHeight + 10);
+      acc[state].shows += 1;
 
-    doc.setFillColor(softAccent.r, softAccent.g, softAccent.b);
-    doc.setDrawColor(accent.r, accent.g, accent.b);
-    doc.setLineWidth(1.2);
-    doc.roundedRect(margin, cursorY, pageWidth - margin * 2, headerHeight, 12, 12, "FD");
+      const sales = parseMetric(show.sales2025);
+      if (sales > 0) {
+        acc[state].totalSales += sales;
+      }
 
-    const logoUrl = await loadLogoDataUrl();
-    if (logoUrl) {
-      const logoWidth = 130;
-      const logoHeight = 78;
-      const logoX = margin + 18;
-      const logoY = cursorY + headerHeight / 2 - logoHeight / 2;
-      doc.addImage(logoUrl, "PNG", logoX, logoY, logoWidth, logoHeight);
+      const duration = parseMetric(show.showDuration);
+      if (duration > 0) {
+        acc[state].totalDays += duration;
+      }
+
+      return acc;
+    }, {} as Record<string, StateStats>);
+  }, [validShows]);
+
+  const filteredShows = useMemo(() => {
+    if (selectedState === 'All') return validShows;
+    return validShows.filter(
+      (show) => normaliseState(show.siteLocation?.state) === selectedState
+    );
+  }, [validShows, selectedState]);
+
+  const fuzzyMatch = (query: string, text: string | undefined) => {
+    if (!query || !text) return false;
+    const lowerQuery = query.toLowerCase();
+    const lowerText = text.toLowerCase();
+
+    if (lowerText.includes(lowerQuery)) return true;
+
+    let qi = 0;
+    for (let i = 0; i < lowerText.length && qi < lowerQuery.length; i += 1) {
+      if (lowerText[i] === lowerQuery[qi]) {
+        qi += 1;
+      }
     }
 
-    const headerTextX = margin + 170;
-    const headerTextWidth = pageWidth - headerTextX - margin;
+    return qi === lowerQuery.length;
+  };
 
-    doc.setFont("helvetica", "bold");
-    doc.setTextColor(accent.r, accent.g, accent.b);
-    doc.setFontSize(22);
-    doc.text("Snowy River", headerTextX, cursorY + 46, { maxWidth: headerTextWidth });
+  const searchedShows = useMemo(() => {
+    if (!searchTerm.trim()) return filteredShows;
 
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(15);
-    doc.setTextColor(slate.r, slate.g, slate.b);
-    doc.text("Show Commission Proof", headerTextX, cursorY + 72, { maxWidth: headerTextWidth });
+    return filteredShows.filter((show) => {
+      const state = normaliseState(show.siteLocation?.state) || '';
+      return (
+        fuzzyMatch(searchTerm, show.name) ||
+        fuzzyMatch(searchTerm, show.dealership) ||
+        fuzzyMatch(searchTerm, show.siteLocation?.suburb) ||
+        fuzzyMatch(searchTerm, state) ||
+        fuzzyMatch(searchTerm, show.status)
+      );
+    });
+  }, [filteredShows, searchTerm]);
 
-    doc.setFontSize(10.5);
-    doc.setTextColor(lightSlate.r, lightSlate.g, lightSlate.b);
-    doc.text(
-      "This document confirms the approved show order for dealer acknowledgement and next-step preparation.",
-      headerTextX,
-      cursorY + 98,
-      { maxWidth: headerTextWidth }
+  const statusPriority = useMemo<Record<Show['status'], number>>(
+    () => ({
+      'In Progress': 0,
+      'Not Started': 1,
+      Finished: 2,
+      Completed: 3,
+    }),
+    []
+  );
+
+  const sortedShows = useMemo(() => {
+    return [...searchedShows].sort((a, b) => {
+      const statusDiff = (statusPriority[a.status] ?? 99) - (statusPriority[b.status] ?? 99);
+      if (statusDiff !== 0) return statusDiff;
+
+      const direction = sortDirection === 'asc' ? 1 : -1;
+
+      if (sortKey === 'name') {
+        return a.name.localeCompare(b.name) * direction;
+      }
+
+      const dateA = a.startDate ? new Date(a.startDate).getTime() : 0;
+      const dateB = b.startDate ? new Date(b.startDate).getTime() : 0;
+
+      return (dateA - dateB) * direction;
+    });
+  }, [searchedShows, sortDirection, sortKey, statusPriority]);
+
+  const searchSuggestions = useMemo(() => {
+    if (!searchTerm.trim()) return [] as string[];
+    const names = Array.from(new Set(validShows.map((show) => show.name?.trim()).filter(Boolean)));
+    return names
+      .filter((name) => fuzzyMatch(searchTerm, name || ''))
+      .slice(0, 5) as string[];
+  }, [searchTerm, validShows]);
+
+  const handleStateSelect = (state: string) => {
+    setSelectedState(state);
+  };
+
+  const handleRowClick = (id: string | undefined) => {
+    if (id) {
+      navigate(`/show/${id}`);
+    }
+  };
+
+  const handleDeleteShow = async (id: string | undefined, name?: string) => {
+    if (!id) return;
+
+    const confirmed = window.confirm(
+      `Are you sure you want to delete the show "${name || 'Unnamed Show'}"? This action cannot be undone.`
     );
 
-    cursorY += headerHeight + 26;
+    if (!confirmed) return;
 
-    // ---------------------------
-    // Key-Value detail block
-    // ---------------------------
-    const detailRows: Array<[string, string]> = [
-      ["Dealer", dealerName],
-      ["Show", show?.name || order.showId || "Unknown show"],
-      ["Salesperson", order.salesperson || recipient.memberName],
-      ["Order ID", order.orderId || "Unavailable"],
-      ["Status", order.status || "Pending"],
-      ["Order Type", order.orderType || "Not set"],
-    ];
+    try {
+      await dbRemove(`shows/${id}`);
+      setShows((prev) => prev.filter((show) => show.id !== id));
+      toast.success('Show deleted successfully');
+    } catch (err) {
+      console.error('Error deleting show:', err);
+      toast.error('Failed to delete show. Please try again.');
+    }
+  };
 
-    const labelX = margin;
-    const valueX = margin + 150;
-    const labelSize = 11;
-    const valueSize = 12.5;
-    const rowHeight = 24;
-    const valueMaxWidth = pageWidth - margin * 2 - 150;
+  const handleAddShow = async () => {
+    setIsCreatingShow(true);
+    try {
+      const id = uuidv4();
+      const newShow: Show = {
+        id,
+        name: 'New Show',
+        siteLocation: {
+          number: '',
+          street: '',
+          suburb: '',
+          postcode: '',
+          state: '',
+          country: '',
+        },
+        dealership: '',
+        startDate: '',
+        finishDate: '',
+        showDuration: 0,
+        target2024: 0,
+        sales2024: 0,
+        target2025: 0,
+        sales2025: 0,
+        target2026: 0,
+        sales2026: 0,
+        eventOrganiser: '',
+        caravansOnDisplay: 0,
+        standSize: '',
+        layoutAddress: '',
+        sapExpenseCode: '',
+        status: 'Not Started',
+        teamMembers: [],
+      };
 
-    ensureSpace(detailRows.length * rowHeight + 12);
+      await dbSet(`shows/${id}`, newShow as unknown as Record<string, unknown>);
+      setShows((prev) => [...prev, newShow]);
+      toast.success('New show created. You can now add details.');
+      navigate(`/show/${id}`);
+    } catch (err) {
+      console.error('Error creating show:', err);
+      toast.error('Failed to create a new show. Please try again.');
+    } finally {
+      setIsCreatingShow(false);
+    }
+  };
+  
+  const csvHeaders = [
+    'ID',
+    'Name',
+    'Dealership',
+    'Site Number',
+    'Street',
+    'Suburb',
+    'Postcode',
+    'State',
+    'Country',
+    'Start Date',
+    'Finish Date',
+    'Show Duration',
+    'Target 2024',
+    'Sales 2024',
+    'Target 2025',
+    'Sales 2025',
+    'Target 2026',
+    'Sales 2026',
+    'Event Organiser',
+    'Caravans On Display',
+    'Stand Size',
+    'Layout Address',
+    'SAP Expense Code',
+    'Status',
+  ];
 
-    detailRows.forEach(([label, value]) => {
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(labelSize);
-      doc.setTextColor(slate.r, slate.g, slate.b);
-      doc.text(label, labelX, cursorY);
+  const escapeCsvValue = (value: unknown) => {
+    if (value === null || value === undefined) return '""';
+    const stringValue = String(value);
+    const escaped = stringValue.replace(/"/g, '""');
+    return `"${escaped}"`;
+  };
 
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(valueSize);
-      doc.setTextColor(accent.r, accent.g, accent.b);
-      const lines = doc.splitTextToSize(value || "", valueMaxWidth);
-      doc.text(lines, valueX, cursorY, { maxWidth: valueMaxWidth });
-
-      cursorY += Math.max(rowHeight, lines.length * 14);
-    });
-
-    cursorY += 16;
-
-    // ---------------------------
-    // "Prepared for" card (只放核心字段，避免溢出)
-    // ---------------------------
-    const cardPadding = 18;
-    const cardWidth = pageWidth - margin * 2;
-    const badgeHeight = 26;
-
-    const coreInfo = [
-      ["Model", order.model || "Not set"],
-      ["Date", order.date || "Not set"],
-      ["Chassis", order.chassisNumber || "Not recorded"],
-    ];
-
-    // 估算 card 高度
-    const infoLabelWidth = 110;
-    const infoValueWidth = cardWidth - cardPadding * 2 - infoLabelWidth - 10;
-    const infoLineHeight = 14;
-
-    // 顶部区域（badge + prepared-for）
-    const topBlockHeight = 90;
-
-    let infoBlockHeight = 0;
-    coreInfo.forEach(([, value]) => {
-      const lines = doc.splitTextToSize(value || "", infoValueWidth);
-      const h = Math.max(22, lines.length * infoLineHeight);
-      infoBlockHeight += h + 6;
-    });
-
-    const cardHeight = Math.max(180, topBlockHeight + infoBlockHeight + 16);
-
-    ensureSpace(cardHeight + 10);
-
-    const cardY = cursorY;
-    doc.setDrawColor(softAccent.r, softAccent.g, softAccent.b);
-    doc.setFillColor(255, 255, 255);
-    doc.roundedRect(margin, cardY, cardWidth, cardHeight, 12, 12, "FD");
-
-    // badge
-    const badgeY = cardY + cardPadding;
-    doc.setFillColor(softAccent.r, softAccent.g, softAccent.b);
-    doc.roundedRect(margin + cardPadding, badgeY, 190, badgeHeight, 6, 6, "F");
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(10.5);
-    doc.setTextColor(accent.r, accent.g, accent.b);
-    doc.text("Snowy River Show Team", margin + cardPadding + 10, badgeY + 18);
-
-    // prepared for
-    const preparedY = badgeY + badgeHeight + 18;
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(10.5);
-    doc.setTextColor(slate.r, slate.g, slate.b);
-    doc.text("Prepared for", margin + cardPadding, preparedY);
-
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(12.5);
-    doc.setTextColor(accent.r, accent.g, accent.b);
-    doc.text(recipient.memberName || "Salesperson", margin + cardPadding, preparedY + 18);
-
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(9.8);
-    doc.setTextColor(lightSlate.r, lightSlate.g, lightSlate.b);
-    doc.text(recipient.email || "", margin + cardPadding, preparedY + 34);
-
-    // core info rows
-    let infoY = cardY + topBlockHeight + 20;
-    const infoX = margin + cardPadding;
-    const infoValueX = infoX + infoLabelWidth + 10;
-
-    coreInfo.forEach(([label, value]) => {
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(10.5);
-      doc.setTextColor(slate.r, slate.g, slate.b);
-      doc.text(label, infoX, infoY);
-
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(12);
-      doc.setTextColor(accent.r, accent.g, accent.b);
-      const lines = doc.splitTextToSize(value || "", infoValueWidth);
-      doc.text(lines, infoValueX, infoY);
-
-      infoY += Math.max(22, lines.length * infoLineHeight) + 6;
-    });
-
-    cursorY = cardY + cardHeight + 22;
-
-    // ---------------------------
-    // Dealer Notes block (单独处理，最防重叠)
-    // ---------------------------
-    const notesText = (order.dealerNotes || "").trim();
-    if (notesText) {
-      const notesTitleHeight = 18;
-      const notesBoxPadding = 14;
-      const notesMaxWidth = pageWidth - margin * 2 - notesBoxPadding * 2;
-
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(11.5);
-      const notesLines = doc.splitTextToSize(notesText, notesMaxWidth);
-      const notesBodyHeight = notesLines.length * 14;
-
-      const notesBoxHeight = notesTitleHeight + notesBodyHeight + notesBoxPadding * 2 + 8;
-
-      ensureSpace(notesBoxHeight + 8);
-
-      const boxY = cursorY;
-      doc.setFillColor(255, 255, 255);
-      doc.setDrawColor(softAccent.r, softAccent.g, softAccent.b);
-      doc.roundedRect(margin, boxY, pageWidth - margin * 2, notesBoxHeight, 10, 10, "FD");
-
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(11);
-      doc.setTextColor(slate.r, slate.g, slate.b);
-      doc.text("Dealer Notes", margin + notesBoxPadding, boxY + notesBoxPadding + 10);
-
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(10.8);
-      doc.setTextColor(accent.r, accent.g, accent.b);
-      doc.text(
-        notesLines,
-        margin + notesBoxPadding,
-        boxY + notesBoxPadding + 28,
-        { maxWidth: notesMaxWidth }
-      );
-
-      cursorY += notesBoxHeight + 20;
+  const handleDownloadCsv = () => {
+    if (shows.length === 0) {
+      toast.info('No shows available to export');
+      return;
     }
 
-    // ---------------------------
-    // Compact barcode footer
-    // ---------------------------
-    const footerHeight = 70;
-    ensureSpace(footerHeight);
+    setIsExporting(true);
 
-    // subtle divider line
-    doc.setDrawColor(230, 235, 242);
-    doc.setLineWidth(1);
-    doc.line(margin, cursorY, pageWidth - margin, cursorY);
-    cursorY += 14;
-
-    const orderIdText = sanitizeOrderIdForBarcode(order.orderId);
-    const barcodeHeight = 26; // 更紧凑，避免抢占右下角空间
-    const footerAvailableWidth = pageWidth - margin * 2;
-
-    const maxBarcodeWidth = Math.min(220, footerAvailableWidth * 0.4);
-    const chosenBarWidth = pickBarcodeBarWidth(order.orderId || "Unknown", maxBarcodeWidth);
-
-    // 左侧条码
-    const barcodeX = margin;
-    const barcodeY = cursorY + 10;
-
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(10.5);
-    doc.setTextColor(slate.r, slate.g, slate.b);
-    doc.text(orderIdText || "", barcodeX, cursorY);
-
-    const barcodeWidth = drawBarcode(doc, {
-      orderId: order.orderId || "Unknown",
-      x: barcodeX,
-      y: barcodeY,
-      height: barcodeHeight,
-      barWidth: chosenBarWidth,
-      color: accent,
-    });
-
-    // 右侧更小的提示 panel
-    const panelX = barcodeX + Math.min(barcodeWidth, maxBarcodeWidth) + 18;
-    const panelWidth = pageWidth - margin - panelX;
-    const panelHeight = 44;
-
-    doc.setFillColor(softAccent.r, softAccent.g, softAccent.b);
-    doc.roundedRect(panelX, barcodeY - 2, panelWidth, panelHeight, 8, 8, "F");
-
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(10.5);
-    doc.setTextColor(accent.r, accent.g, accent.b);
-    doc.text("Attach to Concur commission request", panelX + 10, barcodeY + 18);
-
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(9.2);
-    doc.setTextColor(slate.r, slate.g, slate.b);
-    doc.text("Use this confirmation as the supporting document.", panelX + 10, barcodeY + 32, {
-      maxWidth: panelWidth - 20,
-    });
-
-    // ---------------------------
-    // Done
-    // ---------------------------
-    return doc.output("datauristring");
-  };
-  const handleConfirm = async (order: ShowOrder) => {
-    setSavingOrderId(order.orderId);
     try {
-      const latestOrder = await fetchShowOrderById(order.orderId);
-      if (!latestOrder) {
-        toast.error("Unable to find this order in the database");
+      const rows = shows.map((show) => [
+        show.id,
+        show.name,
+        show.dealership,
+        show.siteLocation?.number,
+        show.siteLocation?.street,
+        show.siteLocation?.suburb,
+        show.siteLocation?.postcode,
+        show.siteLocation?.state,
+        show.siteLocation?.country,
+        show.startDate,
+        show.finishDate,
+        show.showDuration,
+        show.target2024,
+        show.sales2024,
+        show.target2025,
+        show.sales2025,
+        show.target2026,
+        show.sales2026,
+        show.eventOrganiser,
+        show.caravansOnDisplay,
+        show.standSize,
+        show.layoutAddress,
+        show.sapExpenseCode,
+        show.status,
+      ]);
+
+      const csvContent = [
+        csvHeaders.map(escapeCsvValue).join(','),
+        ...rows.map((row) => row.map(escapeCsvValue).join(',')),
+      ].join('\n');
+
+      const blob = new Blob([`\ufeff${csvContent}`], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'shows.csv';
+      link.click();
+      URL.revokeObjectURL(url);
+      toast.success('Export complete. You can open the CSV directly in Excel.');
+    } catch (err) {
+      console.error('Error exporting shows:', err);
+      toast.error('Export failed. Please try again.');
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  const parseCsvLine = (line: string) => {
+    const result: string[] = [];
+    let current = '';
+    let inQuotes = false;
+
+    for (let i = 0; i < line.length; i += 1) {
+      const char = line[i];
+
+      if (char === '"') {
+        if (inQuotes && line[i + 1] === '"') {
+          current += '"';
+          i += 1;
+        } else {
+          inQuotes = !inQuotes;
+        }
+      } else if (char === ',' && !inQuotes) {
+        result.push(current);
+        current = '';
+      } else {
+        current += char;
+      }
+    }
+
+    result.push(current);
+    return result.map((cell) => cell.trim());
+  };
+
+  const parseNumberCell = (value: string | undefined) => {
+    if (!value) return undefined;
+    const trimmed = value.trim();
+    if (!trimmed) return undefined;
+    const parsed = Number(trimmed);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  };
+
+  function stripUndefined<T>(value: T): T {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return value;
+    }
+
+    return Object.entries(value).reduce((acc, [key, val]) => {
+      if (val === undefined) return acc;
+
+      if (val && typeof val === 'object' && !Array.isArray(val)) {
+        const cleaned = stripUndefined(val);
+        if (Object.keys(cleaned).length === 0) return acc;
+        acc[key as keyof T] = cleaned as T[keyof T];
+        return acc;
+      }
+
+      acc[key as keyof T] = val as T[keyof T];
+      return acc;
+    }, {} as T);
+  }
+  
+  const applyCsvUpdate = async (file: File) => {
+    setIsImporting(true);
+
+    try {
+      const text = await file.text();
+      const lines = text
+        .replace(/^\uFEFF/, '')
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean);
+
+      if (lines.length < 2) {
+        toast.error('File is empty or has an invalid format.');
         return;
       }
 
-      const isApproved = (latestOrder.status || "").toLowerCase() === "approved";
+      const header = parseCsvLine(lines[0]);
+      const headerIndex = Object.fromEntries(header.map((title, idx) => [title, idx]));
 
-      let emailSent = false;
+      if (!('ID' in headerIndex)) {
+        toast.error('Missing the ID column. Please keep the ID column from the exported template.');
+        return;
+      }
+      const existingShows = new Map(shows.map((show) => [show.id, show]));
+      const updatedShows: Show[] = [];
+      const failedIds: string[] = [];
 
-      if (isApproved) {
-        if (teamMembersLoading) {
-          toast.error("Team member list is still loading. Please try again in a moment.");
-          return;
+      const updates = lines.slice(1).map((line) => parseCsvLine(line)).filter((cells) => cells.length > 1);
+
+      const getCell = (key: (typeof csvHeaders)[number], cells: string[]) => {
+        const index = headerIndex[key];
+        if (index === undefined) return undefined;
+        return cells[index];
+      };
+
+      const getUpdatedText = (key: (typeof csvHeaders)[number], cells: string[], fallback: string | undefined) => {
+        const value = getCell(key, cells);
+        if (value === undefined) return fallback;
+        const trimmed = value.trim();
+        return trimmed ? trimmed : fallback;
+      };
+
+      for (const cells of updates) {
+        const id = getCell('ID', cells);
+        if (!id) continue;
+
+        const existing = existingShows.get(id);
+        if (!existing) {
+          failedIds.push(id);
+          continue;
         }
 
-        const salesperson = findSalesperson(latestOrder.salesperson);
-        if (!salesperson?.email) {
-          toast.error("Unable to find the salesperson's email in team members");
-          return;
-        }
+        const updatedData: Show = {
+          ...existing,
+          id,
+          name: getUpdatedText('Name', cells, existing.name),
+          dealership: getUpdatedText('Dealership', cells, existing.dealership),
+          siteLocation: {
+            ...(existing.siteLocation || {}),
+            number: getUpdatedText('Site Number', cells, existing.siteLocation?.number || ''),
+            street: getUpdatedText('Street', cells, existing.siteLocation?.street || ''),
+            suburb: getUpdatedText('Suburb', cells, existing.siteLocation?.suburb || ''),
+            postcode: getUpdatedText('Postcode', cells, existing.siteLocation?.postcode || ''),
+            state: getUpdatedText('State', cells, existing.siteLocation?.state || ''),
+            country: getUpdatedText('Country', cells, existing.siteLocation?.country || ''),
+          },
+          startDate: getUpdatedText('Start Date', cells, existing.startDate),
+          finishDate: getUpdatedText('Finish Date', cells, existing.finishDate),
+          showDuration: parseNumberCell(getCell('Show Duration', cells)) ?? existing.showDuration,
+          target2024: parseNumberCell(getCell('Target 2024', cells)) ?? existing.target2024,
+          sales2024: parseNumberCell(getCell('Sales 2024', cells)) ?? existing.sales2024,
+          target2025: parseNumberCell(getCell('Target 2025', cells)) ?? existing.target2025,
+          sales2025: parseNumberCell(getCell('Sales 2025', cells)) ?? existing.sales2025,
+          target2026: parseNumberCell(getCell('Target 2026', cells)) ?? existing.target2026,
+          sales2026: parseNumberCell(getCell('Sales 2026', cells)) ?? existing.sales2026,
+          eventOrganiser: getUpdatedText('Event Organiser', cells, existing.eventOrganiser),
+          caravansOnDisplay:
+            parseNumberCell(getCell('Caravans On Display', cells)) ?? existing.caravansOnDisplay,
+          standSize: getUpdatedText('Stand Size', cells, existing.standSize),
+          layoutAddress: getUpdatedText('Layout Address', cells, existing.layoutAddress),
+          sapExpenseCode: getUpdatedText('SAP Expense Code', cells, existing.sapExpenseCode),
+          status: (getUpdatedText('Status', cells, existing.status) as Show['status']) || existing.status,
+        };
 
-        const pdfAttachment = await buildOrderPdf({
-          order: latestOrder,
-          show: showMap[latestOrder.showId],
-          dealerName: dealerDisplayName,
-          recipient: salesperson,
-        });
+        const cleanedData = stripUndefined(updatedData);
 
-        await sendDealerConfirmationEmail({
-          teamMember: salesperson,
-          order: latestOrder,
-          show: showMap[latestOrder.showId],
-          dealerName: dealerDisplayName,
-          pdfAttachment,
-        });
-
-        emailSent = true;
+        await dbUpdate(`shows/${id}`, cleanedData as unknown as Record<string, unknown>);
+        updatedShows.push(cleanedData);
+        existingShows.set(id, cleanedData);
       }
 
-      await updateShowOrder(order.orderId, { dealerConfirm: true });
-
-      if (emailSent) {
-        toast.success("Order confirmed and notification sent");
+      if (updatedShows.length > 0) {
+        setShows(Array.from(existingShows.values()));
+        toast.success(`Updated ${updatedShows.length} record(s).`);
       } else {
-        toast.success("Order confirmed (email not sent because order is not approved)");
+        toast.info('No records were updated.');
       }
-    } catch (error) {
-      console.error(error);
-      const message = error instanceof Error ? error.message : "Unknown error";
-      toast.error(`Failed to confirm order: ${message}`);
+
+      if (failedIds.length > 0) {
+        toast.warning(`The following IDs were not found: ${failedIds.join(', ')}`);
+      }
+    } catch (err) {
+      console.error('Error importing CSV:', err);
+      toast.error('Import failed. Please confirm the CSV format and try again.');
     } finally {
-      setSavingOrderId(null);
+      setIsImporting(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
 
-  const handleChassisSave = async (order: ShowOrder) => {
-    const chassisNumber = chassisDrafts[order.orderId] ?? order.chassisNumber ?? "";
-    setSavingOrderId(order.orderId);
-    try {
-      await updateShowOrder(order.orderId, { chassisNumber });
-      toast.success("Chassis number updated");
-    } catch (error) {
-      console.error(error);
-      toast.error("Failed to update chassis number");
-    } finally {
-      setSavingOrderId(null);
+  const handleUploadClick = () => {
+    if (fileInputRef.current) {
+      fileInputRef.current.click();
     }
   };
 
-  const showListLoading = showsLoading || mappingsLoading;
-  const isLoading = ordersLoading || showsLoading || mappingsLoading;
   
+  if (loading) {
+    return (
+      <div className="flex h-96 items-center justify-center text-gray-600">
+        Loading show data...
+      </div>
+    );
+  }
+
   return (
-    <div className="flex min-h-screen bg-slate-50">
-      <Sidebar
-        orders={[]}
-        selectedDealer={dealerDisplayName}
-        onDealerSelect={() => {}}
-        hideOtherDealers
-        currentDealerName={dealerDisplayName}
-        showStats={false}
-        showManagementPending={pendingConfirmationCount}
+    <div className="space-y-6">
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".csv"
+        className="hidden"
+        onChange={(event) => {
+          const file = event.target.files?.[0];
+          if (file) applyCsvUpdate(file);
+        }}
       />
 
-      <main className="flex-1 p-6">
-        <div className="mb-6">
-          <h1 className="text-2xl font-semibold text-slate-900">Show Management</h1>
-          <p className="text-slate-600">Manage show orders assigned to {dealerDisplayName}.</p>
-        </div>
+      {error && (
+        <Card className="border-red-200 bg-red-50">
+          <CardContent className="py-3 text-sm text-red-700">
+            {error}
+          </CardContent>
+        </Card>
+      )}
 
-        <Card className="mb-6">
-          <CardHeader className="flex flex-row items-start justify-between gap-4">
-            <div className="space-y-1">
-              <CardTitle className="text-lg">Show lineup for {dealerDisplayName}</CardTitle>
-              <p className="text-sm text-slate-600">
-                优先根据 <code>showDealerMappings</code> 将 Snowy River 数据中的 dealership 映射到当前 dealer slug，再结合
-                handover dealer 信息做补充，便于快速看到相关 show 的时间安排。
+      <Card>
+        <CardHeader>
+          <div className="flex flex-wrap items-end justify-between gap-4">
+            <div>
+              <CardTitle>Show Distribution</CardTitle>
+              <p className="mt-1 text-sm text-gray-500">
+                Click on a region to focus the table below.
               </p>
             </div>
-            <Badge variant="secondary" className="px-3 py-1 text-sm">
-              {showsForDealer.length} shows
-            </Badge>
-          </CardHeader>
-          <CardContent>
-            {showListLoading ? (
-              <div className="flex items-center gap-2 text-slate-600">
-                <Clock3 className="h-4 w-4 animate-spin" /> 正在读取 show 数据...
-              </div>
-            ) : showsForDealer.length === 0 ? (
-              <div className="py-8 text-center text-slate-500">暂无与该 dealer 匹配的 show。</div>
-            ) : (
-              <div className="overflow-x-auto">
-                <Table className="min-w-[960px] text-sm">
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="font-semibold">Show</TableHead>
-                      <TableHead className="font-semibold">Dealership</TableHead>
-                      <TableHead className="font-semibold">Schedule</TableHead>
-                      <TableHead className="font-semibold">匹配方式</TableHead>
-                      <TableHead className="font-semibold text-right">其他信息</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {showsForDealer.map(({ show, match }) => (
-                      <TableRow key={show.id || show.name}>
-                        <TableCell className="font-semibold text-slate-900">
-                          <div className="space-y-0.5">
-                            <div>{show.name || "未命名的 Show"}</div>
-                            {show.siteLocation && (
-                              <div className="text-xs text-slate-500">{show.siteLocation}</div>
-                            )}
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <div className="space-y-0.5">
-                            <div className="text-slate-800">{show.dealership || "-"}</div>
-                            {show.handoverDealer && (
-                              <div className="text-xs text-slate-500">Handover: {show.handoverDealer}</div>
-                            )}
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <div className="space-y-1">
-                            <div className="font-medium text-slate-900">{formatShowDate(show.startDate)}</div>
-                            <div className="text-xs text-slate-500">至 {formatShowDate(show.finishDate)}</div>
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant={match.source === "mapping" ? "default" : "secondary"}>
-                            {match.source === "mapping" ? "showDealerMappings" : "Handover/Dealership"}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <div className="space-y-1">
-                            {show.status && <div className="text-sm font-medium text-slate-900">{show.status}</div>}
-                            {(show.eventOrganiser || show.standSize) && (
-                              <div className="text-xs text-slate-500">
-                                {[show.eventOrganiser, show.standSize].filter(Boolean).join(" • ")}
-                              </div>
-                            )}
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-            )}
-          </CardContent>
-        </Card>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button onClick={handleAddShow} disabled={isCreatingShow}>
+                <Plus className="mr-2 h-4 w-4" /> {isCreatingShow ? 'Creating...' : 'Add Show'}
+              </Button>
+              <Button variant="outline" size="sm" onClick={handleDownloadCsv} disabled={isExporting}>
+                <Download className="mr-2 h-4 w-4" /> Export CSV
+              </Button>
+              <Button variant="outline" size="sm" onClick={handleUploadClick} disabled={isImporting}>
+                <Upload className="mr-2 h-4 w-4" /> Import & Overwrite
+              </Button>
+              {selectedState !== 'All' && (
+                <Button variant="outline" size="sm" onClick={() => setSelectedState('All')}>
+                  Clear selection
+                </Button>
+              )}
+            </div>
+          </div>
+          <p className="mt-2 text-xs text-gray-500">
+            After downloading, change only the fields from column 2 onward and leave the ID column untouched. Save the sheet
+            as CSV before uploading—the import will overwrite matching records by ID.
+          </p>
+        </CardHeader>
+        <CardContent>
+          <AustraliaMap
+            stateStats={stateStats}
+            onStateClick={handleStateSelect}
+            selectedState={selectedState}
+          />
+        </CardContent>
+      </Card>
 
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between">
-            <CardTitle className="text-lg">Orders</CardTitle>
-            <Badge variant="outline" className="text-slate-700">
-              Pending dealer confirmations: {pendingConfirmationCount}
-            </Badge>
-          </CardHeader>
-          <CardContent>
-            {isLoading ? (
-              <div className="flex items-center gap-2 text-slate-600">
-                <Clock3 className="h-4 w-4 animate-spin" /> Loading orders...
+      <Card>
+        <CardHeader>
+          <div className="flex flex-wrap items-end justify-between gap-4">
+            <div>
+              <CardTitle>
+                Shows in {selectedState === 'All' ? 'All Regions' : selectedState}
+              </CardTitle>
+              <p className="mt-1 text-sm text-gray-500">
+                Select a row to view detailed information about each show.
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="relative w-64">
+                <Input
+                  value={searchTerm}
+                  onChange={(event) => setSearchTerm(event.target.value)}
+                  placeholder="Search shows..."
+                  className="pr-10"
+                />
+                <Search className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                {searchSuggestions.length > 0 && (
+                  <div className="absolute z-10 mt-1 w-full rounded-md border bg-white shadow">
+                    {searchSuggestions.map((suggestion) => (
+                      <button
+                        key={suggestion}
+                        type="button"
+                        className="block w-full px-3 py-2 text-left text-sm hover:bg-gray-50"
+                        onClick={() => setSearchTerm(suggestion)}
+                      >
+                        {suggestion}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
-            ) : ordersForDealer.length === 0 ? (
-              <div className="py-10 text-center text-slate-500">No show orders found.</div>
-            ) : (
-              <div className="overflow-x-auto">
-                <Table className="min-w-[1100px] text-sm">
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="font-semibold">Order ID</TableHead>
-                      <TableHead className="font-semibold">Show</TableHead>
-                      <TableHead className="font-semibold">Customer</TableHead>
-                      <TableHead className="font-semibold">Date</TableHead>
-                      <TableHead className="font-semibold">Model</TableHead>
-                      <TableHead className="font-semibold">Salesperson</TableHead>
-                      <TableHead className="font-semibold">Order Type</TableHead>
-                      <TableHead className="font-semibold">Show Manager Confirmation</TableHead>
-                      <TableHead className="font-semibold">Dealer Confirmation</TableHead>
-                      <TableHead className="font-semibold">Chassis Number</TableHead>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setSortKey(sortKey === 'name' ? 'startDate' : 'name')}
+                >
+                  {sortKey === 'name' ? 'Sort by Date' : 'Sort by Name'}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  onClick={() => setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc')}
+                  aria-label="Toggle sort direction"
+                >
+                  {sortDirection === 'asc' ? <SortAsc className="h-4 w-4" /> : <SortDesc className="h-4 w-4" />}
+                </Button>
+              </div>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {sortedShows.length > 0 ? (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Show</TableHead>
+                  <TableHead>Location</TableHead>
+                  <TableHead>Dates</TableHead>
+                  <TableHead>Sales 2025</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead className="w-24 text-right">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {sortedShows.map((show) => {
+                  const state = normaliseState(show.siteLocation?.state);
+                  const locationParts = [
+                    show.siteLocation?.suburb?.trim(),
+                    state || undefined,
+                  ].filter(Boolean);
+                  const sales = parseMetric(show.sales2025);
+                  const target = parseMetric(show.target2025);
+                  const duration = parseMetric(show.showDuration);
+
+                  const statusVariant =
+                    show.status === 'Finished'
+                      ? 'default'
+                      : show.status === 'In Progress'
+                        ? 'secondary'
+                        : 'outline';
+
+                  return (
+                    <TableRow
+                      key={show.id}
+                      className="cursor-pointer transition hover:bg-slate-50"
+                      onClick={() => handleRowClick(show.id)}
+                    >
+                      <TableCell>
+                        <div className="font-medium text-gray-900">{show.name || 'Unnamed Show'}</div>
+                        <div className="text-xs text-gray-500">{show.dealership || 'N/A'}</div>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-2 text-sm text-gray-600">
+                          <MapPin className="h-4 w-4 text-gray-400" />
+                          <span>{locationParts.length > 0 ? locationParts.join(', ') : 'N/A'}</span>
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <div className="text-sm text-gray-900">
+                          {formatDate(show.startDate)} - {formatDate(show.finishDate)}
+                        </div>
+                        <div className="text-xs text-gray-500">
+                          {duration > 0 ? `${duration} days` : 'Duration N/A'}
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <div className="text-sm font-medium text-gray-900">
+                          {formatCurrency(sales)}
+                        </div>
+                        <div className="text-xs text-gray-500">
+                          Target: {formatNumber(target)}
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={statusVariant}>{show.status || 'Unknown'}</Badge>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            handleDeleteShow(show.id, show.name);
+                          }}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </TableCell>
                     </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {ordersForDealer.map((order) => {
-                      const show = showMap[order.showId];
-                      const chassisValue = chassisDrafts[order.orderId] ?? order.chassisNumber ?? "";
-                      return (
-                        <TableRow key={order.orderId}>
-                          <TableCell className="font-semibold text-slate-900">{order.orderId}</TableCell>
-                          <TableCell>{show?.name || order.showId || "Unknown show"}</TableCell>
-                          <TableCell className="text-slate-700">{order.customerName || "-"}</TableCell>
-                          <TableCell>{order.date || "-"}</TableCell>
-                          <TableCell>{order.model || "-"}</TableCell>
-                          <TableCell>{order.salesperson || "-"}</TableCell>
-                          <TableCell>{order.orderType || "-"}</TableCell>
-                          <TableCell>
-                            <div className="flex items-center gap-2">
-                              <Badge variant="secondary" className="bg-slate-100 text-slate-800">
-                                {order.status || "Pending"}
-                              </Badge>
-                            </div>
-                          </TableCell>
-                          <TableCell>
-                            {order.dealerConfirm ? (
-                              <div className="flex items-center gap-2 text-emerald-700">
-                                <CheckCircle2 className="h-4 w-4" /> Confirmed
-                              </div>
-                            ) : (
-                              <Button
-                                size="sm"
-                                onClick={() => handleConfirm(order)}
-                                disabled={savingOrderId === order.orderId}
-                                className="h-8 rounded px-2 text-xs bg-emerald-600 hover:bg-emerald-700"
-                              >
-                                {savingOrderId === order.orderId ? "Saving..." : "Show Manager Confirmation"}
-                              </Button>
-                            )}
-                          </TableCell>
-                          <TableCell>
-                            <div className="flex items-center gap-2">
-                              <Input
-                                value={chassisValue}
-                                onChange={(e) =>
-                                  setChassisDrafts((prev) => ({ ...prev, [order.orderId]: e.target.value }))
-                                }
-                                placeholder="Enter chassis number"
-                                className="w-48"
-                              />
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => handleChassisSave(order)}
-                                disabled={savingOrderId === order.orderId}
-                              >
-                                {savingOrderId === order.orderId ? "Saving..." : "Save"}
-                              </Button>
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      </main>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          ) : (
+            <div className="py-12 text-center text-sm text-gray-500">
+              No shows found for {selectedState === 'All' ? 'any region' : selectedState}.
+            </div>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }
