@@ -16,7 +16,7 @@ import {
   LineChart,
   Line,
 } from 'recharts';
-import { TrendingUp, Calendar, Target } from 'lucide-react';
+import { TrendingUp, Calendar } from 'lucide-react';
 import { dbGet } from '@/lib/firebase';
 import type { Show, TeamMember, ShowOrder } from '@/types';
 import { format as formatDate } from 'date-fns';
@@ -67,9 +67,8 @@ export default function Dashboard() {
 
   // Calculate vehicle type distribution
   const vehicleTypes = orders.reduce((acc, order) => {
-    const chassis = order.chassisNumber || '';
-    const type = chassis.substring(0, 3).toUpperCase() || 'N/A';
-    acc[type] = (acc[type] || 0) + 1;
+    const modelPrefix = order.model?.substring(0, 3).toUpperCase() || 'N/A';
+    acc[modelPrefix] = (acc[modelPrefix] || 0) + 1;
     return acc;
   }, {} as Record<string, number>);
 
@@ -199,25 +198,46 @@ export default function Dashboard() {
       color: 'text-blue-600',
     },
     {
-      title: 'Total Target 2026',
-      value: target2026.toString(),
-      description: `Completed target: ${completedShowTarget2026 || 0}`,
-      icon: TrendingUp,
-      color: 'text-green-600',
-    },
-    {
-      title: 'Total Sales 2026',
-      value: totalSales2026.toString(),
-      description: `Achievement: ${overallAchievement}% of target`,
-      icon: Target,
-      color: 'text-orange-600',
-    },
-    {
       title: 'Total Sales 2025',
       value: totalSales2025.toString(),
       description: `Target: ${target2025}`,
       icon: TrendingUp,
       color: 'text-purple-600',
+    },
+  ];
+
+  const gaugePercent = target2026 > 0 ? Math.round((totalSales2026 / target2026) * 100) : 0;
+  const ytdPercent = target2026 > 0 ? Math.round((completedShowTarget2026 / target2026) * 100) : 0;
+
+  const formatNumber = (value: number) => value.toLocaleString();
+
+  const getRingStyle = (percent: number, color: string) => {
+    const safePercent = Math.min(Math.max(percent, 0), 100);
+    return {
+      background: `conic-gradient(${color} ${safePercent}%, #e5e7eb ${safePercent}% 100%)`,
+    };
+  };
+
+  const metricHighlights = [
+    {
+      label: 'Total Target 2026',
+      value: target2026,
+      helper: 'Overall annual target',
+      accent: 'bg-slate-100 text-slate-700',
+    },
+    {
+      label: 'Completed Show Targets (YTD)',
+      value: completedShowTarget2026,
+      helper: `${completedShows} completed shows`,
+      accent: 'bg-blue-50 text-blue-700',
+      pill: `${ytdPercent}% of annual target`,
+    },
+    {
+      label: 'Sales to Date',
+      value: totalSales2026,
+      helper: `${totalSales2026.toLocaleString()} orders placed`,
+      accent: 'bg-emerald-50 text-emerald-700',
+      pill: `${gaugePercent}% of annual target`,
     },
   ];
 
@@ -231,22 +251,79 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6">
-      {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        {stats.map((stat, index) => (
-          <Card key={index} className="hover:shadow-lg transition-shadow">
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium text-gray-600">
-                {stat.title}
-              </CardTitle>
-              <stat.icon className={`h-5 w-5 ${stat.color}`} />
-            </CardHeader>
-            <CardContent>
-              <div className="text-3xl font-bold text-gray-900">{stat.value}</div>
-              <p className="text-xs text-gray-500 mt-1">{stat.description}</p>
-            </CardContent>
-          </Card>
-        ))}
+      {/* Target Completion Gauge & Stats */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <Card className="lg:col-span-2 hover:shadow-lg transition-shadow">
+          <CardHeader>
+            <CardTitle>2026 Target Completion</CardTitle>
+            <CardDescription>
+              Visual comparison between the overall 2026 target, completed-show targets (YTD), and sales achieved.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 gap-8 md:grid-cols-2 md:items-center">
+              <div className="relative mx-auto h-64 w-64">
+                <div className="absolute inset-0 rounded-full bg-gradient-to-br from-slate-50 via-white to-slate-100 shadow-inner" />
+                <div className="absolute inset-2 rounded-full border border-slate-200" />
+                <div
+                  className="absolute inset-3 rounded-full"
+                  style={getRingStyle(ytdPercent, 'rgba(59, 130, 246, 0.45)')}
+                />
+                <div
+                  className="absolute inset-6 rounded-full"
+                  style={getRingStyle(gaugePercent, 'rgba(16, 185, 129, 0.65)')}
+                />
+                <div className="absolute inset-10 flex flex-col items-center justify-center rounded-full bg-white text-center shadow">
+                  <p className="text-xs uppercase tracking-wide text-gray-500">Sales Completion</p>
+                  <p className="text-4xl font-bold text-gray-900">{gaugePercent}%</p>
+                  <p className="text-xs text-gray-500">of {formatNumber(target2026)} target</p>
+                </div>
+                <div className="absolute -bottom-6 left-1/2 flex -translate-x-1/2 gap-3 text-xs font-medium">
+                  <span className="flex items-center gap-1 text-blue-700">
+                    <span className="h-2 w-2 rounded-full bg-blue-500" /> Completed targets
+                  </span>
+                  <span className="flex items-center gap-1 text-emerald-700">
+                    <span className="h-2 w-2 rounded-full bg-emerald-500" /> Sales
+                  </span>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                {metricHighlights.map((metric) => (
+                  <div key={metric.label} className="rounded-lg border p-4 shadow-sm">
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <p className="text-sm text-gray-600">{metric.label}</p>
+                        <p className="text-2xl font-bold text-gray-900">{formatNumber(metric.value)}</p>
+                        <p className="text-xs text-gray-500">{metric.helper}</p>
+                      </div>
+                      <span className={`rounded-full px-3 py-1 text-xs font-semibold ${metric.accent}`}>
+                        {metric.pill || 'Target detail'}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-1 gap-6">
+          {stats.map((stat, index) => (
+            <Card key={index} className="hover:shadow-lg transition-shadow">
+              <CardHeader className="flex flex-row items-center justify-between pb-2">
+                <CardTitle className="text-sm font-medium text-gray-600">
+                  {stat.title}
+                </CardTitle>
+                <stat.icon className={`h-5 w-5 ${stat.color}`} />
+              </CardHeader>
+              <CardContent>
+                <div className="text-3xl font-bold text-gray-900">{stat.value}</div>
+                <p className="text-xs text-gray-500 mt-1">{stat.description}</p>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
       </div>
 
       {/* Main Content Tabs */}
@@ -272,50 +349,6 @@ export default function Dashboard() {
                     <XAxis dataKey="name" />
                     <YAxis />
                     <Tooltip />
-                    <Legend />
-                    <Bar dataKey="sales" fill="#3b82f6" name="Total Sales" />
-                  </BarChart>
-                </ResponsiveContainer>
-              ) : (
-                <div className="text-center py-8 text-gray-500">No employee data available</div>
-              )}
-            </CardContent>
-          </Card>
-
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <Card>
-              <CardHeader>
-                <CardTitle>Work Days Distribution</CardTitle>
-              </CardHeader>
-              <CardContent>
-                {employeeStats.length > 0 ? (
-                  <ResponsiveContainer width="100%" height={300}>
-                    <BarChart data={employeeStats}>
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="name" />
-                      <YAxis />
-                      <Tooltip />
-                      <Bar dataKey="workDays" fill="#10b981" name="Work Days" />
-                    </BarChart>
-                  </ResponsiveContainer>
-                ) : (
-                  <div className="text-center py-8 text-gray-500">No work days data available</div>
-                )}
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>Average Daily Sales</CardTitle>
-              </CardHeader>
-              <CardContent>
-                {employeeStats.length > 0 ? (
-                  <ResponsiveContainer width="100%" height={300}>
-                    <BarChart data={employeeStats}>
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="name" />
-                      <YAxis />
-                      <Tooltip />
                       <Bar dataKey="avgDaily" fill="#f59e0b" name="Avg Daily Sales" />
                     </BarChart>
                   </ResponsiveContainer>
