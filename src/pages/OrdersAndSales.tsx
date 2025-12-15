@@ -212,11 +212,11 @@ export default function OrdersAndSales() {
     return orderCount === 0 && !selectedShow.handoverDealer;
   }, [ordersByShow, selectedShow]);
 
-  const ordersByShow = useMemo(
-    () =>
-      orders.reduce((acc, order) => {
-        if (!order.showId) return acc;
-        acc[order.showId] = (acc[order.showId] || 0) + 1;
+  const isValidModelSelection = (value: string | undefined) => {
+    if (!value) return false;
+    return modelOptions.some((option) => option.toLowerCase() === value.trim().toLowerCase());
+  };
+
   useEffect(() => {
     if (selectedShow?.handoverDealer) {
       setSelectedHandoverDealer(selectedShow.handoverDealer);
