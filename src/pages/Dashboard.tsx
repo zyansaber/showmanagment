@@ -354,10 +354,9 @@ export default function Dashboard() {
                   </ResponsiveContainer>
                 ) : (
                   <div className="text-center py-8 text-gray-500">No sales data available</div>
-                )}
-              </CardContent>
-            </Card>
-          </div>
+              )}
+            </CardContent>
+          </Card>
         </TabsContent>
 
         {/* Show Analytics Tab */}
