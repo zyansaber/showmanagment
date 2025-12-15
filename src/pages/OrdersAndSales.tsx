@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
@@ -18,16 +18,17 @@ const CONFIRMATION_PASSWORD = 'admin123';
 const CONFIRMATION_CACHE_KEY = 'orders-dashboard-confirmation';
 const CONFIRMATION_DURATION_MS = 5 * 60 * 1000; // 5 minutes
 
+type DealerStatus = 'Pending' | 'Approved';
+
 interface DecoratedOrder extends ShowOrder {
   showName: string;
   handoverDealer: string;
+  dealerStatus: DealerStatus;
 }
 
-
-const statusStyles: Record<ShowOrder['status'], string> = {
+const statusStyles: Record<DealerStatus, string> = {
   Pending: 'bg-yellow-100 text-yellow-800',
   Approved: 'bg-green-100 text-green-800',
-  Rejected: 'bg-red-100 text-red-800',
 };
 
 const formatDate = (value: string | undefined) => {
@@ -70,7 +71,7 @@ export default function OrdersAndSales() {
     showId: '',
     date: new Date().toISOString().split('T')[0],
   });
-  const [statusFilter, setStatusFilter] = useState<'All' | ShowOrder['status']>('All');
+  const [statusFilter, setStatusFilter] = useState<'All' | DealerStatus>('All');
 
   const requiresPassword = !authExpiry || authExpiry <= Date.now();
 
@@ -141,6 +142,11 @@ export default function OrdersAndSales() {
     [shows]
   );
 
+  const deriveDealerStatus = useCallback(
+    (order: ShowOrder): DealerStatus => (order.dealerConfirm ? 'Approved' : 'Pending'),
+    []
+  );
+
   const decoratedOrders: DecoratedOrder[] = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
     return orders
@@ -151,7 +157,8 @@ export default function OrdersAndSales() {
         return Number.isNaN(dateB) ? -1 : Number.isNaN(dateA) ? 1 : dateB - dateA;
       })
       .filter((order) => {
-        if (statusFilter !== 'All' && order.status !== statusFilter) return false;
+        const dealerStatus = deriveDealerStatus(order);
+        if (statusFilter !== 'All' && dealerStatus !== statusFilter) return false;
         if (!term) return true;
         const matchedShow = showLookup[order.showId];
         const haystack = [
@@ -173,12 +180,13 @@ export default function OrdersAndSales() {
         ...order,
         showName: showLookup[order.showId]?.name || 'Unknown Show',
         handoverDealer: showLookup[order.showId]?.handoverDealer || 'Not set',
+        dealerStatus: deriveDealerStatus(order),
       }));
-  }, [orders, searchTerm, showLookup, statusFilter]);
+  }, [deriveDealerStatus, orders, searchTerm, showLookup, statusFilter]);
 
   const totalOrders = orders.length;
-  const pendingOrders = orders.filter((order) => order.status === 'Pending').length;
-  const approvedOrders = orders.filter((order) => order.status === 'Approved').length;
+  const pendingOrders = orders.filter((order) => deriveDealerStatus(order) === 'Pending').length;
+  const approvedOrders = orders.filter((order) => deriveDealerStatus(order) === 'Approved').length;
 
   const selectedShow = useMemo(() => shows.find((show) => show.id === newOrder.showId), [newOrder.showId, shows]);
 
@@ -204,11 +212,11 @@ export default function OrdersAndSales() {
     return orderCount === 0 && !selectedShow.handoverDealer;
   }, [ordersByShow, selectedShow]);
 
-  const isValidModelSelection = (value: string | undefined) => {
-    if (!value) return false;
-    return modelOptions.some((option) => option.toLowerCase() === value.trim().toLowerCase());
-  };
-
+  const ordersByShow = useMemo(
+    () =>
+      orders.reduce((acc, order) => {
+        if (!order.showId) return acc;
+        acc[order.showId] = (acc[order.showId] || 0) + 1;
   useEffect(() => {
     if (selectedShow?.handoverDealer) {
       setSelectedHandoverDealer(selectedShow.handoverDealer);
@@ -234,13 +242,14 @@ export default function OrdersAndSales() {
     try {
       await dbUpdate(`showOrders/${order.id}`, {
         status: 'Approved',
+        dealerConfirm: true,
         approvedBy: 'Orders Dashboard',
         date: order.date,
       });
       setOrders((prev) =>
         prev.map((existing) =>
           existing.id === order.id
-            ? { ...existing, status: 'Approved', approvedBy: 'Orders Dashboard' }
+            ? { ...existing, status: 'Approved', dealerConfirm: true, approvedBy: 'Orders Dashboard' }
             : existing
         )
       );
@@ -254,7 +263,7 @@ export default function OrdersAndSales() {
   };
 
   const handleConfirmationClick = (order: ShowOrder) => {
-    if (order.status === 'Approved') {
+    if (deriveDealerStatus(order) === 'Approved') {
       toast.info('Order already confirmed.');
       return;
     }
@@ -666,7 +675,7 @@ export default function OrdersAndSales() {
                     <TableHead>Type</TableHead>
                     <TableHead>Salesperson</TableHead>
                     <TableHead>Date</TableHead>
-                    <TableHead>Status</TableHead>
+                    <TableHead>Dealer Status</TableHead>
                     <TableHead>Handover Dealer</TableHead>
                     <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
@@ -684,20 +693,26 @@ export default function OrdersAndSales() {
                         <TableCell>{order.salesperson || 'Unassigned'}</TableCell>
                         <TableCell>{formatDate(order.date)}</TableCell>
                         <TableCell>
-                          <span className={`rounded-full px-2 py-1 text-xs font-semibold ${statusStyles[order.status]}`}>
-                            {order.status}
+                          <span className={`rounded-full px-2 py-1 text-xs font-semibold ${statusStyles[order.dealerStatus]}`}>
+                            {order.dealerStatus === 'Approved' ? 'Approved' : 'Pending'}
                           </span>
                         </TableCell>
                         <TableCell>{order.handoverDealer}</TableCell>
                         <TableCell className="text-right">
-                          <Button
-                            size="sm"
-                            variant="secondary"
-                            onClick={() => handleConfirmationClick(order)}
-                            disabled={order.status === 'Approved'}
-                          >
-                            Confirmation
-                          </Button>
+                          {order.dealerStatus === 'Approved' ? (
+                            <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-800">
+                              Confirmed
+                            </span>
+                          ) : (
+                            <Button
+                              size="sm"
+                              variant="secondary"
+                              className="bg-yellow-100 text-yellow-800 hover:bg-yellow-200"
+                              onClick={() => handleConfirmationClick(order)}
+                            >
+                              Confirmation
+                            </Button>
+                          )}
                         </TableCell>
                       </TableRow>
                     );
