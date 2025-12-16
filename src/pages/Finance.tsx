@@ -1,6 +1,3 @@
-+664
--0
-
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { Banknote, Loader2, Plus, Save, Upload, XCircle } from 'lucide-react';
