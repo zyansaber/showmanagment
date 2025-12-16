@@ -244,8 +244,8 @@ export default function Finance() {
       prev.map((order) => {
         if (order.id !== id) return order;
         const nextOrder = { ...order, ...updates };
-        if (updates.showId) {
-          const linkedShow = showLookup[updates.showId];
+        if (updates.showId && updates.showId.trim()) {
+          const linkedShow = showLookup[updates.showId.trim()];
           if (linkedShow) {
             nextOrder.dealership = findMatchingShowDealer(linkedShow);
           }
@@ -482,10 +482,10 @@ export default function Finance() {
                 Loading finance data...
               </div>
             ) : (
-              <div className="overflow-x-auto rounded-lg border border-slate-200">
-                <Table className="text-xs">
-                  <TableHeader>
-                    <TableRow>
+            <div className="overflow-x-auto rounded-lg border border-slate-300 shadow">
+              <Table className="text-xs">
+                <TableHeader>
+                  <TableRow>
                       <TableHead className="min-w-[170px]">Show ID</TableHead>
                       <TableHead>Show Name</TableHead>
                       <TableHead>Dealership</TableHead>
@@ -503,44 +503,27 @@ export default function Finance() {
                       </TableRow>
                     ) : (
                       internalOrders.map((order) => {
-                        const linkedShow = order.showId ? showLookup[order.showId] : undefined;
-                        return (
-                          <TableRow key={order.id}>
-                            <TableCell className="space-y-1">
-                              <Label className="sr-only">Show ID</Label>
-                              <Select
-                                value={order.showId}
-                                onValueChange={(value) =>
-                                  handleOrderChange(order.id, {
-                                    showId: value,
-                                    dealership: findMatchingShowDealer(showLookup[value]),
-                                  })
-                                }
-                              >
-                                <SelectTrigger className="h-9">
-                                  <SelectValue placeholder="Select show" />
-                                </SelectTrigger>
-                                <SelectContent className="max-h-64">
-                                  {shows.map((show) =>
-                                    show.id ? (
-                                      <SelectItem key={show.id} value={show.id}>
-                                        {show.name || show.id}
-                                      </SelectItem>
-                                    ) : null
-                                  )}
-                                </SelectContent>
-                              </Select>
-                              <p className="text-[11px] text-slate-500 break-words">{order.showId || 'Not linked'}</p>
-                            </TableCell>
-                            <TableCell>
-                              <p className="font-medium text-slate-900">{linkedShow?.name || 'Unknown Show'}</p>
-                            </TableCell>
-                            <TableCell>
-                              <Input value={order.dealership || linkedShow?.dealership || ''} disabled />
-                              <p className="text-[11px] text-slate-500">
-                                来自 shows/{order.showId || 'id'}/dealership
-                              </p>
-                            </TableCell>
+                      const linkedShow = order.showId ? showLookup[order.showId] : undefined;
+                      return (
+                        <TableRow key={order.id} className="align-middle">
+                          <TableCell className="space-y-1">
+                            <Label className="text-[11px] text-slate-500">Show ID</Label>
+                            <Input
+                              value={order.showId}
+                              onChange={(event) =>
+                                handleOrderChange(order.id, { showId: event.target.value.trim() })
+                              }
+                              placeholder="Enter Show ID"
+                              className="h-9"
+                              readOnly={Boolean(order.showId)}
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <p className="font-semibold text-slate-900">{linkedShow?.name || 'Unknown Show'}</p>
+                          </TableCell>
+                          <TableCell>
+                            <Input value={order.dealership || linkedShow?.dealership || ''} disabled className="h-9" />
+                          </TableCell>
                             <TableCell>
                               <Input
                                 value={order.internalSalesOrderNumber}
