@@ -226,31 +226,11 @@ export default function Finance() {
     await dbSet('finance/expenses', payload as unknown as Record<string, unknown>);
   };
 
-  const handleAddOrder = () => {
-    setInternalOrders((prev) => [
-      ...prev,
-      {
-        id: newId(),
-        showId: '',
-        internalSalesOrderNumber: '',
-        internalSalesOrderNumberDealer: '',
-        dealership: '',
-      },
-    ]);
-  };
-
   const handleOrderChange = (id: string, updates: Partial<InternalSalesOrder>) => {
     setInternalOrders((prev) =>
       prev.map((order) => {
         if (order.id !== id) return order;
-        const nextOrder = { ...order, ...updates };
-        if (updates.showId && updates.showId.trim()) {
-          const linkedShow = showLookup[updates.showId.trim()];
-          if (linkedShow) {
-            nextOrder.dealership = findMatchingShowDealer(linkedShow);
-          }
-        }
-        return nextOrder;
+        return { ...order, ...updates };
       })
     );
   };
@@ -453,9 +433,6 @@ export default function Finance() {
                 )}
                 {importing ? 'Uploading...' : 'Upload Excel'}
               </Button>
-              <Button variant="outline" size="sm" onClick={handleAddOrder}>
-                <Plus className="mr-2 h-4 w-4" /> Add Row
-              </Button>
               <Button onClick={handleSaveOrders} disabled={savingOrders}>
                 {savingOrders ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
                 {savingOrders ? 'Saving...' : 'Save Changes'}
@@ -484,8 +461,8 @@ export default function Finance() {
             ) : (
             <div className="overflow-x-auto rounded-lg border border-slate-300 shadow">
               <Table className="text-xs">
-                <TableHeader>
-                  <TableRow>
+                  <TableHeader>
+                    <TableRow>
                       <TableHead className="min-w-[170px]">Show ID</TableHead>
                       <TableHead>Show Name</TableHead>
                       <TableHead>Dealership</TableHead>
@@ -503,27 +480,18 @@ export default function Finance() {
                       </TableRow>
                     ) : (
                       internalOrders.map((order) => {
-                      const linkedShow = order.showId ? showLookup[order.showId] : undefined;
-                      return (
-                        <TableRow key={order.id} className="align-middle">
-                          <TableCell className="space-y-1">
-                            <Label className="text-[11px] text-slate-500">Show ID</Label>
-                            <Input
-                              value={order.showId}
-                              onChange={(event) =>
-                                handleOrderChange(order.id, { showId: event.target.value.trim() })
-                              }
-                              placeholder="Enter Show ID"
-                              className="h-9"
-                              readOnly={Boolean(order.showId)}
-                            />
-                          </TableCell>
-                          <TableCell>
-                            <p className="font-semibold text-slate-900">{linkedShow?.name || 'Unknown Show'}</p>
-                          </TableCell>
-                          <TableCell>
-                            <Input value={order.dealership || linkedShow?.dealership || ''} disabled className="h-9" />
-                          </TableCell>
+                        const linkedShow = order.showId ? showLookup[order.showId] : undefined;
+                        return (
+                          <TableRow key={order.id} className="align-middle">
+                            <TableCell>
+                              <p className="font-semibold text-slate-900">{order.showId || '—'}</p>
+                            </TableCell>
+                            <TableCell>
+                              <p className="font-semibold text-slate-900">{linkedShow?.name || 'Unknown Show'}</p>
+                            </TableCell>
+                            <TableCell>
+                              <p className="text-slate-800">{order.dealership || linkedShow?.dealership || '—'}</p>
+                            </TableCell>
                             <TableCell>
                               <Input
                                 value={order.internalSalesOrderNumber}
