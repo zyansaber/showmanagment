@@ -156,6 +156,7 @@ export default function Finance() {
   const [savingExpenses, setSavingExpenses] = useState(false);
   const [importing, setImporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [activeTable, setActiveTable] = useState<'orders' | 'expenses'>('orders');
   const [newExpense, setNewExpense] = useState<Pick<ExpenseItem, 'category' | 'name' | 'glCode'>>({
     category: 'Dealer Cost',
     name: '',
@@ -246,7 +247,7 @@ export default function Finance() {
         if (updates.showId) {
           const linkedShow = showLookup[updates.showId];
           if (linkedShow) {
-            nextOrder.dealership = nextOrder.dealership || findMatchingShowDealer(linkedShow);
+            nextOrder.dealership = findMatchingShowDealer(linkedShow);
           }
         }
         return nextOrder;
@@ -416,246 +417,148 @@ export default function Finance() {
 
       <Card>
         <CardHeader className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <CardTitle>Internal Sales Orders</CardTitle>
-            <CardDescription>
-              Upload Excel/CSV data or edit records inline. Show names are pulled from the shows dataset.
-            </CardDescription>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".xlsx,.xls,.csv"
-              className="hidden"
-              onChange={(event) => {
-                const file = event.target.files?.[0];
-                if (file) handleImportOrders(file);
-              }}
-            />
-            <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()} disabled={importing}>
-              {importing ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              ) : (
-                <Upload className="mr-2 h-4 w-4" />
-              )}
-              {importing ? 'Uploading...' : 'Upload Excel'}
+          <div className="flex flex-wrap items-center gap-3">
+            <Button
+              variant={activeTable === 'orders' ? 'default' : 'outline'}
+              onClick={() => setActiveTable('orders')}
+              className="text-sm"
+            >
+              Internal Sales Order
             </Button>
-            <Button variant="outline" size="sm" onClick={handleAddOrder}>
-              <Plus className="mr-2 h-4 w-4" /> Add Row
-            </Button>
-            <Button onClick={handleSaveOrders} disabled={savingOrders}>
-              {savingOrders ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
-              {savingOrders ? 'Saving...' : 'Save Changes'}
+            <Button
+              variant={activeTable === 'expenses' ? 'default' : 'outline'}
+              onClick={() => setActiveTable('expenses')}
+              className="text-sm"
+            >
+              GL Account
             </Button>
           </div>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {loading ? (
-            <div className="flex items-center gap-2 text-slate-600">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              Loading finance data...
+          {activeTable === 'orders' ? (
+            <div className="flex flex-wrap items-center gap-2">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".xlsx,.xls,.csv"
+                className="hidden"
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  if (file) handleImportOrders(file);
+                }}
+              />
+              <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()} disabled={importing}>
+                {importing ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Upload className="mr-2 h-4 w-4" />
+                )}
+                {importing ? 'Uploading...' : 'Upload Excel'}
+              </Button>
+              <Button variant="outline" size="sm" onClick={handleAddOrder}>
+                <Plus className="mr-2 h-4 w-4" /> Add Row
+              </Button>
+              <Button onClick={handleSaveOrders} disabled={savingOrders}>
+                {savingOrders ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+                {savingOrders ? 'Saving...' : 'Save Changes'}
+              </Button>
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="min-w-[180px]">Show ID</TableHead>
-                    <TableHead>Show Name</TableHead>
-                    <TableHead>Dealership</TableHead>
-                    <TableHead>Internal Sales Order Number</TableHead>
-                    <TableHead>Internal Sales Order Number (Dealer)</TableHead>
-                    <TableHead className="w-24 text-right">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {internalOrders.length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={6} className="text-center text-sm text-slate-500">
-                        No internal sales orders yet. Upload a spreadsheet or add a row to begin.
-                      </TableCell>
-                    </TableRow>
-                  ) : (
-                    internalOrders.map((order) => {
-                      const linkedShow = order.showId ? showLookup[order.showId] : undefined;
-                      return (
-                        <TableRow key={order.id}>
-                          <TableCell>
-                            <Label className="sr-only">Show ID</Label>
-                            <Select
-                              value={order.showId}
-                              onValueChange={(value) =>
-                                handleOrderChange(order.id, {
-                                  showId: value,
-                                  dealership: order.dealership || findMatchingShowDealer(showLookup[value]),
-                                })
-                              }
-                            >
-                              <SelectTrigger>
-                                <SelectValue placeholder="Select show" />
-                              </SelectTrigger>
-                              <SelectContent className="max-h-64">
-                                {shows.map((show) =>
-                                  show.id ? (
-                                    <SelectItem key={show.id} value={show.id}>
-                                      {show.name || show.id}
-                                    </SelectItem>
-                                  ) : null
-                                )}
-                              </SelectContent>
-                            </Select>
-                            <p className="mt-1 text-xs text-slate-500 break-words">{order.showId || 'Not linked'}</p>
-                          </TableCell>
-                          <TableCell>
-                            <p className="font-medium text-slate-900">{linkedShow?.name || 'Unknown Show'}</p>
-                            {linkedShow?.dealership && (
-                              <p className="text-xs text-slate-500">Default dealer: {linkedShow.dealership}</p>
-                            )}
-                          </TableCell>
-                          <TableCell>
-                            <Input
-                              value={order.dealership}
-                              onChange={(event) => handleOrderChange(order.id, { dealership: event.target.value })}
-                              placeholder="Dealership"
-                            />
-                          </TableCell>
-                          <TableCell>
-                            <Input
-                              value={order.internalSalesOrderNumber}
-                              onChange={(event) =>
-                                handleOrderChange(order.id, { internalSalesOrderNumber: event.target.value })
-                              }
-                              placeholder="Internal Sales Order Number"
-                            />
-                          </TableCell>
-                          <TableCell>
-                            <Input
-                              value={order.internalSalesOrderNumberDealer}
-                              onChange={(event) =>
-                                handleOrderChange(order.id, { internalSalesOrderNumberDealer: event.target.value })
-                              }
-                              placeholder="Internal Sales Order Number (Dealer)"
-                            />
-                          </TableCell>
-                          <TableCell className="text-right">
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="text-red-500 hover:text-red-600"
-                              onClick={() => handleDeleteOrder(order.id)}
-                            >
-                              <XCircle className="h-4 w-4" />
-                            </Button>
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })
-                  )}
-                </TableBody>
-              </Table>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button onClick={handleSaveExpenses} disabled={savingExpenses}>
+                {savingExpenses ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Save className="mr-2 h-4 w-4" />
+                )}
+                {savingExpenses ? 'Saving...' : 'Save GL Accounts'}
+              </Button>
             </div>
           )}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <CardTitle>Expense GL Codes</CardTitle>
-            <CardDescription>
-              Dealer Cost, Factory Cost, and Factory Commissions with editable GL codes. Add subcategories as needed.
-            </CardDescription>
-          </div>
-          <Button onClick={handleSaveExpenses} disabled={savingExpenses}>
-            {savingExpenses ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
-            {savingExpenses ? 'Saving...' : 'Save Expense Codes'}
-          </Button>
         </CardHeader>
         <CardContent className="space-y-6">
-          <div className="grid gap-4 md:grid-cols-3">
-            <div className="space-y-2">
-              <Label>Category</Label>
-              <Select
-                value={newExpense.category}
-                onValueChange={(value) => setNewExpense((prev) => ({ ...prev, category: value as ExpenseCategory }))}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select category" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="Dealer Cost">Dealer Cost</SelectItem>
-                  <SelectItem value="Factory Cost">Factory Cost</SelectItem>
-                  <SelectItem value="Factory Commissions">Factory Commissions</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label>Subcategory</Label>
-              <Input
-                value={newExpense.name}
-                onChange={(event) => setNewExpense((prev) => ({ ...prev, name: event.target.value }))}
-                placeholder="e.g. Stand Cost"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>GL Code</Label>
-              <div className="flex items-center gap-2">
-                <Input
-                  value={newExpense.glCode}
-                  onChange={(event) => setNewExpense((prev) => ({ ...prev, glCode: event.target.value }))}
-                  placeholder="Enter GL code"
-                />
-                <Button variant="outline" onClick={handleAddExpenseItem}>
-                  <Plus className="mr-2 h-4 w-4" />
-                  Add
-                </Button>
+          {activeTable === 'orders' ? (
+            loading ? (
+              <div className="flex items-center gap-2 text-slate-600">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Loading finance data...
               </div>
-            </div>
-          </div>
-
-          <div className="space-y-4">
-            {groupedExpenses.map(({ category, items }) => (
-              <Card key={category} className="border-slate-200">
-                <CardHeader className="flex flex-row items-center justify-between space-y-0">
-                  <div>
-                    <CardTitle className="text-base">{category}</CardTitle>
-                    <CardDescription>Update GL codes or extend the list with new subcategories.</CardDescription>
-                  </div>
-                  <Badge variant="outline" className="text-slate-700">
-                    {items.length} item{items.length === 1 ? '' : 's'}
-                  </Badge>
-                </CardHeader>
-                <CardContent className="overflow-x-auto">
-                  <Table>
-                    <TableHeader>
+            ) : (
+              <div className="overflow-x-auto rounded-lg border border-slate-200">
+                <Table className="text-xs">
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="min-w-[170px]">Show ID</TableHead>
+                      <TableHead>Show Name</TableHead>
+                      <TableHead>Dealership</TableHead>
+                      <TableHead>Internal Sales Order Number</TableHead>
+                      <TableHead>Internal Sales Order Number (Dealer)</TableHead>
+                      <TableHead className="w-16 text-right">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {internalOrders.length === 0 ? (
                       <TableRow>
-                        <TableHead>Subcategory</TableHead>
-                        <TableHead className="w-64">GL Code</TableHead>
-                        <TableHead className="w-20 text-right">Actions</TableHead>
+                        <TableCell colSpan={6} className="text-center text-sm text-slate-500">
+                          No internal sales orders yet. Upload a spreadsheet or add a row to begin.
+                        </TableCell>
                       </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {items.length === 0 ? (
-                        <TableRow>
-                          <TableCell colSpan={3} className="text-center text-sm text-slate-500">
-                            No entries yet for {category}. Add a subcategory above.
-                          </TableCell>
-                        </TableRow>
-                      ) : (
-                        items.map((item) => (
-                          <TableRow key={item.id}>
+                    ) : (
+                      internalOrders.map((order) => {
+                        const linkedShow = order.showId ? showLookup[order.showId] : undefined;
+                        return (
+                          <TableRow key={order.id}>
+                            <TableCell className="space-y-1">
+                              <Label className="sr-only">Show ID</Label>
+                              <Select
+                                value={order.showId}
+                                onValueChange={(value) =>
+                                  handleOrderChange(order.id, {
+                                    showId: value,
+                                    dealership: findMatchingShowDealer(showLookup[value]),
+                                  })
+                                }
+                              >
+                                <SelectTrigger className="h-9">
+                                  <SelectValue placeholder="Select show" />
+                                </SelectTrigger>
+                                <SelectContent className="max-h-64">
+                                  {shows.map((show) =>
+                                    show.id ? (
+                                      <SelectItem key={show.id} value={show.id}>
+                                        {show.name || show.id}
+                                      </SelectItem>
+                                    ) : null
+                                  )}
+                                </SelectContent>
+                              </Select>
+                              <p className="text-[11px] text-slate-500 break-words">{order.showId || 'Not linked'}</p>
+                            </TableCell>
+                            <TableCell>
+                              <p className="font-medium text-slate-900">{linkedShow?.name || 'Unknown Show'}</p>
+                            </TableCell>
+                            <TableCell>
+                              <Input value={order.dealership || linkedShow?.dealership || ''} disabled />
+                              <p className="text-[11px] text-slate-500">
+                                来自 shows/{order.showId || 'id'}/dealership
+                              </p>
+                            </TableCell>
                             <TableCell>
                               <Input
-                                value={item.name}
-                                onChange={(event) => handleExpenseChange(item.id, { name: event.target.value })}
+                                value={order.internalSalesOrderNumber}
+                                onChange={(event) =>
+                                  handleOrderChange(order.id, { internalSalesOrderNumber: event.target.value })
+                                }
+                                placeholder="Internal Sales Order Number"
+                                className="h-9"
                               />
                             </TableCell>
                             <TableCell>
                               <Input
-                                value={item.glCode}
-                                onChange={(event) => handleExpenseChange(item.id, { glCode: event.target.value })}
-                                placeholder="GL code"
+                                value={order.internalSalesOrderNumberDealer}
+                                onChange={(event) =>
+                                  handleOrderChange(order.id, { internalSalesOrderNumberDealer: event.target.value })
+                                }
+                                placeholder="Internal Sales Order Number (Dealer)"
+                                className="h-9"
                               />
                             </TableCell>
                             <TableCell className="text-right">
@@ -663,20 +566,131 @@ export default function Finance() {
                                 variant="ghost"
                                 size="icon"
                                 className="text-red-500 hover:text-red-600"
-                                onClick={() => handleDeleteExpense(item.id)}
+                                onClick={() => handleDeleteOrder(order.id)}
                               >
                                 <XCircle className="h-4 w-4" />
                               </Button>
                             </TableCell>
                           </TableRow>
-                        ))
-                      )}
-                    </TableBody>
-                  </Table>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
+                        );
+                      })
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+            )
+          ) : (
+            <>
+              <div className="grid gap-4 md:grid-cols-3">
+                <div className="space-y-2">
+                  <Label>Category</Label>
+                  <Select
+                    value={newExpense.category}
+                    onValueChange={(value) => setNewExpense((prev) => ({ ...prev, category: value as ExpenseCategory }))}
+                  >
+                    <SelectTrigger className="h-9">
+                      <SelectValue placeholder="Select category" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Dealer Cost">Dealer Cost</SelectItem>
+                      <SelectItem value="Factory Cost">Factory Cost</SelectItem>
+                      <SelectItem value="Factory Commissions">Factory Commissions</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Subcategory</Label>
+                  <Input
+                    value={newExpense.name}
+                    onChange={(event) => setNewExpense((prev) => ({ ...prev, name: event.target.value }))}
+                    placeholder="e.g. Stand Cost"
+                    className="h-9"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>GL Code</Label>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      value={newExpense.glCode}
+                      onChange={(event) => setNewExpense((prev) => ({ ...prev, glCode: event.target.value }))}
+                      placeholder="Enter GL code"
+                      className="h-9"
+                    />
+                    <Button variant="outline" onClick={handleAddExpenseItem}>
+                      <Plus className="mr-2 h-4 w-4" />
+                      Add
+                    </Button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                {groupedExpenses.map(({ category, items }) => (
+                  <Card key={category} className="border-slate-200">
+                    <CardHeader className="flex flex-row items-center justify-between space-y-0">
+                      <div>
+                        <CardTitle className="text-base">{category}</CardTitle>
+                        <CardDescription>Update GL codes or extend the list with new subcategories.</CardDescription>
+                      </div>
+                      <Badge variant="outline" className="text-slate-700">
+                        {items.length} item{items.length === 1 ? '' : 's'}
+                      </Badge>
+                    </CardHeader>
+                    <CardContent className="overflow-x-auto">
+                      <Table className="text-xs">
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Subcategory</TableHead>
+                            <TableHead className="w-64">GL Code</TableHead>
+                            <TableHead className="w-16 text-right">Actions</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {items.length === 0 ? (
+                            <TableRow>
+                              <TableCell colSpan={3} className="text-center text-sm text-slate-500">
+                                No entries yet for {category}. Add a subcategory above.
+                              </TableCell>
+                            </TableRow>
+                          ) : (
+                            items.map((item) => (
+                              <TableRow key={item.id}>
+                                <TableCell>
+                                  <Input
+                                    value={item.name}
+                                    onChange={(event) => handleExpenseChange(item.id, { name: event.target.value })}
+                                    className="h-9"
+                                  />
+                                </TableCell>
+                                <TableCell>
+                                  <Input
+                                    value={item.glCode}
+                                    onChange={(event) => handleExpenseChange(item.id, { glCode: event.target.value })}
+                                    placeholder="GL code"
+                                    className="h-9"
+                                  />
+                                </TableCell>
+                                <TableCell className="text-right">
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="text-red-500 hover:text-red-600"
+                                    onClick={() => handleDeleteExpense(item.id)}
+                                  >
+                                    <XCircle className="h-4 w-4" />
+                                  </Button>
+                                </TableCell>
+                              </TableRow>
+                            ))
+                          )}
+                        </TableBody>
+                      </Table>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            </>
+          )}
         </CardContent>
       </Card>
     </div>
