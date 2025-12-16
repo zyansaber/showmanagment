@@ -32,15 +32,16 @@ type ExpenseItem = {
   category: ExpenseCategory;
   name: string;
   glCode: string;
+  contains?: string;
 };
 
 const DEFAULT_EXPENSE_ITEMS: ExpenseItem[] = [
-  { id: 'dealer-stand-cost', category: 'Dealer Cost', name: 'Stand Cost', glCode: '' },
-  { id: 'dealer-day-rates', category: 'Dealer Cost', name: 'Dealer Day Rates', glCode: '' },
-  { id: 'dealer-commission', category: 'Dealer Cost', name: 'Dealer Commission', glCode: '' },
-  { id: 'dealer-transport', category: 'Dealer Cost', name: 'Dealer Costs Transport', glCode: '' },
-  { id: 'factory-cost', category: 'Factory Cost', name: 'Factory Cost', glCode: '' },
-  { id: 'factory-commissions', category: 'Factory Commissions', name: 'Factory Commissions', glCode: '' },
+  { id: 'dealer-stand-cost', category: 'Dealer Cost', name: 'Stand Cost', glCode: '', contains: '' },
+  { id: 'dealer-day-rates', category: 'Dealer Cost', name: 'Dealer Day Rates', glCode: '', contains: '' },
+  { id: 'dealer-commission', category: 'Dealer Cost', name: 'Dealer Commission', glCode: '', contains: '' },
+  { id: 'dealer-transport', category: 'Dealer Cost', name: 'Dealer Costs Transport', glCode: '', contains: '' },
+  { id: 'factory-cost', category: 'Factory Cost', name: 'Factory Cost', glCode: '', contains: '' },
+  { id: 'factory-commissions', category: 'Factory Commissions', name: 'Factory Commissions', glCode: '', contains: '' },
 ];
 
 const newId = () =>
@@ -97,7 +98,8 @@ const normaliseExpenseItems = (value: unknown): ExpenseItem[] => {
           : 'Dealer Cost';
       const name = typeof raw.name === 'string' && raw.name.trim().length > 0 ? raw.name.trim() : 'Unnamed Item';
       const glCode = typeof raw.glCode === 'string' ? raw.glCode.trim() : '';
-      return { id, category, name, glCode };
+      const contains = typeof raw.contains === 'string' ? raw.contains.trim() : '';
+      return { id, category, name, glCode, contains };
     })
     .filter(Boolean) as ExpenseItem[];
 };
@@ -157,10 +159,11 @@ export default function Finance() {
   const [importing, setImporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeTable, setActiveTable] = useState<'orders' | 'expenses'>('orders');
-  const [newExpense, setNewExpense] = useState<Pick<ExpenseItem, 'category' | 'name' | 'glCode'>>({
+  const [newExpense, setNewExpense] = useState<Pick<ExpenseItem, 'category' | 'name' | 'glCode' | 'contains'>>({
     category: 'Dealer Cost',
     name: '',
     glCode: '',
+    contains: '',
   });
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -336,7 +339,7 @@ export default function Finance() {
       return;
     }
     setExpenses((prev) => [...prev, { ...newExpense, id: newId() }]);
-    setNewExpense({ category: 'Dealer Cost', name: '', glCode: '' });
+    setNewExpense({ category: 'Dealer Cost', name: '', glCode: '', contains: '' });
   };
 
   const handleExpenseChange = (id: string, updates: Partial<ExpenseItem>) => {
@@ -532,7 +535,7 @@ export default function Finance() {
             )
           ) : (
             <>
-              <div className="grid gap-4 md:grid-cols-3">
+              <div className="grid gap-4 md:grid-cols-4">
                 <div className="space-y-2">
                   <Label>Category</Label>
                   <Select
@@ -555,6 +558,15 @@ export default function Finance() {
                     value={newExpense.name}
                     onChange={(event) => setNewExpense((prev) => ({ ...prev, name: event.target.value }))}
                     placeholder="e.g. Stand Cost"
+                    className="h-9"
+                  />
+                </div>
+                <div className="space-y-2 md:col-span-2">
+                  <Label>Contains</Label>
+                  <Input
+                    value={newExpense.contains}
+                    onChange={(event) => setNewExpense((prev) => ({ ...prev, contains: event.target.value }))}
+                    placeholder="Describe what goes into this account"
                     className="h-9"
                   />
                 </div>
@@ -591,29 +603,38 @@ export default function Finance() {
                       <Table className="text-xs">
                         <TableHeader>
                           <TableRow>
-                            <TableHead>Subcategory</TableHead>
-                            <TableHead className="w-64">GL Code</TableHead>
+                            <TableHead className="w-36">Subcategory</TableHead>
+                            <TableHead>Contains</TableHead>
+                            <TableHead className="w-40">GL Code</TableHead>
                             <TableHead className="w-16 text-right">Actions</TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
                           {items.length === 0 ? (
                             <TableRow>
-                              <TableCell colSpan={3} className="text-center text-sm text-slate-500">
+                              <TableCell colSpan={4} className="text-center text-sm text-slate-500">
                                 No entries yet for {category}. Add a subcategory above.
                               </TableCell>
                             </TableRow>
                           ) : (
                             items.map((item) => (
                               <TableRow key={item.id}>
-                                <TableCell>
+                                <TableCell className="align-middle">
                                   <Input
                                     value={item.name}
                                     onChange={(event) => handleExpenseChange(item.id, { name: event.target.value })}
                                     className="h-9"
                                   />
                                 </TableCell>
-                                <TableCell>
+                                <TableCell className="align-middle">
+                                  <Input
+                                    value={item.contains || ''}
+                                    onChange={(event) => handleExpenseChange(item.id, { contains: event.target.value })}
+                                    placeholder="Describe contents"
+                                    className="h-9"
+                                  />
+                                </TableCell>
+                                <TableCell className="align-middle">
                                   <Input
                                     value={item.glCode}
                                     onChange={(event) => handleExpenseChange(item.id, { glCode: event.target.value })}
@@ -621,7 +642,7 @@ export default function Finance() {
                                     className="h-9"
                                   />
                                 </TableCell>
-                                <TableCell className="text-right">
+                                <TableCell className="text-right align-middle">
                                   <Button
                                     variant="ghost"
                                     size="icon"
