@@ -1,3 +1,6 @@
++664
+-0
+
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { Banknote, Loader2, Plus, Save, Upload, XCircle } from 'lucide-react';
@@ -603,9 +606,9 @@ export default function Finance() {
                       <Table className="text-xs">
                         <TableHeader>
                           <TableRow>
-                            <TableHead className="w-36">Subcategory</TableHead>
-                            <TableHead>Contains</TableHead>
-                            <TableHead className="w-40">GL Code</TableHead>
+                            <TableHead className="w-32">Subcategory</TableHead>
+                            <TableHead className="w-48">Contains</TableHead>
+                            <TableHead className="w-32">GL Code</TableHead>
                             <TableHead className="w-16 text-right">Actions</TableHead>
                           </TableRow>
                         </TableHeader>
@@ -619,13 +622,7 @@ export default function Finance() {
                           ) : (
                             items.map((item) => (
                               <TableRow key={item.id}>
-                                <TableCell className="align-middle">
-                                  <Input
-                                    value={item.name}
-                                    onChange={(event) => handleExpenseChange(item.id, { name: event.target.value })}
-                                    className="h-9"
-                                  />
-                                </TableCell>
+                                <TableCell className="align-middle font-medium text-slate-900">{item.name}</TableCell>
                                 <TableCell className="align-middle">
                                   <Input
                                     value={item.contains || ''}
