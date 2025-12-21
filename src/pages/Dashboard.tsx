@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
@@ -18,11 +18,12 @@ import {
 } from 'recharts';
 import { TrendingUp, Calendar } from 'lucide-react';
 import { dbGet } from '@/lib/firebase';
-import type { Show, ShowOrder } from '@/types';
+import type { Show, ShowOrder, TeamMember } from '@/types';
 import { format as formatDate } from 'date-fns';
 
 export default function Dashboard() {
   const [shows, setShows] = useState<Show[]>([]);
+  const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
   const [orders, setOrders] = useState<ShowOrder[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -32,12 +33,14 @@ export default function Dashboard() {
 
   const loadData = async () => {
     try {
-      const [showsData, ordersData] = await Promise.all([
+      const [showsData, membersData, ordersData] = await Promise.all([
         dbGet('shows'),
+        dbGet('teamMembers'),
         dbGet('showOrders'),
       ]);
 
       setShows(showsData ? Object.values(showsData) : []);
+      setTeamMembers(membersData ? Object.values(membersData) : []);
       setOrders(ordersData ? Object.values(ordersData) : []);
     } catch (error) {
       console.error('Error loading data:', error);
@@ -47,17 +50,49 @@ export default function Dashboard() {
   };
 
   // Calculate employee statistics
-  const employeeStats = Object.entries(
-    orders.reduce((acc, order) => {
+  const salespersonStats = useMemo(() => {
+    const orderStats = orders.reduce((acc, order) => {
       const name = typeof order.salesperson === 'string' ? order.salesperson.trim() : '';
       if (!name || name.toLowerCase() === 'n/a') return acc;
-      acc[name] = (acc[name] || 0) + 1;
+      if (!acc[name]) {
+        acc[name] = { sales: 0, dates: new Set<string>() };
+      }
+      acc[name].sales += 1;
+      if (order.date) {
+        acc[name].dates.add(order.date);
+      }
       return acc;
-    }, {} as Record<string, number>)
-  )
-    .map(([name, sales]) => ({ name, sales }))
-    .sort((a, b) => b.sales - a.sales)
-    .slice(0, 5);
+    }, {} as Record<string, { sales: number; dates: Set<string> }>);
+
+    const teamNames = teamMembers
+      .filter((member) => member.activeFlag === 1)
+      .map((member) => member.memberName)
+      .filter((name): name is string => !!name && name.trim().length > 0);
+
+    const withSales = Object.entries(orderStats)
+      .map(([name, data]) => ({
+        name,
+        sales: data.sales,
+        avgDaily: data.dates.size > 0 ? Number((data.sales / data.dates.size).toFixed(2)) : data.sales,
+      }))
+      .sort((a, b) => b.sales - a.sales);
+
+    if (withSales.length >= 10) {
+      return withSales.slice(0, 10);
+    }
+
+    const needed = 10 - withSales.length;
+    const withSalesNames = new Set(withSales.map((entry) => entry.name));
+    const fillNames = teamNames
+      .filter((name) => !withSalesNames.has(name))
+      .sort((a, b) => a.localeCompare(b))
+      .slice(0, needed);
+
+    return [
+      ...withSales,
+      ...fillNames.map((name) => ({ name, sales: 0, avgDaily: 0 })),
+    ];
+  }, [orders, teamMembers]);
 
   // Calculate vehicle type distribution
   const vehicleTypes = orders.reduce((acc, order) => {
@@ -330,27 +365,51 @@ export default function Dashboard() {
 
         {/* Employee Performance Tab */}
         <TabsContent value="employees" className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>Top Sales Performance</CardTitle>
-              <CardDescription>Employee sales ranking and statistics</CardDescription>
-            </CardHeader>
-            <CardContent>
-              {employeeStats.length > 0 ? (
-                <ResponsiveContainer width="100%" height={350}>
-                  <BarChart data={employeeStats}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="name" />
-                    <YAxis />
-                    <Tooltip />
-                    <Bar dataKey="sales" fill="#f59e0b" name="Total Sales" />
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <Card>
+              <CardHeader>
+                <CardTitle>Average Day Performance</CardTitle>
+                <CardDescription>Average sales per active day (Top 10)</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {salespersonStats.length > 0 ? (
+                  <ResponsiveContainer width="100%" height={350}>
+                    <BarChart data={salespersonStats}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="name" />
+                      <YAxis />
+                      <Tooltip />
+                      <Bar dataKey="avgDaily" fill="#10b981" name="Avg Daily Sales" />
                     </BarChart>
                   </ResponsiveContainer>
                 ) : (
                   <div className="text-center py-8 text-gray-500">No sales data available</div>
-              )}
-            </CardContent>
-          </Card>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Total Sales Performance</CardTitle>
+                <CardDescription>Total sales counts by salesperson (Top 10)</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {salespersonStats.length > 0 ? (
+                  <ResponsiveContainer width="100%" height={350}>
+                    <BarChart data={salespersonStats}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="name" />
+                      <YAxis />
+                      <Tooltip />
+                      <Bar dataKey="sales" fill="#f59e0b" name="Total Sales" />
+                    </BarChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="text-center py-8 text-gray-500">No sales data available</div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
         </TabsContent>
 
         {/* Show Analytics Tab */}
