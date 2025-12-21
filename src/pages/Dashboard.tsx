@@ -18,12 +18,11 @@ import {
 } from 'recharts';
 import { TrendingUp, Calendar } from 'lucide-react';
 import { dbGet } from '@/lib/firebase';
-import type { Show, TeamMember, ShowOrder } from '@/types';
+import type { Show, ShowOrder } from '@/types';
 import { format as formatDate } from 'date-fns';
 
 export default function Dashboard() {
   const [shows, setShows] = useState<Show[]>([]);
-  const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
   const [orders, setOrders] = useState<ShowOrder[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -33,14 +32,12 @@ export default function Dashboard() {
 
   const loadData = async () => {
     try {
-      const [showsData, membersData, ordersData] = await Promise.all([
+      const [showsData, ordersData] = await Promise.all([
         dbGet('shows'),
-        dbGet('teamMembers'),
-        dbGet('showOrders')
+        dbGet('showOrders'),
       ]);
 
       setShows(showsData ? Object.values(showsData) : []);
-      setTeamMembers(membersData ? Object.values(membersData) : []);
       setOrders(ordersData ? Object.values(ordersData) : []);
     } catch (error) {
       console.error('Error loading data:', error);
@@ -50,18 +47,15 @@ export default function Dashboard() {
   };
 
   // Calculate employee statistics
-  const employeeStats = teamMembers
-    .filter(m => m.activeFlag === 1)
-    .map(member => {
-      const memberOrders = orders.filter(o => o.salesperson === member.memberName);
-      const workDays = member.totalWorkDays || 0;
-      return {
-        name: member.memberName,
-        sales: memberOrders.length,
-        workDays: workDays,
-        avgDaily: workDays > 0 ? (memberOrders.length / workDays).toFixed(2) : 0
-      };
-    })
+  const employeeStats = Object.entries(
+    orders.reduce((acc, order) => {
+      const name = typeof order.salesperson === 'string' ? order.salesperson.trim() : '';
+      if (!name || name.toLowerCase() === 'n/a') return acc;
+      acc[name] = (acc[name] || 0) + 1;
+      return acc;
+    }, {} as Record<string, number>)
+  )
+    .map(([name, sales]) => ({ name, sales }))
     .sort((a, b) => b.sales - a.sales)
     .slice(0, 5);
 
@@ -349,7 +343,7 @@ export default function Dashboard() {
                     <XAxis dataKey="name" />
                     <YAxis />
                     <Tooltip />
-                      <Bar dataKey="avgDaily" fill="#f59e0b" name="Avg Daily Sales" />
+                    <Bar dataKey="sales" fill="#f59e0b" name="Total Sales" />
                     </BarChart>
                   </ResponsiveContainer>
                 ) : (
