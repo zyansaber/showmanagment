@@ -1,12 +1,13 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useNavigate } from 'react-router-dom';
 import { MapPin, Calendar as CalendarIcon, Users } from 'lucide-react';
 import { format, parseISO, isValid, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, addMonths, subMonths } from 'date-fns';
 import { dbGet } from '@/lib/firebase';
-import type { Show } from '@/types';
+import type { Show, ShowTask } from '@/types';
 import AustraliaMap from '@/components/AustraliaMap';
 
 export default function ShowCalendar() {
@@ -14,8 +15,11 @@ export default function ShowCalendar() {
   const [currentMonth, setCurrentMonth] = useState<Date>(new Date());
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [shows, setShows] = useState<Show[]>([]);
+  const [tasks, setTasks] = useState<ShowTask[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedState, setSelectedState] = useState<string>('All');
+  const [selectedDealership, setSelectedDealership] = useState<string>('All');
+  const [taskDialogShowId, setTaskDialogShowId] = useState<string | null>(null);
 
   useEffect(() => {
     loadShows();
@@ -23,8 +27,9 @@ export default function ShowCalendar() {
 
   const loadShows = async () => {
     try {
-      const showsData = await dbGet('shows');
+      const [showsData, tasksData] = await Promise.all([dbGet('shows'), dbGet('showTasks')]);
       setShows(showsData ? Object.values(showsData) : []);
+      setTasks(tasksData ? Object.values(tasksData) : []);
     } catch (error) {
       console.error('Error loading shows:', error);
     } finally {
@@ -89,6 +94,15 @@ export default function ShowCalendar() {
     return value.toString();
   };
 
+  const getShowTimelineStatus = (show: Show) => {
+    const now = new Date();
+    const start = parseISO(show.startDate);
+    const end = parseISO(show.finishDate);
+    if (now < start) return 'Not Started';
+    if (now > end) return 'Finished';
+    return 'In Progress';
+  };
+
   const validShows = shows.filter(show => {
     try {
       return show && 
@@ -101,27 +115,110 @@ export default function ShowCalendar() {
     }
   });
 
-  const filteredShows = selectedState === 'All' 
-    ? validShows 
-    : validShows.filter(show => {
-        try {
-          return show.siteLocation?.state === selectedState;
-        } catch {
-          return false;
-        }
-      });
+  const dealershipOptions = useMemo(() => {
+    const uniqueDealers = new Set(
+      validShows
+        .map((show) => (typeof show.dealership === 'string' ? show.dealership.trim() : ''))
+        .filter((dealer) => dealer)
+    );
+    return ['All', ...Array.from(uniqueDealers).sort((a, b) => a.localeCompare(b))];
+  }, [validShows]);
 
-  const showsOnDate = selectedDate ? filteredShows.filter(show => {
+  const filteredShows = validShows.filter(show => {
     try {
-      const start = parseISO(show.startDate);
-      const end = parseISO(show.finishDate);
-      return selectedDate >= start && selectedDate <= end;
+      const matchesState = selectedState === 'All' || show.siteLocation?.state === selectedState;
+      const dealerValue = typeof show.dealership === 'string' ? show.dealership.trim() : '';
+      const matchesDealer = selectedDealership === 'All' || dealerValue === selectedDealership;
+      const timelineStatus = getShowTimelineStatus(show);
+      return matchesState && matchesDealer && timelineStatus !== 'Finished';
     } catch {
       return false;
     }
-  }) : [];
+  });
 
-  const displayedShows = selectedDate ? showsOnDate : filteredShows;
+  const sortedFilteredShows = useMemo(() => {
+    return [...filteredShows].sort((a, b) => {
+      const aDate = parseISO(a.startDate);
+      const bDate = parseISO(b.startDate);
+      return aDate.getTime() - bDate.getTime();
+    });
+  }, [filteredShows]);
+
+  const showsOnDate = selectedDate
+    ? filteredShows
+        .filter(show => {
+          try {
+            const start = parseISO(show.startDate);
+            const end = parseISO(show.finishDate);
+            return selectedDate >= start && selectedDate <= end;
+          } catch {
+            return false;
+          }
+        })
+        .sort((a, b) => parseISO(a.startDate).getTime() - parseISO(b.startDate).getTime())
+    : [];
+
+  const displayedShows = selectedDate ? showsOnDate : sortedFilteredShows;
+
+  const showTaskSummary = useMemo(() => {
+    return tasks.reduce((acc, task) => {
+      const eventId = typeof task.eventId === 'string' ? task.eventId.trim() : '';
+      if (!eventId) return acc;
+      if (!acc[eventId]) {
+        acc[eventId] = { total: 0, completed: 0, percentSum: 0 };
+      }
+      const percent = Number(task.percentComplete || 0);
+      acc[eventId].total += 1;
+      acc[eventId].percentSum += Number.isFinite(percent) ? percent : 0;
+      if (task.status === 'Done' || percent >= 100) {
+        acc[eventId].completed += 1;
+      }
+      return acc;
+    }, {} as Record<string, { total: number; completed: number; percentSum: number }>);
+  }, [tasks]);
+
+  const tasksByShow = useMemo(() => {
+    return tasks.reduce((acc, task) => {
+      const eventId = typeof task.eventId === 'string' ? task.eventId.trim() : '';
+      if (!eventId) return acc;
+      if (!acc[eventId]) acc[eventId] = [];
+      acc[eventId].push(task);
+      return acc;
+    }, {} as Record<string, ShowTask[]>);
+  }, [tasks]);
+
+  const getTaskCompletion = (showId?: string) => {
+    if (!showId) return null;
+    const summary = showTaskSummary[showId];
+    if (!summary || summary.total === 0) return null;
+    const percent = Math.round(summary.percentSum / summary.total);
+    return {
+      percent,
+      label: `${summary.completed}/${summary.total} tasks complete`,
+    };
+  };
+
+  const activeShow = useMemo(
+    () => shows.find((show) => show.id === taskDialogShowId) || null,
+    [shows, taskDialogShowId]
+  );
+  const activeShowTasks = taskDialogShowId ? tasksByShow[taskDialogShowId] || [] : [];
+  const sortedActiveShowTasks = useMemo(() => {
+    return [...activeShowTasks].sort((a, b) => {
+      const aDate = a.dueDate ? parseISO(a.dueDate) : null;
+      const bDate = b.dueDate ? parseISO(b.dueDate) : null;
+      if (aDate && bDate) return aDate.getTime() - bDate.getTime();
+      if (aDate) return -1;
+      if (bDate) return 1;
+      return a.taskName.localeCompare(b.taskName);
+    });
+  }, [activeShowTasks]);
+
+  const statusBadgeStyles: Record<string, string> = {
+    'Not Started': 'bg-slate-100 text-slate-700',
+    'In Progress': 'bg-blue-100 text-blue-700',
+    Finished: 'bg-emerald-100 text-emerald-700',
+  };
 
   const stateStats = validShows.reduce((acc, show) => {
     try {
@@ -210,22 +307,39 @@ export default function ShowCalendar() {
           <CardTitle>Filter by State</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="flex flex-wrap gap-2">
-            {states.map(state => (
-              <Button
-                key={state}
-                variant={selectedState === state ? 'default' : 'outline'}
-                onClick={() => setSelectedState(state)}
-                className={selectedState === state && state !== 'All' ? stateColors[state] : ''}
-              >
-                {state}
-                {state !== 'All' && stateStats[state] && (
-                  <Badge variant="secondary" className="ml-2">
-                    {stateStats[state].shows}
-                  </Badge>
-                )}
-              </Button>
-            ))}
+          <div className="space-y-4">
+            <div className="flex flex-wrap gap-2">
+              {states.map(state => (
+                <Button
+                  key={state}
+                  variant={selectedState === state ? 'default' : 'outline'}
+                  onClick={() => setSelectedState(state)}
+                  className={selectedState === state && state !== 'All' ? stateColors[state] : ''}
+                >
+                  {state}
+                  {state !== 'All' && stateStats[state] && (
+                    <Badge variant="secondary" className="ml-2">
+                      {stateStats[state].shows}
+                    </Badge>
+                  )}
+                </Button>
+              ))}
+            </div>
+            <div>
+              <h4 className="text-sm font-semibold text-slate-700">Filter by Dealership</h4>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {dealershipOptions.map((dealer) => (
+                  <Button
+                    key={dealer}
+                    size="sm"
+                    variant={selectedDealership === dealer ? 'default' : 'outline'}
+                    onClick={() => setSelectedDealership(dealer)}
+                  >
+                    {dealer}
+                  </Button>
+                ))}
+              </div>
+            </div>
           </div>
         </CardContent>
       </Card>
@@ -320,7 +434,7 @@ export default function ShowCalendar() {
                 {selectedDate
                   ? `Shows on ${format(selectedDate, 'MMM dd, yyyy')}${selectedState === 'All' ? '' : ` in ${selectedState}`}`
                   : selectedState === 'All'
-                    ? 'All Shows'
+                    ? 'NEXT SHOW'
                     : `Shows in ${selectedState}`}
               </CardTitle>
               {selectedDate && (
@@ -335,14 +449,16 @@ export default function ShowCalendar() {
               <div className="space-y-4 max-h-[600px] overflow-y-auto">
                 {displayedShows.map((show) => {
                   try {
+                    const timelineStatus = getShowTimelineStatus(show);
                     return (
                       <div
                         key={show.id}
                         className="p-4 border rounded-lg hover:shadow-md transition-all cursor-pointer bg-white"
                         onClick={() => navigate(`/show/${show.id}`)}
                       >
-                        <div className="flex justify-between items-start mb-3">
-                          <div className="flex-1">
+                      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                        <div className="flex-1 space-y-3">
+                          <div>
                             <h3 className="font-semibold text-lg text-gray-900">{show.name || 'Unnamed Show'}</h3>
                             <div className="flex items-center gap-2 mt-1">
                               <MapPin className="h-4 w-4 text-gray-500" />
@@ -351,33 +467,67 @@ export default function ShowCalendar() {
                               </span>
                             </div>
                           </div>
+                          <div className="flex flex-wrap items-center gap-4 text-sm text-gray-600">
+                            <div className="flex items-center gap-2">
+                              <CalendarIcon className="h-4 w-4" />
+                              <span>
+                                {format(parseISO(show.startDate), 'MMM dd')} - {format(parseISO(show.finishDate), 'MMM dd, yyyy')}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <Users className="h-4 w-4" />
+                              <span>{formatValue(show.caravansOnDisplay)} caravans</span>
+                            </div>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-3 text-xs">
+                            <span className="text-gray-500">
+                              Sales: {formatValue(show.sales2025)}/{formatValue(show.target2025)}
+                            </span>
+                            <Badge className={statusBadgeStyles[timelineStatus] || 'bg-slate-100 text-slate-700'}>
+                              {timelineStatus}
+                            </Badge>
+                          </div>
+                          {(() => {
+                            const completion = getTaskCompletion(show.id);
+                            if (!completion) return null;
+                            return (
+                              <button
+                                type="button"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  setTaskDialogShowId(show.id);
+                                }}
+                                className="w-full text-left rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 transition hover:border-emerald-200 hover:bg-emerald-50"
+                              >
+                                <div className="flex items-center justify-between text-xs text-slate-600">
+                                  <span>Show tasks completion</span>
+                                  <span className="font-semibold text-slate-900">{completion.percent}%</span>
+                                </div>
+                                <div className="mt-2 h-2 w-full rounded-full bg-slate-200">
+                                  <div
+                                    className="h-2 rounded-full bg-emerald-500"
+                                    style={{ width: `${completion.percent}%` }}
+                                  />
+                                </div>
+                                <p className="mt-1 text-xs text-slate-500">{completion.label}</p>
+                              </button>
+                            );
+                          })()}
+                        </div>
+                        <div className="flex flex-col items-start gap-2 lg:items-end">
                           <Badge className={stateColors[show.siteLocation?.state] || 'bg-gray-500'}>
                             {show.siteLocation?.state || 'N/A'}
                           </Badge>
-                        </div>
-                        <div className="flex items-center gap-6 text-sm text-gray-600">
-                          <div className="flex items-center gap-2">
-                            <CalendarIcon className="h-4 w-4" />
-                            <span>
-                              {format(parseISO(show.startDate), 'MMM dd')} - {format(parseISO(show.finishDate), 'MMM dd, yyyy')}
-                            </span>
+                          <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-right shadow-sm">
+                            <p className="text-xs uppercase tracking-wide text-slate-400">Dealership</p>
+                            <p className="text-sm font-semibold text-slate-900">{show.dealership || 'N/A'}</p>
                           </div>
-                          <div className="flex items-center gap-2">
-                            <Users className="h-4 w-4" />
-                            <span>{formatValue(show.caravansOnDisplay)} caravans</span>
+                          <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-right shadow-sm">
+                            <p className="text-xs uppercase tracking-wide text-slate-400">Handover Dealer</p>
+                            <p className="text-sm font-semibold text-slate-900">{show.handoverDealer || 'N/A'}</p>
                           </div>
                         </div>
-                        <div className="mt-2 flex items-center gap-4 text-xs">
-                          <span className="text-gray-500">
-                            Sales: {formatValue(show.sales2025)}/{formatValue(show.target2025)}
-                          </span>
-                          <Badge variant={
-                            show.status === 'Completed' ? 'default' :
-                            show.status === 'In Progress' ? 'secondary' : 'outline'
-                          }>
-                            {show.status}
-                          </Badge>
-                        </div>
+                      </div>
                       </div>
                     );
                   } catch (error) {
@@ -415,6 +565,56 @@ export default function ShowCalendar() {
           />
         </CardContent>
       </Card>
+
+      <Dialog
+        open={!!taskDialogShowId}
+        onOpenChange={(open) => {
+          if (!open) setTaskDialogShowId(null);
+        }}
+      >
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>
+              {activeShow?.name || 'Show Tasks'}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
+              {sortedActiveShowTasks.length} task{sortedActiveShowTasks.length === 1 ? '' : 's'} scheduled
+            </div>
+            {sortedActiveShowTasks.length > 0 ? (
+              <div className="space-y-3 max-h-[360px] overflow-y-auto pr-2">
+                {sortedActiveShowTasks.map((task) => (
+                  <div key={task.taskId} className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="font-semibold text-slate-900">{task.taskName}</p>
+                        <p className="text-xs text-slate-500">{task.stage}</p>
+                      </div>
+                      <Badge className="bg-slate-100 text-slate-700">{task.status}</Badge>
+                    </div>
+                    <div className="mt-2 flex flex-wrap items-center gap-4 text-xs text-slate-500">
+                      <span>Start: {task.startDate || 'TBD'}</span>
+                      <span>Due: {task.dueDate || 'TBD'}</span>
+                      <span>{Math.round(task.percentComplete || 0)}% complete</span>
+                    </div>
+                    <div className="mt-2 h-2 w-full rounded-full bg-slate-200">
+                      <div
+                        className="h-2 rounded-full bg-emerald-500"
+                        style={{ width: `${Math.min(Math.max(task.percentComplete || 0, 0), 100)}%` }}
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="rounded-lg border border-dashed border-slate-200 p-6 text-center text-sm text-slate-500">
+                No tasks for this show yet.
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
