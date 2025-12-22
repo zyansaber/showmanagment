@@ -17,7 +17,7 @@ export default function Login() {
   if (user) {
     return <Navigate to="/" replace />;
   }
-  
+
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setIsSubmitting(true);
@@ -68,5 +68,3 @@ export default function Login() {
     </div>
   );
 }
-    }
-  }, [navigate, user]);
