@@ -50,19 +50,30 @@ export default function Dashboard() {
   };
 
   // Calculate employee statistics
+  const parseDaysFromEntry = (entry: string) => {
+    const match = entry.match(/\((\d+)\)\s*days/i);
+    return match ? Number.parseInt(match[1], 10) : 0;
+  };
+
+  const teamMemberDaysMap = useMemo(() => {
+    return teamMembers.reduce((acc, member) => {
+      const rawEntries = Array.isArray(member.showDayEntries) ? member.showDayEntries : [];
+      const totalDays = rawEntries.reduce((sum, entry) => sum + parseDaysFromEntry(entry), 0);
+      acc[member.memberName] = totalDays;
+      return acc;
+    }, {} as Record<string, number>);
+  }, [teamMembers]);
+
   const salespersonStats = useMemo(() => {
     const orderStats = orders.reduce((acc, order) => {
       const name = typeof order.salesperson === 'string' ? order.salesperson.trim() : '';
       if (!name || name.toLowerCase() === 'n/a') return acc;
       if (!acc[name]) {
-        acc[name] = { sales: 0, dates: new Set<string>() };
+        acc[name] = { sales: 0 };
       }
       acc[name].sales += 1;
-      if (order.date) {
-        acc[name].dates.add(order.date);
-      }
       return acc;
-    }, {} as Record<string, { sales: number; dates: Set<string> }>);
+    }, {} as Record<string, { sales: number }>);
 
     const teamNames = teamMembers
       .filter((member) => member.activeFlag === 1)
@@ -73,7 +84,10 @@ export default function Dashboard() {
       .map(([name, data]) => ({
         name,
         sales: data.sales,
-        avgDaily: data.dates.size > 0 ? Number((data.sales / data.dates.size).toFixed(2)) : data.sales,
+        avgDaily:
+          teamMemberDaysMap[name] > 0
+            ? Number((data.sales / teamMemberDaysMap[name]).toFixed(2))
+            : 0,
       }))
       .sort((a, b) => b.sales - a.sales);
 
@@ -86,6 +100,38 @@ export default function Dashboard() {
     const fillNames = teamNames
       .filter((name) => !withSalesNames.has(name))
       .sort((a, b) => a.localeCompare(b))
+      .slice(0, needed);
+
+    return [
+      ...withSales,
+      ...fillNames.map((name) => ({ name, sales: 0, avgDaily: 0 })),
+    ];
+  }, [orders, teamMembers, teamMemberDaysMap]);
+
+  // Calculate vehicle type distribution
+  const vehicleTypes = orders.reduce((acc, order) => {
+    const modelPrefix = order.model?.substring(0, 3).toUpperCase() || 'N/A';
+    acc[modelPrefix] = (acc[modelPrefix] || 0) + 1;
+    return acc;
+  }, {} as Record<string, number>);
+
+  const vehicleTypeData = Object.entries(vehicleTypes).map(([name, value], index) => ({
+    name,
+    value,
+    color: ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'][index % 5]
+  }));
+
+  const vehicleTrendMap = orders.reduce((acc, order) => {
+    if (!order.date) return acc;
+    const parsed = new Date(order.date);
+    if (Number.isNaN(parsed.getTime())) return acc;
+    const key = formatDate(parsed, 'yyyy-MM');
+    acc[key] = (acc[key] || 0) + 1;
+    return acc;
+  }, {} as Record<string, number>);
+
+  const vehicleTrendData = Object.entries(vehicleTrendMap)
+    .sort(([a], [b]) => a.localeCompare(b))
       .slice(0, needed);
 
     return [
