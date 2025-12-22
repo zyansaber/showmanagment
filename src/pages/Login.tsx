@@ -68,8 +68,5 @@ export default function Login() {
     </div>
   );
 }
-  useEffect(() => {
-    if (user) {
-      navigate('/');
     }
   }, [navigate, user]);
