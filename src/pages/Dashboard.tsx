@@ -132,38 +132,6 @@ export default function Dashboard() {
 
   const vehicleTrendData = Object.entries(vehicleTrendMap)
     .sort(([a], [b]) => a.localeCompare(b))
-      .slice(0, needed);
-
-    return [
-      ...withSales,
-      ...fillNames.map((name) => ({ name, sales: 0, avgDaily: 0 })),
-    ];
-  }, [orders, teamMembers]);
-
-  // Calculate vehicle type distribution
-  const vehicleTypes = orders.reduce((acc, order) => {
-    const modelPrefix = order.model?.substring(0, 3).toUpperCase() || 'N/A';
-    acc[modelPrefix] = (acc[modelPrefix] || 0) + 1;
-    return acc;
-  }, {} as Record<string, number>);
-
-  const vehicleTypeData = Object.entries(vehicleTypes).map(([name, value], index) => ({
-    name,
-    value,
-    color: ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'][index % 5]
-  }));
-
-  const vehicleTrendMap = orders.reduce((acc, order) => {
-    if (!order.date) return acc;
-    const parsed = new Date(order.date);
-    if (Number.isNaN(parsed.getTime())) return acc;
-    const key = formatDate(parsed, 'yyyy-MM');
-    acc[key] = (acc[key] || 0) + 1;
-    return acc;
-  }, {} as Record<string, number>);
-
-  const vehicleTrendData = Object.entries(vehicleTrendMap)
-    .sort(([a], [b]) => a.localeCompare(b))
     .map(([key, value]) => ({
       month: formatDate(new Date(`${key}-01`), 'MMM yyyy'),
       value,
