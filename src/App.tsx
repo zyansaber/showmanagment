@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { BrowserRouter, Routes, Route, useNavigate, useLocation } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Toaster } from '@/components/ui/sonner';
@@ -36,12 +36,18 @@ import ShowReport from './pages/ShowReport';
 import ShowBudgetExpense from './pages/ShowBudgetExpense';
 import AIHelpAssistant from './components/AIHelpAssistant';
 import Finance from './pages/Finance';
+import Login from './pages/Login';
+import AdminSettings from './pages/AdminSettings';
+import ProtectedRoute from './components/ProtectedRoute';
+import { AuthProvider, useAuth } from './context/AuthContext';
+import RestrictedScreen from './components/RestrictedScreen';
 
 const queryClient = new QueryClient();
 
 function Sidebar({ isOpen, setIsOpen }: { isOpen: boolean; setIsOpen: (open: boolean) => void }) {
   const navigate = useNavigate();
   const location = useLocation();
+  const { user, logout } = useAuth();
 
   const menuItems = [
     { icon: LayoutDashboard, label: 'Dashboard', path: '/' },
@@ -56,6 +62,7 @@ function Sidebar({ isOpen, setIsOpen }: { isOpen: boolean; setIsOpen: (open: boo
     { icon: Wallet, label: 'Show Budget & Expense', path: '/budget' },
     { icon: Banknote, label: 'Finance', path: '/finance' },
     { icon: BarChart3, label: 'Power BI Reports', path: '/powerbi' },
+    { icon: Users, label: 'Admin Settings', path: '/admin', adminOnly: true },
   ];
 
   return (
@@ -101,6 +108,9 @@ function Sidebar({ isOpen, setIsOpen }: { isOpen: boolean; setIsOpen: (open: boo
           {/* Navigation */}
           <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
             {menuItems.map((item) => {
+              if (item.adminOnly && user?.role !== 'admin') {
+                return null;
+              }
               const Icon = item.icon;
               const isActive = location.pathname === item.path;
               
@@ -125,6 +135,24 @@ function Sidebar({ isOpen, setIsOpen }: { isOpen: boolean; setIsOpen: (open: boo
             })}
           </nav>
 
+          <div className="px-4 pb-4">
+            {isOpen && user && (
+              <div className="rounded-lg bg-slate-800 px-3 py-2 text-xs text-slate-200">
+                Signed in as <span className="font-semibold">{user.username}</span>
+              </div>
+            )}
+            {isOpen && user && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => logout()}
+                className="mt-3 w-full justify-start text-white hover:bg-slate-700"
+              >
+                Logout
+              </Button>
+            )}
+          </div>
+
           {/* Toggle button for desktop */}
           <div className="hidden lg:flex p-4 border-t border-slate-700">
             <Button
@@ -144,6 +172,25 @@ function Sidebar({ isOpen, setIsOpen }: { isOpen: boolean; setIsOpen: (open: boo
 
 function AppLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const { user, loading } = useAuth();
+  const location = useLocation();
+  const isLoginPage = location.pathname === '/login';
+
+  if (loading) {
+    return <div className="min-h-screen flex items-center justify-center text-slate-500">Loading…</div>;
+  }
+
+  if (!user && !isLoginPage) {
+    return <RestrictedScreen onLogin={() => window.location.assign('/login')} />;
+  }
+
+  if (isLoginPage) {
+    return (
+      <Routes>
+        <Route path="/login" element={<Login />} />
+      </Routes>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50">
@@ -176,19 +223,118 @@ function AppLayout() {
         {/* Page content */}
         <main className="p-6">
           <Routes>
-            <Route path="/" element={<Dashboard />} />
-            <Route path="/calendar" element={<ShowCalendar />} />
-            <Route path="/shows" element={<ShowManagement />} />
-            <Route path="/show/:id" element={<ShowDetail />} />
-            <Route path="/layout-studio" element={<ShowLayoutDesigner />} />
-            <Route path="/dealerships" element={<DealershipManagement />} />
-            <Route path="/orders" element={<OrdersAndSales />} />
-            <Route path="/process-templates" element={<ProcessTemplates />} />
-            <Route path="/team" element={<TeamManagement />} />
-            <Route path="/powerbi" element={<PowerBI />} />
-            <Route path="/show-report" element={<ShowReport />} />
-            <Route path="/budget" element={<ShowBudgetExpense />} />
-            <Route path="/finance" element={<Finance />} />
+            <Route
+              path="/"
+              element={
+                <ProtectedRoute>
+                  <Dashboard />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/calendar"
+              element={
+                <ProtectedRoute>
+                  <ShowCalendar />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/shows"
+              element={
+                <ProtectedRoute>
+                  <ShowManagement />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/show/:id"
+              element={
+                <ProtectedRoute>
+                  <ShowDetail />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/layout-studio"
+              element={
+                <ProtectedRoute>
+                  <ShowLayoutDesigner />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/dealerships"
+              element={
+                <ProtectedRoute>
+                  <DealershipManagement />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/orders"
+              element={
+                <ProtectedRoute>
+                  <OrdersAndSales />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/process-templates"
+              element={
+                <ProtectedRoute>
+                  <ProcessTemplates />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/team"
+              element={
+                <ProtectedRoute>
+                  <TeamManagement />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/powerbi"
+              element={
+                <ProtectedRoute>
+                  <PowerBI />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/show-report"
+              element={
+                <ProtectedRoute>
+                  <ShowReport />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/budget"
+              element={
+                <ProtectedRoute>
+                  <ShowBudgetExpense />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/finance"
+              element={
+                <ProtectedRoute>
+                  <Finance />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/admin"
+              element={
+                <ProtectedRoute requiredRole="admin">
+                  <AdminSettings />
+                </ProtectedRoute>
+              }
+            />
           </Routes>
         </main>
         <AIHelpAssistant />
@@ -201,9 +347,11 @@ const App = () => (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
       <Toaster />
-      <BrowserRouter>
-        <AppLayout />
-      </BrowserRouter>
+      <AuthProvider>
+        <BrowserRouter>
+          <AppLayout />
+        </BrowserRouter>
+      </AuthProvider>
     </TooltipProvider>
   </QueryClientProvider>
 );
