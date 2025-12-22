@@ -239,7 +239,7 @@ const ShowLayoutDesigner = () => {
   const [elements, setElements] = useState<LayoutElement[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [tool, setTool] = useState<Tool>('select');
-  const [zoom, setZoom] = useState(2);
+  const [zoom, setZoom] = useState(0.75);
   const [snapToGrid, setSnapToGrid] = useState(true);
   const [showGrid, setShowGrid] = useState(true);
   const [isLengthLocked, setIsLengthLocked] = useState(false);
@@ -251,13 +251,20 @@ const ShowLayoutDesigner = () => {
     projectId: '',
     collection: 'drafts',
   });
+  const [draftName, setDraftName] = useState('');
+  const [savedDrafts, setSavedDrafts] = useState<
+    { id: string; name: string; savedAt: string; data: string }[]
+  >([]);
+  const [selectedDraftId, setSelectedDraftId] = useState('');
   const [isSavingDraft, setIsSavingDraft] = useState(false);
+  const [isLoadingDrafts, setIsLoadingDrafts] = useState(false);
   const [draftMessage, setDraftMessage] = useState<string | null>(null);
   const [isExporting, setIsExporting] = useState(false);
 
   const svgRef = useRef<SVGSVGElement | null>(null);
   const dragStateRef = useRef<DragState | null>(null);
   const lineStartRef = useRef<{ x: number; y: number } | null>(null);
+  const copiedElementRef = useRef<LayoutElement | null>(null);
 
   const snapValue = useCallback(
     (value: number) => {
@@ -680,47 +687,132 @@ const ShowLayoutDesigner = () => {
     lineStartRef.current = null;
   };
 
+  const cloneElement = (source: LayoutElement, offset: number, labelSuffix = 'copy') => {
+    if (source.kind === 'line') {
+      return {
+        ...source,
+        id: uuidv4(),
+        label: `${source.label} ${labelSuffix}`,
+        x1: source.x1 + offset,
+        x2: source.x2 + offset,
+        y1: source.y1 + offset,
+        y2: source.y2 + offset,
+      } satisfies LineElement;
+    }
+
+    if (source.kind === 'site') {
+      return {
+        ...source,
+        id: uuidv4(),
+        label: `${source.label} ${labelSuffix}`,
+        points: source.points.map((point) => ({ x: point.x + offset, y: point.y + offset })),
+      } satisfies SiteShapeElement;
+    }
+
+    return {
+      ...source,
+      id: uuidv4(),
+      label: `${source.label} ${labelSuffix}`,
+      x: source.x + offset,
+      y: source.y + offset,
+    } satisfies RectShapeElement;
+  };
+
   const duplicateSelected = () => {
     if (!selectedElement) return;
     setElements((prev) => {
       const source = prev.find((item) => item.id === selectedElement.id);
       if (!source) return prev;
-      const offset = 1;
-      if (source.kind === 'line') {
-        const clone: LineElement = {
-          ...source,
-          id: uuidv4(),
-          label: `${source.label} copy`,
-          x1: source.x1 + offset,
-          x2: source.x2 + offset,
-          y1: source.y1 + offset,
-          y2: source.y2 + offset,
-        };
-        setSelectedId(clone.id);
-        return [...prev, clone];
-      }
-
-      if (source.kind === 'site') {
-        const clone: SiteShapeElement = {
-          ...source,
-          id: uuidv4(),
-          label: `${source.label} copy`,
-          points: source.points.map((point) => ({ x: point.x + offset, y: point.y + offset })),
-        };
-        setSelectedId(clone.id);
-        return [...prev, clone];
-      }
-
-      const clone: RectShapeElement = {
-        ...source,
-        id: uuidv4(),
-        label: `${source.label} copy`,
-        x: source.x + offset,
-        y: source.y + offset,
-      };
+      const clone = cloneElement(source, 1, 'copy');
       setSelectedId(clone.id);
       return [...prev, clone];
     });
+  };
+
+  const isEditableTarget = (target: EventTarget | null) => {
+    if (!target || !(target instanceof HTMLElement)) return false;
+    const tag = target.tagName.toLowerCase();
+    return (
+      tag === 'input' ||
+      tag === 'textarea' ||
+      tag === 'select' ||
+      target.isContentEditable
+    );
+  };
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (isEditableTarget(event.target)) return;
+      const key = event.key.toLowerCase();
+      if ((event.ctrlKey || event.metaKey) && key === 'c') {
+        if (selectedElement) {
+          copiedElementRef.current = JSON.parse(JSON.stringify(selectedElement)) as LayoutElement;
+        }
+        return;
+      }
+      if ((event.ctrlKey || event.metaKey) && key === 'v') {
+        const source = copiedElementRef.current ?? selectedElement;
+        if (!source) return;
+        const clone = cloneElement(source, 1, 'pasted');
+        setElements((prev) => [...prev, clone]);
+        setSelectedId(clone.id);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedElement]);
+
+  useEffect(() => {
+    setSavedDrafts([]);
+    setSelectedDraftId('');
+  }, [firebaseConfig.apiKey, firebaseConfig.projectId, firebaseConfig.collection]);
+
+  const fetchDraftsFromFirebase = async () => {
+    setDraftMessage(null);
+    setIsLoadingDrafts(true);
+    try {
+      if (!firebaseConfig.apiKey || !firebaseConfig.projectId) {
+        setDraftMessage('Add your Firebase API key and project ID to load drafts.');
+        return;
+      }
+
+      const response = await fetch(
+        `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/(default)/documents/${firebaseConfig.collection}?key=${firebaseConfig.apiKey}`,
+        { method: 'GET' }
+      );
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || 'Unable to fetch drafts');
+      }
+
+      const data = (await response.json()) as {
+        documents?: {
+          name: string;
+          fields?: {
+            name?: { stringValue?: string };
+            data?: { stringValue?: string };
+            savedAt?: { stringValue?: string };
+          };
+        }[];
+      };
+
+      const drafts =
+        data.documents?.map((doc) => {
+          const id = doc.name.split('/').pop() ?? doc.name;
+          const name = doc.fields?.name?.stringValue ?? 'Untitled draft';
+          const savedAt = doc.fields?.savedAt?.stringValue ?? '';
+          const payload = doc.fields?.data?.stringValue ?? '';
+          return { id, name, savedAt, data: payload };
+        }) ?? [];
+      setSavedDrafts(drafts);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error loading drafts';
+      setDraftMessage(message);
+    } finally {
+      setIsLoadingDrafts(false);
+    }
   };
 
   const saveDraftToFirebase = async () => {
@@ -729,6 +821,10 @@ const ShowLayoutDesigner = () => {
     try {
       if (!firebaseConfig.apiKey || !firebaseConfig.projectId) {
         setDraftMessage('Add your Firebase API key and project ID to save drafts.');
+        return;
+      }
+      if (!draftName.trim()) {
+        setDraftMessage('Add a draft name before saving.');
         return;
       }
 
@@ -745,7 +841,9 @@ const ShowLayoutDesigner = () => {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             fields: {
+              name: { stringValue: draftName.trim() },
               data: { stringValue: JSON.stringify(payload) },
+              savedAt: { stringValue: payload.savedAt },
             },
           }),
         }
@@ -756,6 +854,7 @@ const ShowLayoutDesigner = () => {
         throw new Error(errorText || 'Unable to save draft');
       }
       setDraftMessage('Draft saved to Firebase successfully.');
+      await fetchDraftsFromFirebase();
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error saving draft';
       setDraftMessage(message);
@@ -1504,6 +1603,12 @@ const ShowLayoutDesigner = () => {
                 Enter your Firebase REST API details to store drafts. Data is stored as a JSON string in the chosen collection.
               </p>
               <div className="space-y-2 text-sm">
+                <Label className="text-xs text-slate-500">Draft name</Label>
+                <Input
+                  placeholder="Spring show layout"
+                  value={draftName}
+                  onChange={(event) => setDraftName(event.target.value)}
+                />
                 <Label className="text-xs text-slate-500">API key</Label>
                 <Input
                   placeholder="AIza..."
@@ -1522,6 +1627,49 @@ const ShowLayoutDesigner = () => {
                   value={firebaseConfig.collection}
                   onChange={(event) => setFirebaseConfig((prev) => ({ ...prev, collection: event.target.value }))}
                 />
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={fetchDraftsFromFirebase}
+                    disabled={isLoadingDrafts}
+                  >
+                    {isLoadingDrafts ? 'Loading...' : 'Refresh drafts'}
+                  </Button>
+                  {savedDrafts.length > 0 && (
+                    <div className="flex-1">
+                      <Label className="text-xs text-slate-500">Load saved draft</Label>
+                      <select
+                        className="mt-1 w-full rounded-md border border-slate-300 px-2 py-2 text-sm"
+                        value={selectedDraftId}
+                        onChange={(event) => {
+                          const nextId = event.target.value;
+                          setSelectedDraftId(nextId);
+                          const draft = savedDrafts.find((item) => item.id === nextId);
+                          if (!draft?.data) return;
+                          try {
+                            const parsed = JSON.parse(draft.data) as { elements?: LayoutElement[]; stats?: typeof stats };
+                            if (parsed.elements) {
+                              setElements(parsed.elements);
+                              setSelectedId(null);
+                              setLinePreview(null);
+                              lineStartRef.current = null;
+                            }
+                          } catch (error) {
+                            setDraftMessage('Unable to parse the selected draft data.');
+                          }
+                        }}
+                      >
+                        <option value="">Select a saved layout</option>
+                        {savedDrafts.map((draft) => (
+                          <option key={draft.id} value={draft.id}>
+                            {draft.name} {draft.savedAt ? `• ${new Date(draft.savedAt).toLocaleString()}` : ''}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                </div>
                 {draftMessage && (
                   <p className="text-xs font-semibold text-amber-700">{draftMessage}</p>
                 )}
