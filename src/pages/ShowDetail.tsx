@@ -39,6 +39,12 @@ import { cn } from '@/lib/utils';
 
 const TASK_STATUSES: ShowTask['status'][] = ['Not Started', 'In Progress', 'Blocked', 'Done'];
 const TASK_STAGES: ShowTask['stage'][] = ['Design', 'Booking', 'Logistics', 'Marketing'];
+const STATUS_PROGRESS_MAP: Record<ShowTask['status'], number> = {
+  'Not Started': 0,
+  'In Progress': 50,
+  Blocked: 50,
+  Done: 100,
+};
 
 const normalisePercentComplete = (value: unknown): number => {
   const numeric =
@@ -94,7 +100,14 @@ const normaliseTaskRecord = (
           )
         )
       )
-    : [];
+      : [];
+
+  const resolvedStatus = TASK_STATUSES.includes(statusCandidate as ShowTask['status'])
+    ? (statusCandidate as ShowTask['status'])
+    : 'Not Started';
+  const mappedProgress = STATUS_PROGRESS_MAP[resolvedStatus];
+  const resolvedProgress =
+    mappedProgress !== undefined ? mappedProgress : normalisePercentComplete(safeTask.percentComplete);
 
   return {
     taskId: rawTaskId,
@@ -104,12 +117,10 @@ const normaliseTaskRecord = (
     stage: TASK_STAGES.includes(stageCandidate as ShowTask['stage'])
       ? (stageCandidate as ShowTask['stage'])
       : 'Design',
-    status: TASK_STATUSES.includes(statusCandidate as ShowTask['status'])
-      ? (statusCandidate as ShowTask['status'])
-      : 'Not Started',
+    status: resolvedStatus,
     startDate: typeof safeTask.startDate === 'string' ? safeTask.startDate : '',
     dueDate: typeof safeTask.dueDate === 'string' ? safeTask.dueDate : '',
-    percentComplete: normalisePercentComplete(safeTask.percentComplete),
+    percentComplete: resolvedProgress,
     costBudget: toSafeNumber(safeTask.costBudget),
     costActual: toSafeNumber(safeTask.costActual),
     attachmentUrl:
@@ -840,13 +851,6 @@ export default function ShowDetail() {
     }
   };
 
-  const statusProgressMap: Record<ShowTask['status'], number> = {
-    'Not Started': 0,
-    'In Progress': 50,
-    Blocked: 50,
-    Done: 100,
-  };
-
   const openTaskEditor = (task: ShowTask) => {
     setEditingTask(task);
     setEditingTaskForm({
@@ -863,11 +867,6 @@ export default function ShowDetail() {
     setEditingTaskForm({});
   };
 
-  const clampPercent = (value: number) => {
-    if (Number.isNaN(value)) return 0;
-    return Math.min(100, Math.max(0, Math.round(value)));
-  };
-
   const handleSaveTaskEdits = async () => {
     if (!editingTask) return;
 
@@ -882,9 +881,8 @@ export default function ShowDetail() {
       return;
     }
 
-    const percent = clampPercent(
-      editingTaskForm.percentComplete ?? statusProgressMap[editingTaskForm.status as ShowTask['status']] ?? editingTask.percentComplete
-    );
+    const resolvedStatus = (editingTaskForm.status || editingTask.status) as ShowTask['status'];
+    const percent = STATUS_PROGRESS_MAP[resolvedStatus] ?? 0;
 
     const responsible = Array.isArray(editingTaskForm.responsiblePeople)
       ? editingTaskForm.responsiblePeople
@@ -894,7 +892,7 @@ export default function ShowDetail() {
       ...editingTask,
       taskName: name,
       stage: (editingTaskForm.stage || editingTask.stage) as ShowTask['stage'],
-      status: (editingTaskForm.status || editingTask.status) as ShowTask['status'],
+      status: resolvedStatus,
       startDate: editingTaskForm.startDate,
       dueDate: editingTaskForm.dueDate,
       responsiblePeople: responsible,
@@ -1874,11 +1872,9 @@ export default function ShowDetail() {
                               <Select
                                 value={(editingTaskForm.status ?? editingTask.status) as ShowTask['status']}
                                 onValueChange={(value) => {
-                                  const mapped = statusProgressMap[value as ShowTask['status']];
                                   setEditingTaskForm((prev) => ({
                                     ...prev,
                                     status: value as ShowTask['status'],
-                                    percentComplete: mapped,
                                   }));
                                 }}
                               >
@@ -1917,21 +1913,6 @@ export default function ShowDetail() {
                             </div>
                           </div>
                           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                            <div>
-                              <Label>Progress (%)</Label>
-                              <Input
-                                type="number"
-                                min={0}
-                                max={100}
-                                value={editingTaskForm.percentComplete ?? editingTask.percentComplete}
-                                onChange={(e) =>
-                                  setEditingTaskForm((prev) => ({
-                                    ...prev,
-                                    percentComplete: clampPercent(Number(e.target.value)),
-                                  }))
-                                }
-                              />
-                            </div>
                             <div>
                               <Label>Cost Budget</Label>
                               <Input
@@ -2072,11 +2053,10 @@ export default function ShowDetail() {
                           <Select
                             value={task.status}
                             onValueChange={(value) => {
-                              const mapped = statusProgressMap[value as ShowTask['status']];
                               handleUpdateTaskStatus(
                                 task.taskId,
                                 value,
-                                mapped !== undefined ? mapped : task.percentComplete
+                                STATUS_PROGRESS_MAP[value as ShowTask['status']]
                               );
                             }}
                           >
@@ -2100,13 +2080,6 @@ export default function ShowDetail() {
                         <TableCell>{formatValue(task.costBudget)}</TableCell>
                         <TableCell className="text-right">
                           <div className="flex justify-end gap-1">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => openTaskEditor(task)}
-                            >
-                              <Edit2 className="h-4 w-4" />
-                            </Button>
                             <Button
                               variant="ghost"
                               size="sm"
