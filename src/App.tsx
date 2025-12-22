@@ -40,7 +40,7 @@ import Login from './pages/Login';
 import AdminSettings from './pages/AdminSettings';
 import ProtectedRoute from './components/ProtectedRoute';
 import { AuthProvider, useAuth } from './context/AuthContext';
-import RestrictedScreen from './components/RestrictedScreen';
+import { Navigate } from 'react-router-dom';
 
 const queryClient = new QueryClient();
 
@@ -181,7 +181,7 @@ function AppLayout() {
   }
 
   if (!user && !isLoginPage) {
-    return <RestrictedScreen onLogin={() => window.location.assign('/login')} />;
+    return <Navigate to="/login" replace />;
   }
 
   if (isLoginPage) {
