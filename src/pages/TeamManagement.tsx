@@ -20,6 +20,7 @@ export default function TeamManagement() {
   const [loading, setLoading] = useState(true);
   const [isAddingMember, setIsAddingMember] = useState(false);
   const [selectedMember, setSelectedMember] = useState<TeamMember | null>(null);
+  const [dayEntryDrafts, setDayEntryDrafts] = useState<Record<string, string>>({});
 
   const [newMember, setNewMember] = useState<Partial<TeamMember>>({
     memberName: '',
@@ -71,6 +72,7 @@ export default function TeamManagement() {
         activeFlag: 1,
         totalSales: 0,
         totalWorkDays: 0,
+        showDayEntries: [],
       };
       
       await dbSet(`teamMembers/${memberId}`, member as unknown as Record<string, unknown>);
@@ -121,6 +123,24 @@ export default function TeamManagement() {
     return counts;
   }, [orders]);
 
+  const parseDaysFromEntry = (entry: string) => {
+    const match = entry.match(/\((\d+)\)\s*days/i);
+    return match ? Number.parseInt(match[1], 10) : 0;
+  };
+
+  const buildMemberDayEntries = (member: TeamMember) => {
+    const rawEntries = Array.isArray(member.showDayEntries) ? member.showDayEntries : [];
+    return rawEntries.filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0);
+  };
+
+  const memberDayTotals = useMemo(() => {
+    return teamMembers.reduce((acc, member) => {
+      const entries = buildMemberDayEntries(member);
+      acc[member.memberId] = entries.reduce((sum, entry) => sum + parseDaysFromEntry(entry), 0);
+      return acc;
+    }, {} as Record<string, number>);
+  }, [teamMembers]);
+
   const showParticipationMap = useMemo(() => {
     const counts: Record<string, number> = {};
     shows.forEach(show => {
@@ -162,6 +182,23 @@ export default function TeamManagement() {
     return monthMap;
   };
 
+  const addDayEntry = async (member: TeamMember) => {
+    const draft = (dayEntryDrafts[member.memberId] || '').trim();
+    if (!draft) return;
+
+    const existing = buildMemberDayEntries(member);
+    const updatedEntries = [...existing, draft];
+    try {
+      await dbUpdate(`teamMembers/${member.memberId}`, { showDayEntries: updatedEntries });
+      setTeamMembers((prev) =>
+        prev.map((m) => (m.memberId === member.memberId ? { ...m, showDayEntries: updatedEntries } : m))
+      );
+      setDayEntryDrafts((prev) => ({ ...prev, [member.memberId]: '' }));
+    } catch (error) {
+      console.error('Error updating show day entry:', error);
+    }
+  };
+
   const buildMemberInsight = (member: TeamMember | null) => {
     if (!member) return null;
 
@@ -175,7 +212,15 @@ export default function TeamManagement() {
     });
 
     const totalCarsSold = memberOrders.length;
-    const participationDays = memberShows.reduce((sum, show) => sum + getShowDuration(show), 0);
+    const memberEntries = buildMemberDayEntries(member);
+    const entryDaysByShow = memberEntries.reduce<Record<string, number>>((acc, entry) => {
+      const [label] = entry.split('-').map((part) => part.trim());
+      const days = parseDaysFromEntry(entry);
+      if (!label || days <= 0) return acc;
+      acc[label] = (acc[label] || 0) + days;
+      return acc;
+    }, {});
+    const participationDays = memberEntries.reduce((sum, entry) => sum + parseDaysFromEntry(entry), 0);
     const avgDailySales = participationDays > 0 ? totalCarsSold / participationDays : 0;
 
     const modelCounts = memberOrders.reduce<Record<string, number>>((acc, order) => {
@@ -193,10 +238,16 @@ export default function TeamManagement() {
       return acc;
     }, {});
 
-    const participationDaysByMonth = memberShows.reduce<Record<string, number>>((acc, show) => {
-      const monthMap = getShowDaysByMonth(show);
+    const participationDaysByMonth = memberEntries.reduce<Record<string, number>>((acc, entry) => {
+      const [label] = entry.split('-').map((part) => part.trim());
+      const entryDays = parseDaysFromEntry(entry);
+      const matchedShow = memberShows.find((show) => show.name === label || show.id === label);
+      if (!matchedShow || entryDays <= 0) return acc;
+      const monthMap = getShowDaysByMonth(matchedShow);
+      const totalShowDays = Object.values(monthMap).reduce((sum, days) => sum + days, 0);
+      if (totalShowDays <= 0) return acc;
       Object.entries(monthMap).forEach(([month, days]) => {
-        acc[month] = (acc[month] || 0) + days;
+        acc[month] = (acc[month] || 0) + (entryDays * days) / totalShowDays;
       });
       return acc;
     }, {});
@@ -222,6 +273,7 @@ export default function TeamManagement() {
       avgDailyTrend,
       salesTrend,
       participationTrend,
+      entryDaysByShow,
     };
   };
 
@@ -382,6 +434,8 @@ export default function TeamManagement() {
                   <TableHead>Role</TableHead>
                   <TableHead>Total Sales</TableHead>
                   <TableHead>Shows Participated</TableHead>
+                  <TableHead>Participated Days</TableHead>
+                  <TableHead>Days Entry</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Actions</TableHead>
                 </TableRow>
@@ -396,7 +450,36 @@ export default function TeamManagement() {
                       <Badge className={getRoleBadgeColor(member.role)}>{member.role}</Badge>
                     </TableCell>
                     <TableCell>{orderCountMap[member.memberName] || 0}</TableCell>
-                    <TableCell>{showParticipationMap[member.memberName] || 0}</TableCell>
+                    <TableCell>
+                      {showParticipationMap[member.memberId] || showParticipationMap[member.memberName] || 0}
+                    </TableCell>
+                    <TableCell>{memberDayTotals[member.memberId] || 0}</TableCell>
+                    <TableCell className="min-w-[220px]">
+                      <div className="flex items-center gap-2">
+                        <Input
+                          value={dayEntryDrafts[member.memberId] || ''}
+                          onChange={(event) =>
+                            setDayEntryDrafts((prev) => ({ ...prev, [member.memberId]: event.target.value }))
+                          }
+                          placeholder="Show - (10) days"
+                          className="h-8"
+                        />
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => addDayEntry(member)}
+                        >
+                          Add
+                        </Button>
+                      </div>
+                      {buildMemberDayEntries(member).length > 0 && (
+                        <div className="mt-2 flex flex-col gap-1 text-xs text-gray-500">
+                          {buildMemberDayEntries(member).map((entry) => (
+                            <span key={entry}>• {entry}</span>
+                          ))}
+                        </div>
+                      )}
+                    </TableCell>
                     <TableCell>
                       <Badge variant={member.activeFlag === 1 ? 'default' : 'secondary'}>
                         {member.activeFlag === 1 ? 'Active' : 'Inactive'}
@@ -536,7 +619,9 @@ export default function TeamManagement() {
                                   ? `${show.startDate} - ${show.finishDate}`
                                   : 'Dates not set'}
                               </TableCell>
-                              <TableCell className="text-right">{getShowDuration(show)}</TableCell>
+                              <TableCell className="text-right">
+                                {selectedInsight.entryDaysByShow[show.name || show.id || ''] || 0}
+                              </TableCell>
                             </TableRow>
                           ))}
                         </TableBody>
