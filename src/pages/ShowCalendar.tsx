@@ -165,16 +165,14 @@ export default function ShowCalendar() {
       const eventId = typeof task.eventId === 'string' ? task.eventId.trim() : '';
       if (!eventId) return acc;
       if (!acc[eventId]) {
-        acc[eventId] = { total: 0, completed: 0, percentSum: 0 };
+        acc[eventId] = { total: 0, completed: 0 };
       }
-      const percent = Number(task.percentComplete || 0);
       acc[eventId].total += 1;
-      acc[eventId].percentSum += Number.isFinite(percent) ? percent : 0;
-      if (task.status === 'Done' || percent >= 100) {
+      if (task.status === 'Done') {
         acc[eventId].completed += 1;
       }
       return acc;
-    }, {} as Record<string, { total: number; completed: number; percentSum: number }>);
+    }, {} as Record<string, { total: number; completed: number }>);
   }, [tasks]);
 
   const tasksByShow = useMemo(() => {
@@ -191,7 +189,7 @@ export default function ShowCalendar() {
     if (!showId) return null;
     const summary = showTaskSummary[showId];
     if (!summary || summary.total === 0) return null;
-    const percent = Math.round(summary.percentSum / summary.total);
+    const percent = Math.round((summary.completed / summary.total) * 100);
     return {
       percent,
       label: `${summary.completed}/${summary.total} tasks complete`,
