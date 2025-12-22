@@ -14,6 +14,12 @@ export default function Login() {
   const [password, setPassword] = useState('admin');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+useEffect(() => {
+    if (user) {
+      navigate('/');
+    }
+  }, [navigate, user]);
+  
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setIsSubmitting(true);
