@@ -376,7 +376,7 @@ export default function Dashboard() {
                   <ResponsiveContainer width="100%" height={350}>
                     <BarChart data={salespersonStats}>
                       <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="name" />
+                    <XAxis dataKey="name" interval={0} angle={-30} textAnchor="end" height={70} />
                       <YAxis />
                       <Tooltip />
                       <Bar dataKey="avgDaily" fill="#10b981" name="Avg Daily Sales" />
@@ -398,7 +398,7 @@ export default function Dashboard() {
                   <ResponsiveContainer width="100%" height={350}>
                     <BarChart data={salespersonStats}>
                       <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="name" />
+                    <XAxis dataKey="name" interval={0} angle={-30} textAnchor="end" height={70} />
                       <YAxis />
                       <Tooltip />
                       <Bar dataKey="sales" fill="#f59e0b" name="Total Sales" />
