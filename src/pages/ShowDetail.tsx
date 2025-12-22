@@ -125,6 +125,7 @@ export default function ShowDetail() {
   const [orders, setOrders] = useState<ShowOrder[]>([]);
   const [tasks, setTasks] = useState<ShowTask[]>([]);
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
+  const [teamMemberKeys, setTeamMemberKeys] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [isAddingOrder, setIsAddingOrder] = useState(false);
   const [isAddingTask, setIsAddingTask] = useState(false);
@@ -245,7 +246,14 @@ export default function ShowDetail() {
         .map((task, index) => normaliseTaskRecord(task, id, task?.taskId || `task-${index}`));
       setTasks(tasksForShow);
 
-      const allTeamMembers: TeamMember[] = teamData ? Object.values(teamData) : [];
+      const teamEntries = teamData ? Object.entries(teamData as Record<string, TeamMember>) : [];
+      const memberKeyMap: Record<string, string> = {};
+      const allTeamMembers = teamEntries.map(([key, value]) => {
+        const memberId = value.memberId || key;
+        memberKeyMap[memberId] = key;
+        return { ...value, memberId };
+      });
+      setTeamMemberKeys(memberKeyMap);
       setTeamMembers(allTeamMembers.filter(m => m.activeFlag === 1));
 
       if (templatesData) {
@@ -452,6 +460,11 @@ export default function ShowDetail() {
       return;
     }
 
+    if (!member.memberId) {
+      toast.error('Unable to determine team member ID for saving days.');
+      return;
+    }
+
     const rawValue = memberDayDrafts[member.memberId];
     const parsed = Number(rawValue);
     const days = Number.isFinite(parsed) && parsed > 0 ? Math.round(parsed) : 0;
@@ -464,8 +477,14 @@ export default function ShowDetail() {
       delete updatedDays[showId];
     }
 
+    const memberKey = teamMemberKeys[member.memberId] || member.memberId;
+    if (!memberKey) {
+      toast.error('Unable to determine team member record for saving days.');
+      return;
+    }
+
     try {
-      await dbUpdate(`teamMembers/${member.memberId}`, { showDays: updatedDays });
+      await dbUpdate(`teamMembers/${memberKey}`, { showDays: updatedDays });
       setTeamMembers((prev) =>
         prev.map((m) => (m.memberId === member.memberId ? { ...m, showDays: updatedDays } : m))
       );
