@@ -454,6 +454,32 @@ export default function ShowDetail() {
     return value.toString();
   };
 
+  const buildMemberShowDaysList = (member: TeamMember) => {
+    const rawDays = member.showDays;
+    if (Array.isArray(rawDays)) {
+      return rawDays
+        .map((entry) => ({
+          showId: typeof entry?.showId === 'string' ? entry.showId : '',
+          showName: typeof entry?.showName === 'string' ? entry.showName : '',
+          days: typeof entry?.days === 'number' ? entry.days : Number(entry?.days),
+        }))
+        .filter((entry) => entry.showId && Number.isFinite(entry.days) && entry.days > 0);
+    }
+    if (rawDays && typeof rawDays === 'object') {
+      return Object.entries(rawDays).reduce(
+        (acc, [showId, days]) => {
+          const numeric = typeof days === 'number' ? days : Number(days);
+          if (Number.isFinite(numeric) && numeric > 0) {
+            acc.push({ showId, showName: '', days: numeric });
+          }
+          return acc;
+        },
+        [] as { showId: string; showName: string; days: number }[]
+      );
+    }
+    return [] as { showId: string; showName: string; days: number }[];
+  };
+
   const handleSaveMemberDays = async (member: TeamMember) => {
     if (!showId) {
       toast.error('Unable to determine show ID for saving days.');
@@ -468,13 +494,15 @@ export default function ShowDetail() {
     const rawValue = memberDayDrafts[member.memberId];
     const parsed = Number(rawValue);
     const days = Number.isFinite(parsed) && parsed > 0 ? Math.round(parsed) : 0;
-    const existingDays = member.showDays && typeof member.showDays === 'object' ? member.showDays : {};
-    const updatedDays = { ...existingDays };
+    const existingDays = buildMemberShowDaysList(member);
+    const updatedDays = existingDays.filter((entry) => entry.showId !== showId);
 
     if (days > 0) {
-      updatedDays[showId] = days;
-    } else {
-      delete updatedDays[showId];
+      updatedDays.push({
+        showId,
+        showName: show?.name || '',
+        days,
+      });
     }
 
     const memberKey = teamMemberKeys[member.memberId] || member.memberId;
@@ -936,11 +964,8 @@ export default function ShowDetail() {
   };
 
   const getMemberShowDaysValue = (member: TeamMember, showId: string) => {
-    const rawDays = member.showDays;
-    if (!rawDays || typeof rawDays !== 'object') return 0;
-    const days = rawDays[showId];
-    const numeric = typeof days === 'number' ? days : Number(days);
-    return Number.isFinite(numeric) && numeric > 0 ? numeric : 0;
+    const match = buildMemberShowDaysList(member).find((entry) => entry.showId === showId);
+    return match ? match.days : 0;
   };
 
   const showId = show?.id || id || '';
