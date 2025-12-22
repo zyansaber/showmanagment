@@ -50,15 +50,22 @@ export default function Dashboard() {
   };
 
   // Calculate employee statistics
-  const parseDaysFromEntry = (entry: string) => {
-    const match = entry.match(/\((\d+)\)\s*days/i);
-    return match ? Number.parseInt(match[1], 10) : 0;
+  const buildMemberShowDays = (member: TeamMember) => {
+    const rawDays = member.showDays;
+    if (!rawDays || typeof rawDays !== 'object') return {} as Record<string, number>;
+    return Object.entries(rawDays).reduce((acc, [showId, days]) => {
+      const numeric = typeof days === 'number' ? days : Number(days);
+      if (Number.isFinite(numeric) && numeric > 0) {
+        acc[showId] = numeric;
+      }
+      return acc;
+    }, {} as Record<string, number>);
   };
 
   const teamMemberDaysMap = useMemo(() => {
     return teamMembers.reduce((acc, member) => {
-      const rawEntries = Array.isArray(member.showDayEntries) ? member.showDayEntries : [];
-      const totalDays = rawEntries.reduce((sum, entry) => sum + parseDaysFromEntry(entry), 0);
+      const showDays = buildMemberShowDays(member);
+      const totalDays = Object.values(showDays).reduce((sum, days) => sum + days, 0);
       acc[member.memberName] = totalDays;
       return acc;
     }, {} as Record<string, number>);
