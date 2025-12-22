@@ -71,7 +71,7 @@ export default function TeamManagement() {
         activeFlag: 1,
         totalSales: 0,
         totalWorkDays: 0,
-        showDays: {},
+        showDays: [],
       };
       
       await dbSet(`teamMembers/${memberId}`, member as unknown as Record<string, unknown>);
@@ -122,22 +122,43 @@ export default function TeamManagement() {
     return counts;
   }, [orders]);
 
-  const buildMemberShowDays = (member: TeamMember) => {
+  const buildMemberShowDaysList = (member: TeamMember) => {
     const rawDays = member.showDays;
-    if (!rawDays || typeof rawDays !== 'object') return {} as Record<string, number>;
-    return Object.entries(rawDays).reduce((acc, [showId, days]) => {
-      const numeric = typeof days === 'number' ? days : Number(days);
-      if (Number.isFinite(numeric) && numeric > 0) {
-        acc[showId] = numeric;
-      }
+    if (Array.isArray(rawDays)) {
+      return rawDays
+        .map((entry) => ({
+          showId: typeof entry?.showId === 'string' ? entry.showId : '',
+          showName: typeof entry?.showName === 'string' ? entry.showName : '',
+          days: typeof entry?.days === 'number' ? entry.days : Number(entry?.days),
+        }))
+        .filter((entry) => entry.showId && Number.isFinite(entry.days) && entry.days > 0);
+    }
+    if (rawDays && typeof rawDays === 'object') {
+      return Object.entries(rawDays).reduce(
+        (acc, [showId, days]) => {
+          const numeric = typeof days === 'number' ? days : Number(days);
+          if (Number.isFinite(numeric) && numeric > 0) {
+            acc.push({ showId, showName: '', days: numeric });
+          }
+          return acc;
+        },
+        [] as { showId: string; showName: string; days: number }[]
+      );
+    }
+    return [] as { showId: string; showName: string; days: number }[];
+  };
+
+  const buildMemberShowDaysMap = (member: TeamMember) => {
+    return buildMemberShowDaysList(member).reduce((acc, entry) => {
+      acc[entry.showId] = entry.days;
       return acc;
     }, {} as Record<string, number>);
   };
 
   const memberDayTotals = useMemo(() => {
     return teamMembers.reduce((acc, member) => {
-      const showDays = buildMemberShowDays(member);
-      acc[member.memberId] = Object.values(showDays).reduce((sum, days) => sum + days, 0);
+      const showDays = buildMemberShowDaysList(member);
+      acc[member.memberId] = showDays.reduce((sum, entry) => sum + entry.days, 0);
       return acc;
     }, {} as Record<string, number>);
   }, [teamMembers]);
@@ -196,7 +217,7 @@ export default function TeamManagement() {
     });
 
     const totalCarsSold = memberOrders.length;
-    const memberShowDays = buildMemberShowDays(member);
+    const memberShowDays = buildMemberShowDaysMap(member);
     const entryDaysByShow = memberShows.reduce<Record<string, number>>((acc, show) => {
       const showKey = show.id || show.name || '';
       if (!showKey) return acc;
