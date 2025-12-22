@@ -905,6 +905,15 @@ export default function ShowDetail() {
   }
 
   const showTeamMembers = teamMembers.filter(m => selectedTeamMembers.includes(m.memberId));
+  const showYear = (() => {
+    const parsed = show.startDate ? new Date(show.startDate) : null;
+    if (parsed && !Number.isNaN(parsed.getTime())) return parsed.getFullYear();
+    if (show.target2026 > 0 || show.sales2026 > 0) return 2026;
+    if (show.target2025 > 0 || show.sales2025 > 0) return 2025;
+    return null;
+  })();
+  const is2026Show = showYear === 2026;
+  const showOrderCount = orders.filter((order) => order.showId === show.id).length;
 
   return (
     <div className="space-y-6">
@@ -929,21 +938,21 @@ export default function ShowDetail() {
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-gray-600">Target 2025</CardTitle>
+            <CardTitle className="text-sm font-medium text-gray-600">2025 Sales</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{formatValue(show.target2025)}</div>
+            <div className="text-2xl font-bold text-blue-600">{formatValue(show.sales2025)}</div>
           </CardContent>
         </Card>
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-gray-600">Current Sales</CardTitle>
+            <CardTitle className="text-sm font-medium text-gray-600">2026 Sales</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-blue-600">{formatValue(show.sales2025)}</div>
-            {show.target2025 > 0 && (
-              <Progress value={(show.sales2025 / show.target2025) * 100} className="mt-2" />
-            )}
+            <div className="text-2xl font-bold text-emerald-600">
+              {is2026Show ? showOrderCount : 0}
+            </div>
+            <p className="text-xs text-gray-500 mt-1">Orders for this 2026 show</p>
           </CardContent>
         </Card>
         <Card>
