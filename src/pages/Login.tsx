@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState } from 'react';
+import { Navigate, useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -14,11 +14,9 @@ export default function Login() {
   const [password, setPassword] = useState('admin');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-useEffect(() => {
-    if (user) {
-      navigate('/');
-    }
-  }, [navigate, user]);
+  if (user) {
+    return <Navigate to="/" replace />;
+  }
   
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
