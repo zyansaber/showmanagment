@@ -31,6 +31,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Slider } from '@/components/ui/slider';
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { dbGet, dbPush } from '@/lib/firebase';
 
 const PIXELS_PER_METER = 40;
 const CANVAS_DIMENSIONS = { width: 120, height: 80 }; // meters
@@ -246,11 +247,6 @@ const ShowLayoutDesigner = () => {
   const [lockedLength, setLockedLength] = useState(5);
   const [linePreview, setLinePreview] = useState<LineElement | null>(null);
   const [isFullScreen, setIsFullScreen] = useState(false);
-  const [firebaseConfig, setFirebaseConfig] = useState({
-    apiKey: '',
-    projectId: '',
-    collection: 'drafts',
-  });
   const [draftName, setDraftName] = useState('');
   const [savedDrafts, setSavedDrafts] = useState<
     { id: string; name: string; savedAt: string; data: string }[]
@@ -763,55 +759,50 @@ const ShowLayoutDesigner = () => {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [selectedElement]);
 
-  useEffect(() => {
-    setSavedDrafts([]);
-    setSelectedDraftId('');
-  }, [firebaseConfig.apiKey, firebaseConfig.projectId, firebaseConfig.collection]);
-
-  const fetchDraftsFromFirebase = async () => {
+  const fetchDraftsFromFirebase = useCallback(async () => {
     setDraftMessage(null);
     setIsLoadingDrafts(true);
     try {
-      if (!firebaseConfig.apiKey || !firebaseConfig.projectId) {
-        setDraftMessage('Add your Firebase API key and project ID to load drafts.');
-        return;
-      }
+      const data = (await dbGet('layoutDrafts')) as
+        | Record<string, { name?: string; savedAt?: string; data?: string }>
+        | null;
 
-      const response = await fetch(
-        `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/(default)/documents/${firebaseConfig.collection}?key=${firebaseConfig.apiKey}`,
-        { method: 'GET' }
-      );
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(errorText || 'Unable to fetch drafts');
-      }
-
-      const data = (await response.json()) as {
-        documents?: {
-          name: string;
-          fields?: {
-            name?: { stringValue?: string };
-            data?: { stringValue?: string };
-            savedAt?: { stringValue?: string };
-          };
-        }[];
-      };
-
-      const drafts =
-        data.documents?.map((doc) => {
-          const id = doc.name.split('/').pop() ?? doc.name;
-          const name = doc.fields?.name?.stringValue ?? 'Untitled draft';
-          const savedAt = doc.fields?.savedAt?.stringValue ?? '';
-          const payload = doc.fields?.data?.stringValue ?? '';
-          return { id, name, savedAt, data: payload };
-        }) ?? [];
+      const drafts = Object.entries(data ?? {}).map(([id, value]) => ({
+        id,
+        name: value.name ?? 'Untitled draft',
+        savedAt: value.savedAt ?? '',
+        data: value.data ?? '',
+      }));
+      drafts.sort((a, b) => b.savedAt.localeCompare(a.savedAt));
       setSavedDrafts(drafts);
+      if (!drafts.find((item) => item.id === selectedDraftId)) {
+        setSelectedDraftId('');
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error loading drafts';
       setDraftMessage(message);
     } finally {
       setIsLoadingDrafts(false);
+    }
+  }, [selectedDraftId]);
+
+  useEffect(() => {
+    void fetchDraftsFromFirebase();
+  }, [fetchDraftsFromFirebase]);
+
+  const handleLoadDraft = (draftId: string) => {
+    const draft = savedDrafts.find((item) => item.id === draftId);
+    if (!draft?.data) return;
+    try {
+      const parsed = JSON.parse(draft.data) as { elements?: LayoutElement[] };
+      if (parsed.elements) {
+        setElements(parsed.elements);
+        setSelectedId(null);
+        setLinePreview(null);
+        lineStartRef.current = null;
+      }
+    } catch (error) {
+      setDraftMessage('Unable to parse the selected draft data.');
     }
   };
 
@@ -819,10 +810,6 @@ const ShowLayoutDesigner = () => {
     setIsSavingDraft(true);
     setDraftMessage(null);
     try {
-      if (!firebaseConfig.apiKey || !firebaseConfig.projectId) {
-        setDraftMessage('Add your Firebase API key and project ID to save drafts.');
-        return;
-      }
       if (!draftName.trim()) {
         setDraftMessage('Add a draft name before saving.');
         return;
@@ -834,25 +821,11 @@ const ShowLayoutDesigner = () => {
         savedAt: new Date().toISOString(),
       };
 
-      const response = await fetch(
-        `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/(default)/documents/${firebaseConfig.collection}?key=${firebaseConfig.apiKey}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            fields: {
-              name: { stringValue: draftName.trim() },
-              data: { stringValue: JSON.stringify(payload) },
-              savedAt: { stringValue: payload.savedAt },
-            },
-          }),
-        }
-      );
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(errorText || 'Unable to save draft');
-      }
+      await dbPush('layoutDrafts', {
+        name: draftName.trim(),
+        savedAt: payload.savedAt,
+        data: JSON.stringify(payload),
+      });
       setDraftMessage('Draft saved to Firebase successfully.');
       await fetchDraftsFromFirebase();
     } catch (error) {
@@ -1153,7 +1126,7 @@ const ShowLayoutDesigner = () => {
             <FileDown className="h-4 w-4" /> {isExporting ? 'Exporting...' : 'Export PDF'}
           </Button>
           <Button className="gap-2" variant="secondary" onClick={saveDraftToFirebase} disabled={isSavingDraft}>
-            <Save className="h-4 w-4" /> {isSavingDraft ? 'Saving...' : 'Save draft'}
+            <Save className="h-4 w-4" /> {isSavingDraft ? 'Saving...' : 'Save layout'}
           </Button>
         </div>
       </div>
@@ -1598,9 +1571,9 @@ const ShowLayoutDesigner = () => {
             </div>
 
             <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 space-y-3">
-              <p className="text-sm font-semibold text-slate-900">Firebase draft sync</p>
+              <p className="text-sm font-semibold text-slate-900">Saved layouts</p>
               <p className="text-xs text-slate-500">
-                Enter your Firebase REST API details to store drafts. Data is stored as a JSON string in the chosen collection.
+                Save this layout directly into the connected Firebase project and reload it later from the dropdown.
               </p>
               <div className="space-y-2 text-sm">
                 <Label className="text-xs text-slate-500">Draft name</Label>
@@ -1608,24 +1581,6 @@ const ShowLayoutDesigner = () => {
                   placeholder="Spring show layout"
                   value={draftName}
                   onChange={(event) => setDraftName(event.target.value)}
-                />
-                <Label className="text-xs text-slate-500">API key</Label>
-                <Input
-                  placeholder="AIza..."
-                  value={firebaseConfig.apiKey}
-                  onChange={(event) => setFirebaseConfig((prev) => ({ ...prev, apiKey: event.target.value }))}
-                />
-                <Label className="text-xs text-slate-500">Project ID</Label>
-                <Input
-                  placeholder="your-project-id"
-                  value={firebaseConfig.projectId}
-                  onChange={(event) => setFirebaseConfig((prev) => ({ ...prev, projectId: event.target.value }))}
-                />
-                <Label className="text-xs text-slate-500">Collection (optional)</Label>
-                <Input
-                  placeholder="drafts"
-                  value={firebaseConfig.collection}
-                  onChange={(event) => setFirebaseConfig((prev) => ({ ...prev, collection: event.target.value }))}
                 />
                 <div className="flex flex-wrap items-center gap-2">
                   <Button
@@ -1636,39 +1591,29 @@ const ShowLayoutDesigner = () => {
                   >
                     {isLoadingDrafts ? 'Loading...' : 'Refresh drafts'}
                   </Button>
-                  {savedDrafts.length > 0 && (
-                    <div className="flex-1">
-                      <Label className="text-xs text-slate-500">Load saved draft</Label>
-                      <select
-                        className="mt-1 w-full rounded-md border border-slate-300 px-2 py-2 text-sm"
-                        value={selectedDraftId}
-                        onChange={(event) => {
-                          const nextId = event.target.value;
-                          setSelectedDraftId(nextId);
-                          const draft = savedDrafts.find((item) => item.id === nextId);
-                          if (!draft?.data) return;
-                          try {
-                            const parsed = JSON.parse(draft.data) as { elements?: LayoutElement[]; stats?: typeof stats };
-                            if (parsed.elements) {
-                              setElements(parsed.elements);
-                              setSelectedId(null);
-                              setLinePreview(null);
-                              lineStartRef.current = null;
-                            }
-                          } catch (error) {
-                            setDraftMessage('Unable to parse the selected draft data.');
-                          }
-                        }}
-                      >
-                        <option value="">Select a saved layout</option>
-                        {savedDrafts.map((draft) => (
-                          <option key={draft.id} value={draft.id}>
-                            {draft.name} {draft.savedAt ? `• ${new Date(draft.savedAt).toLocaleString()}` : ''}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  )}
+                </div>
+                <div className="space-y-2">
+                  <Label className="text-xs text-slate-500">Load saved layout</Label>
+                  <select
+                    className="w-full rounded-md border border-slate-300 px-2 py-2 text-sm"
+                    value={selectedDraftId}
+                    onChange={(event) => setSelectedDraftId(event.target.value)}
+                  >
+                    <option value="">Select a saved layout</option>
+                    {savedDrafts.map((draft) => (
+                      <option key={draft.id} value={draft.id}>
+                        {draft.name} {draft.savedAt ? `• ${new Date(draft.savedAt).toLocaleString()}` : ''}
+                      </option>
+                    ))}
+                  </select>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => handleLoadDraft(selectedDraftId)}
+                    disabled={!selectedDraftId}
+                  >
+                    Load selected layout
+                  </Button>
                 </div>
                 {draftMessage && (
                   <p className="text-xs font-semibold text-amber-700">{draftMessage}</p>
