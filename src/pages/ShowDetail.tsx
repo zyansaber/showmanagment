@@ -132,6 +132,7 @@ export default function ShowDetail() {
   const [isManagingTeam, setIsManagingTeam] = useState(false);
   const [editedShow, setEditedShow] = useState<Partial<Show>>({});
   const [selectedTeamMembers, setSelectedTeamMembers] = useState<string[]>([]);
+  const [memberDayDrafts, setMemberDayDrafts] = useState<Record<string, string>>({});
   const [processTemplates, setProcessTemplates] = useState<ProcessTemplate[]>([]);
   const [isUsingTemplate, setIsUsingTemplate] = useState(false);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>('');
@@ -443,6 +444,37 @@ export default function ShowDetail() {
   const formatValue = (value: number | undefined): string => {
     if (value === undefined || value === null || value === 0) return 'N/A';
     return value.toString();
+  };
+
+  const handleSaveMemberDays = async (member: TeamMember) => {
+    if (!showId) {
+      toast.error('Unable to determine show ID for saving days.');
+      return;
+    }
+
+    const rawValue = memberDayDrafts[member.memberId];
+    const parsed = Number(rawValue);
+    const days = Number.isFinite(parsed) && parsed > 0 ? Math.round(parsed) : 0;
+    const existingDays = member.showDays && typeof member.showDays === 'object' ? member.showDays : {};
+    const updatedDays = { ...existingDays };
+
+    if (days > 0) {
+      updatedDays[showId] = days;
+    } else {
+      delete updatedDays[showId];
+    }
+
+    try {
+      await dbUpdate(`teamMembers/${member.memberId}`, { showDays: updatedDays });
+      setTeamMembers((prev) =>
+        prev.map((m) => (m.memberId === member.memberId ? { ...m, showDays: updatedDays } : m))
+      );
+      setMemberDayDrafts((prev) => ({ ...prev, [member.memberId]: days > 0 ? String(days) : '' }));
+      toast.success('Team member days updated.');
+    } catch (error) {
+      console.error('Error updating team member days:', error);
+      toast.error('Failed to update team member days.');
+    }
   };
 
   const handleSaveShowInfo = async () => {
@@ -884,6 +916,38 @@ export default function ShowDetail() {
     return <Badge className={colors[status] || 'bg-gray-500'}>{status}</Badge>;
   };
 
+  const getMemberShowDaysValue = (member: TeamMember, showId: string) => {
+    const rawDays = member.showDays;
+    if (!rawDays || typeof rawDays !== 'object') return 0;
+    const days = rawDays[showId];
+    const numeric = typeof days === 'number' ? days : Number(days);
+    return Number.isFinite(numeric) && numeric > 0 ? numeric : 0;
+  };
+
+  const showId = show?.id || id || '';
+  const showTeamMembers = useMemo(
+    () => teamMembers.filter((member) => selectedTeamMembers.includes(member.memberId)),
+    [teamMembers, selectedTeamMembers]
+  );
+
+  useEffect(() => {
+    setMemberDayDrafts({});
+  }, [showId]);
+
+  useEffect(() => {
+    if (!showId) return;
+    setMemberDayDrafts((prev) => {
+      const next = { ...prev };
+      showTeamMembers.forEach((member) => {
+        if (next[member.memberId] === undefined) {
+          const storedDays = getMemberShowDaysValue(member, showId);
+          next[member.memberId] = storedDays > 0 ? String(storedDays) : '';
+        }
+      });
+      return next;
+    });
+  }, [showId, showTeamMembers]);
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-96">
@@ -904,7 +968,6 @@ export default function ShowDetail() {
     );
   }
 
-  const showTeamMembers = teamMembers.filter(m => selectedTeamMembers.includes(m.memberId));
   const showYear = (() => {
     const parsed = show.startDate ? new Date(show.startDate) : null;
     if (parsed && !Number.isNaN(parsed.getTime())) return parsed.getFullYear();
@@ -1396,6 +1459,28 @@ export default function ShowDetail() {
                             <p className="text-sm text-gray-500 mt-1">{member.email}</p>
                           </div>
                           <Badge variant="outline">{member.activeFlag === 1 ? 'Active' : 'Inactive'}</Badge>
+                        </div>
+                        <div className="mt-4 flex items-center gap-2">
+                          <Label className="text-xs uppercase text-gray-500">Days</Label>
+                          <Input
+                            type="number"
+                            min={0}
+                            value={memberDayDrafts[member.memberId] ?? ''}
+                            onChange={(event) =>
+                              setMemberDayDrafts((prev) => ({
+                                ...prev,
+                                [member.memberId]: event.target.value,
+                              }))
+                            }
+                            className="h-8 w-24"
+                          />
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => handleSaveMemberDays(member)}
+                          >
+                            Save
+                          </Button>
                         </div>
                       </CardContent>
                     </Card>
