@@ -50,22 +50,35 @@ export default function Dashboard() {
   };
 
   // Calculate employee statistics
-  const buildMemberShowDays = (member: TeamMember) => {
+  const buildMemberShowDaysList = (member: TeamMember) => {
     const rawDays = member.showDays;
-    if (!rawDays || typeof rawDays !== 'object') return {} as Record<string, number>;
-    return Object.entries(rawDays).reduce((acc, [showId, days]) => {
-      const numeric = typeof days === 'number' ? days : Number(days);
-      if (Number.isFinite(numeric) && numeric > 0) {
-        acc[showId] = numeric;
-      }
-      return acc;
-    }, {} as Record<string, number>);
+    if (Array.isArray(rawDays)) {
+      return rawDays
+        .map((entry) => ({
+          showId: typeof entry?.showId === 'string' ? entry.showId : '',
+          days: typeof entry?.days === 'number' ? entry.days : Number(entry?.days),
+        }))
+        .filter((entry) => entry.showId && Number.isFinite(entry.days) && entry.days > 0);
+    }
+    if (rawDays && typeof rawDays === 'object') {
+      return Object.entries(rawDays).reduce(
+        (acc, [showId, days]) => {
+          const numeric = typeof days === 'number' ? days : Number(days);
+          if (Number.isFinite(numeric) && numeric > 0) {
+            acc.push({ showId, days: numeric });
+          }
+          return acc;
+        },
+        [] as { showId: string; days: number }[]
+      );
+    }
+    return [] as { showId: string; days: number }[];
   };
 
   const teamMemberDaysMap = useMemo(() => {
     return teamMembers.reduce((acc, member) => {
-      const showDays = buildMemberShowDays(member);
-      const totalDays = Object.values(showDays).reduce((sum, days) => sum + days, 0);
+      const showDays = buildMemberShowDaysList(member);
+      const totalDays = showDays.reduce((sum, entry) => sum + entry.days, 0);
       acc[member.memberName] = totalDays;
       return acc;
     }, {} as Record<string, number>);
