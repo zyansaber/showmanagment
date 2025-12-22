@@ -740,6 +740,12 @@ const ShowLayoutDesigner = () => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (isEditableTarget(event.target)) return;
       const key = event.key.toLowerCase();
+      if (key === 'delete' || key === 'backspace') {
+        if (!selectedElement) return;
+        setElements((prev) => prev.filter((item) => item.id !== selectedElement.id));
+        setSelectedId(null);
+        return;
+      }
       if ((event.ctrlKey || event.metaKey) && key === 'c') {
         if (selectedElement) {
           copiedElementRef.current = JSON.parse(JSON.stringify(selectedElement)) as LayoutElement;
@@ -1158,16 +1164,13 @@ const ShowLayoutDesigner = () => {
                     {paletteItems.map((item) => (
                       <div
                         key={item.id}
-                        className="cursor-grab active:cursor-grabbing rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition hover:shadow-md"
+                        className="cursor-grab active:cursor-grabbing rounded-xl border border-slate-200 bg-white p-3 shadow-sm transition hover:shadow-md"
                         draggable
                         onDragStart={(event) => handleDragStart(event, item.id)}
                         onClick={() => addShapeFromPalette(item.id)}
                       >
-                        <div className="flex items-start justify-between">
-                          <div>
-                            <p className="text-sm font-semibold text-slate-900">{item.label}</p>
-                            <p className="text-xs text-slate-500">{item.description}</p>
-                          </div>
+                        <div className="flex items-center justify-between">
+                          <p className="text-sm font-semibold text-slate-900">{item.label}</p>
                           <div className="rounded-full bg-slate-100 p-2">
                             {item.kind === 'plant' && <Trees className="h-4 w-4 text-emerald-600" />}
                             {item.kind === 'caravan' && <Tent className="h-4 w-4 text-blue-600" />}
@@ -1178,10 +1181,7 @@ const ShowLayoutDesigner = () => {
                             {item.kind === 'street' && <Route className="h-4 w-4 text-slate-700" />}
                           </div>
                         </div>
-                        <div className="mt-3 flex items-center justify-between text-xs text-slate-500">
-                          <span>{`${item.width}m x ${item.height}m`}</span>
-                          <span>Drag onto canvas</span>
-                        </div>
+                        <div className="mt-2 text-xs text-slate-500">{`${item.width}m x ${item.height}m`}</div>
                       </div>
                     ))}
                   </div>
