@@ -162,10 +162,9 @@ export default function AdminSettings() {
     }
   };
 
-  const handleAccountUpdate = async (username: string, updates: Partial<{ password: string; role: string }>) => {
+  const handleAccountUpdate = async (username: string, updates: Partial<{ role: string }>) => {
     try {
       await updateAccount(username, {
-        ...(updates.password ? { password: updates.password } : {}),
         ...(updates.role ? { role: updates.role as 'admin' | 'user' } : {}),
       });
       toast.success('Account updated');
@@ -283,7 +282,6 @@ export default function AdminSettings() {
                     <TableRow>
                       <TableHead>Username</TableHead>
                       <TableHead>Role</TableHead>
-                      <TableHead>Password</TableHead>
                       <TableHead className="text-right">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -480,12 +478,11 @@ export default function AdminSettings() {
 
 type AccountRowProps = {
   account: { username: string; password: string; role: string };
-  onUpdate: (username: string, updates: { password?: string; role?: string }) => void;
+  onUpdate: (username: string, updates: { role?: string }) => void;
   onDelete: (username: string) => void;
 };
 
 const AccountRow = ({ account, onUpdate, onDelete }: AccountRowProps) => {
-  const [password, setPassword] = useState(account.password);
   const [role, setRole] = useState(account.role);
 
   return (
@@ -502,18 +499,11 @@ const AccountRow = ({ account, onUpdate, onDelete }: AccountRowProps) => {
           </SelectContent>
         </Select>
       </TableCell>
-      <TableCell>
-        <Input
-          value={password}
-          onChange={(event) => setPassword(event.target.value)}
-          className="min-w-[160px]"
-        />
-      </TableCell>
       <TableCell className="text-right space-x-2">
         <Button
           variant="outline"
           size="sm"
-          onClick={() => onUpdate(account.username, { password, role })}
+          onClick={() => onUpdate(account.username, { role })}
         >
           Update
         </Button>
