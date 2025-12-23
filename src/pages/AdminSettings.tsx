@@ -7,8 +7,9 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { dbGet, dbUpdate } from '@/lib/firebase';
+import { dbGet, dbUpdate, schedulingDbGet } from '@/lib/firebase';
 import { useAuth } from '@/context/AuthContext';
+import type { ScheduleOrder } from '@/types';
 
 const emptyAccountForm = {
   username: '',
@@ -49,14 +50,19 @@ export default function AdminSettings() {
   const [shows, setShows] = useState<ShowRecord[]>([]);
   const [showSettings, setShowSettings] = useState<Record<string, ShowSettings>>({});
   const [templates, setTemplates] = useState<ProcessTemplate[]>([]);
+  const [dealerOptions, setDealerOptions] = useState<string[]>([]);
   const [loadingShows, setLoadingShows] = useState(true);
+  const [showSearchTerm, setShowSearchTerm] = useState('');
+  const [showSortKey, setShowSortKey] = useState<'name' | 'startDate' | 'finishDate'>('startDate');
+  const [showSortDirection, setShowSortDirection] = useState<'asc' | 'desc'>('desc');
 
   const loadShowData = async () => {
     try {
       setLoadingShows(true);
-      const [showsData, templatesData] = await Promise.all([
+      const [showsData, templatesData, scheduleData] = await Promise.all([
         dbGet('shows'),
         dbGet('processTemplates'),
+        schedulingDbGet('schedule'),
       ]);
       const showList = showsData
         ? (Object.entries(showsData) as Array<[string, Omit<ShowRecord, 'firebaseKey'>]>).map(
@@ -75,6 +81,15 @@ export default function AdminSettings() {
         : [];
       setShows(showList);
       setTemplates(templateList);
+      if (scheduleData) {
+        const values = Object.values(scheduleData as Record<string, ScheduleOrder>);
+        const dealers = Array.from(
+          new Set(values.map((order) => order.Dealer?.trim()).filter((name): name is string => Boolean(name)))
+        ).sort((a, b) => a.localeCompare(b));
+        setDealerOptions(dealers);
+      } else {
+        setDealerOptions([]);
+      }
       setShowSettings(() => {
         const next: Record<string, ShowSettings> = {};
         showList.forEach((show) => {
@@ -98,8 +113,31 @@ export default function AdminSettings() {
   };
 
   const sortedShows = useMemo(() => {
-    return [...shows].sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id));
-  }, [shows]);
+    const term = showSearchTerm.trim().toLowerCase();
+    const filtered = shows.filter((show) => {
+      if (!term) return true;
+      const name = (show.name || show.id).toLowerCase();
+      return name.includes(term);
+    });
+    const getDateValue = (show: ShowRecord, key: 'startDate' | 'finishDate') => {
+      const settings = showSettings[show.id];
+      const value = settings?.[key] || show[key] || '';
+      const timestamp = value ? new Date(value).getTime() : Number.NaN;
+      return Number.isNaN(timestamp) ? null : timestamp;
+    };
+    return filtered.sort((a, b) => {
+      if (showSortKey === 'name') {
+        const result = (a.name || a.id).localeCompare(b.name || b.id);
+        return showSortDirection === 'asc' ? result : -result;
+      }
+      const aTime = getDateValue(a, showSortKey);
+      const bTime = getDateValue(b, showSortKey);
+      if (aTime === null && bTime === null) return 0;
+      if (aTime === null) return 1;
+      if (bTime === null) return -1;
+      return showSortDirection === 'asc' ? aTime - bTime : bTime - aTime;
+    });
+  }, [showSearchTerm, showSortDirection, showSortKey, showSettings, shows]);
 
   const handleAccountSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -279,9 +317,53 @@ export default function AdminSettings() {
               <div className="text-sm text-slate-500">Loading show data…</div>
             ) : (
               <div className="space-y-6">
+                <div className="flex flex-wrap items-end gap-4">
+                  <div className="min-w-[220px] flex-1 space-y-2">
+                    <Label htmlFor="show-search">Search show name</Label>
+                    <Input
+                      id="show-search"
+                      placeholder="Search by show name"
+                      value={showSearchTerm}
+                      onChange={(event) => setShowSearchTerm(event.target.value)}
+                    />
+                  </div>
+                  <div className="min-w-[200px] space-y-2">
+                    <Label>Sort by</Label>
+                    <Select
+                      value={showSortKey}
+                      onValueChange={(value) =>
+                        setShowSortKey(value as 'name' | 'startDate' | 'finishDate')
+                      }
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select sort" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="startDate">Start date</SelectItem>
+                        <SelectItem value="finishDate">Finish date</SelectItem>
+                        <SelectItem value="name">Name</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      onClick={() =>
+                        setShowSortDirection((prev) => (prev === 'asc' ? 'desc' : 'asc'))
+                      }
+                    >
+                      {showSortDirection === 'asc' ? 'Ascending' : 'Descending'}
+                    </Button>
+                  </div>
+                </div>
                 {sortedShows.map((show) => {
                   const settings = showSettings[show.id];
                   if (!settings) return null;
+                  const handoverOptions = dealerOptions.includes(settings.handoverDealer)
+                    ? dealerOptions
+                    : settings.handoverDealer
+                      ? [settings.handoverDealer, ...dealerOptions]
+                      : dealerOptions;
                   return (
                     <div key={show.id} className="rounded-lg border border-slate-200 p-4">
                       <div className="flex flex-col gap-1">
@@ -321,12 +403,31 @@ export default function AdminSettings() {
                         </div>
                         <div className="space-y-2">
                           <Label>Handover Dealer</Label>
-                          <Input
-                            value={settings.handoverDealer}
-                            onChange={(event) =>
-                              handleShowSettingChange(show.id, { handoverDealer: event.target.value })
+                          <Select
+                            value={settings.handoverDealer || 'none'}
+                            onValueChange={(value) =>
+                              handleShowSettingChange(show.id, {
+                                handoverDealer: value === 'none' ? '' : value,
+                              })
                             }
-                          />
+                          >
+                            <SelectTrigger>
+                              <SelectValue placeholder="Select handover dealer" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="none">No dealer</SelectItem>
+                              {handoverOptions.map((dealer) => (
+                                <SelectItem key={dealer} value={dealer}>
+                                  {dealer}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          {handoverOptions.length === 0 && (
+                            <p className="text-xs text-slate-500">
+                              No handover dealers found in scheduling data.
+                            </p>
+                          )}
                         </div>
                         <div className="space-y-2">
                           <Label>Process Template</Label>
