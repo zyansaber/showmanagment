@@ -14,7 +14,6 @@ import {
   ChevronLeft,
   ChevronRight,
   Briefcase,
-  Building2,
   ClipboardList,
   FileSpreadsheet,
   FileText,
@@ -29,7 +28,6 @@ import ShowManagement from './pages/ShowManagement';
 import ShowLayoutDesigner from './pages/ShowLayoutDesigner';
 import TeamManagement from './pages/TeamManagement';
 import PowerBI from './pages/PowerBI';
-import DealershipManagement from './pages/DealershipManagement';
 import ProcessTemplates from './pages/ProcessTemplates';
 import OrdersAndSales from './pages/OrdersAndSales';
 import ShowReport from './pages/ShowReport';
@@ -56,7 +54,6 @@ function Sidebar({ isOpen, setIsOpen }: { isOpen: boolean; setIsOpen: (open: boo
     { icon: PenTool, label: 'Show Layout Studio', path: '/layout-studio' },
     { icon: FileSpreadsheet, label: 'Orders & Sales', path: '/orders' },
     { icon: ClipboardList, label: 'Process Templates', path: '/process-templates' },
-    { icon: Building2, label: 'Dealership Management', path: '/dealerships' },
     { icon: Users, label: 'Team Management', path: '/team' },
     { icon: FileText, label: 'Show Report', path: '/show-report' },
     { icon: Wallet, label: 'Show Budget & Expense', path: '/budget' },
@@ -64,6 +61,7 @@ function Sidebar({ isOpen, setIsOpen }: { isOpen: boolean; setIsOpen: (open: boo
     { icon: BarChart3, label: 'Power BI Reports', path: '/powerbi' },
     { icon: Users, label: 'Admin Settings', path: '/admin', adminOnly: true },
   ];
+
 
   return (
     <>
@@ -263,14 +261,7 @@ function AppLayout() {
                 </ProtectedRoute>
               }
             />
-            <Route
-              path="/dealerships"
-              element={
-                <ProtectedRoute>
-                  <DealershipManagement />
-                </ProtectedRoute>
-              }
-            />
+
             <Route
               path="/orders"
               element={
