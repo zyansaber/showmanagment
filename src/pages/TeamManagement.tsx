@@ -7,19 +7,19 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import { UserPlus, Edit, Lock, BarChart3 } from 'lucide-react';
+import { UserPlus, Edit, Check, UserCheck, BarChart3 } from 'lucide-react';
 import { dbGet, dbSet, dbUpdate } from '@/lib/firebase';
 import type { TeamMember, UserRole, Show, ShowOrder } from '@/types';
 
 export default function TeamManagement() {
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [password, setPassword] = useState('');
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
   const [shows, setShows] = useState<Show[]>([]);
   const [orders, setOrders] = useState<ShowOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [isAddingMember, setIsAddingMember] = useState(false);
   const [selectedMember, setSelectedMember] = useState<TeamMember | null>(null);
+  const [editingEmailMemberId, setEditingEmailMemberId] = useState<string | null>(null);
+  const [emailDraft, setEmailDraft] = useState('');
 
   const [newMember, setNewMember] = useState<Partial<TeamMember>>({
     memberName: '',
@@ -29,10 +29,8 @@ export default function TeamManagement() {
   });
 
   useEffect(() => {
-    if (isAuthenticated) {
-      loadTeamData();
-    }
-  }, [isAuthenticated]);
+    loadTeamData();
+  }, []);
 
   const loadTeamData = async () => {
     try {
@@ -49,14 +47,6 @@ export default function TeamManagement() {
       console.error('Error loading team members:', error);
     } finally {
       setLoading(false);
-    }
-  };
-
-  const handleLogin = () => {
-    if (password === 'admin123') {
-      setIsAuthenticated(true);
-    } else {
-      alert('Incorrect password');
     }
   };
 
@@ -98,6 +88,24 @@ export default function TeamManagement() {
     } catch (error) {
       console.error('Error toggling member status:', error);
     }
+  };
+
+  const handleEmailEditToggle = async (member: TeamMember) => {
+    if (editingEmailMemberId === member.memberId) {
+      try {
+        await dbUpdate(`teamMembers/${member.memberId}`, { email: emailDraft });
+        setTeamMembers(teamMembers.map((m) => (
+          m.memberId === member.memberId ? { ...m, email: emailDraft } : m
+        )));
+        setEditingEmailMemberId(null);
+      } catch (error) {
+        console.error('Error updating email:', error);
+      }
+      return;
+    }
+
+    setEditingEmailMemberId(member.memberId);
+    setEmailDraft(member.email || '');
   };
 
   const getRoleBadgeColor = (role: UserRole) => {
@@ -309,41 +317,6 @@ export default function TeamManagement() {
     );
   };
 
-  if (!isAuthenticated) {
-    return (
-      <div className="flex items-center justify-center h-[calc(100vh-200px)]">
-        <Card className="w-full max-w-md">
-          <CardHeader className="text-center">
-            <div className="mx-auto w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center mb-4">
-              <Lock className="h-6 w-6 text-blue-600" />
-            </div>
-            <CardTitle>Admin Panel Access</CardTitle>
-            <CardDescription>Enter password to access team management</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              <div>
-                <Label htmlFor="password">Password</Label>
-                <Input
-                  id="password"
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  onKeyPress={(e) => e.key === 'Enter' && handleLogin()}
-                  placeholder="Enter admin password"
-                />
-                <p className="text-xs text-gray-500 mt-1">Demo password: admin123</p>
-              </div>
-              <Button onClick={handleLogin} className="w-full">
-                Login
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
-
   if (loading) {
     return (
       <div className="flex items-center justify-center h-96">
@@ -420,9 +393,6 @@ export default function TeamManagement() {
                   </div>
                 </DialogContent>
               </Dialog>
-              <Button variant="outline" onClick={() => setIsAuthenticated(false)}>
-                Logout
-              </Button>
             </div>
           </div>
         </CardHeader>
@@ -447,7 +417,17 @@ export default function TeamManagement() {
                   <TableRow key={member.memberId}>
                     <TableCell className="font-medium">{member.memberId}</TableCell>
                     <TableCell>{member.memberName}</TableCell>
-                    <TableCell>{member.email}</TableCell>
+                    <TableCell>
+                      {editingEmailMemberId === member.memberId ? (
+                        <Input
+                          value={emailDraft}
+                          onChange={(e) => setEmailDraft(e.target.value)}
+                          placeholder="Enter email address"
+                        />
+                      ) : (
+                        member.email || '-'
+                      )}
+                    </TableCell>
                     <TableCell>
                       <Badge className={getRoleBadgeColor(member.role)}>{member.role}</Badge>
                     </TableCell>
@@ -468,7 +448,18 @@ export default function TeamManagement() {
                           size="sm"
                           onClick={() => handleToggleActive(member.memberId, member.activeFlag)}
                         >
-                          <Edit className="h-4 w-4" />
+                          <UserCheck className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleEmailEditToggle(member)}
+                        >
+                          {editingEmailMemberId === member.memberId ? (
+                            <Check className="h-4 w-4" />
+                          ) : (
+                            <Edit className="h-4 w-4" />
+                          )}
                         </Button>
                         <Button
                           variant="ghost"
@@ -486,48 +477,6 @@ export default function TeamManagement() {
           ) : (
             <div className="text-center py-8 text-gray-500">No team members yet</div>
           )}
-        </CardContent>
-      </Card>
-
-      {/* Role Permissions Info */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Role Permissions</CardTitle>
-          <CardDescription>Overview of access levels for each role</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="p-4 border rounded-lg">
-              <Badge className="bg-green-500 mb-2">Show Team</Badge>
-              <h3 className="font-semibold mb-2">Show Team</h3>
-              <ul className="text-sm text-gray-600 space-y-1">
-                <li>• View show information</li>
-                <li>• View assigned tasks</li>
-                <li>• Read-only access</li>
-                <li>• Cannot modify data</li>
-              </ul>
-            </div>
-            <div className="p-4 border rounded-lg">
-              <Badge className="bg-blue-500 mb-2">Show Manager</Badge>
-              <h3 className="font-semibold mb-2">Show Manager</h3>
-              <ul className="text-sm text-gray-600 space-y-1">
-                <li>• Add and edit show data</li>
-                <li>• Manage team assignments</li>
-                <li>• Create and update tasks</li>
-                <li>• Submit for approval</li>
-              </ul>
-            </div>
-            <div className="p-4 border rounded-lg">
-              <Badge className="bg-purple-500 mb-2">Headquarter Management</Badge>
-              <h3 className="font-semibold mb-2">Headquarter Management</h3>
-              <ul className="text-sm text-gray-600 space-y-1">
-                <li>• Full system access</li>
-                <li>• Approve/reject submissions</li>
-                <li>• Set targets and budgets</li>
-                <li>• Manage all users</li>
-              </ul>
-            </div>
-          </div>
         </CardContent>
       </Card>
 
