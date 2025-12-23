@@ -13,6 +13,9 @@ export default function Login() {
   const [username, setUsername] = useState('admin');
   const [password, setPassword] = useState('admin');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [registerUsername, setRegisterUsername] = useState('');
+  const [registerPassword, setRegisterPassword] = useState('');
+  const [isRegistering, setIsRegistering] = useState(false);
 
   if (auth.user) {
     return <Navigate to="/" replace />;
@@ -29,6 +32,22 @@ export default function Login() {
     }
     toast.success('Login successful');
     navigate('/');
+  };
+
+  const handleRegister = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setIsRegistering(true);
+    const result = await auth.registerUser(registerUsername, registerPassword);
+    setIsRegistering(false);
+    if (!result.ok) {
+      toast.error(result.message || 'Registration failed');
+      return;
+    }
+    toast.success('Registration successful. Please sign in.');
+    setUsername(registerUsername);
+    setPassword(registerPassword);
+    setRegisterUsername('');
+    setRegisterPassword('');
   };
 
   return (
@@ -63,6 +82,39 @@ export default function Login() {
               {isSubmitting ? 'Signing in…' : 'Sign in'}
             </Button>
           </form>
+          <div className="my-6 border-t border-slate-200" />
+          <div className="space-y-4">
+            <div>
+              <h3 className="text-sm font-semibold text-slate-900">Create a user account</h3>
+              <p className="text-xs text-slate-500">
+                Register a standard user account. Admins manage admin accounts separately.
+              </p>
+            </div>
+            <form className="space-y-4" onSubmit={handleRegister}>
+              <div className="space-y-2">
+                <Label htmlFor="register-username">Username</Label>
+                <Input
+                  id="register-username"
+                  value={registerUsername}
+                  onChange={(event) => setRegisterUsername(event.target.value)}
+                  autoComplete="username"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="register-password">Password</Label>
+                <Input
+                  id="register-password"
+                  type="password"
+                  value={registerPassword}
+                  onChange={(event) => setRegisterPassword(event.target.value)}
+                  autoComplete="new-password"
+                />
+              </div>
+              <Button type="submit" variant="outline" className="w-full" disabled={isRegistering}>
+                {isRegistering ? 'Creating…' : 'Create account'}
+              </Button>
+            </form>
+          </div>
         </CardContent>
       </Card>
     </div>
