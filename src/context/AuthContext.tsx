@@ -57,6 +57,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [accounts, setAccounts] = useState<AuthAccount[]>([]);
   const [user, setUser] = useState<AuthUser | null>(() => loadStoredUser());
   const [loading, setLoading] = useState(true);
+  const [accountsSource, setAccountsSource] = useState<'db' | 'unknown'>('unknown');
 
   const ensureDefaultAdmin = useCallback(async (data: AuthAccount[]) => {
     if (data.length > 0) return;
@@ -72,38 +73,11 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
   const refreshAccounts = useCallback(async () => {
     const data = await dbGet('authAccounts');
-    const normalised = normalizeAccounts(data);
-    await ensureDefaultAdmin(normalised);
-    const updatedData = normalised.length === 0 ? [
-      {
-        username: 'admin',
-        password: 'admin',
-        role: 'admin',
-      },
-    ] : normalised;
-    setAccounts(updatedData);
-  }, [ensureDefaultAdmin]);
-
-  useEffect(() => {
-    const load = async () => {
-      await refreshAccounts();
-      setLoading(false);
-    };
-    load();
-  }, [refreshAccounts]);
-
-  useEffect(() => {
-    if (!user) return;
-    const exists = accounts.find((account) => account.username === user.username);
-    if (!exists) {
-      setUser(null);
-      persistUser(null);
+    if (data === null) {
+      setAccounts([]);
+      setAccountsSource('unknown');
+      return;
     }
-  }, [accounts, user]);
-
-  const login = useCallback(
-    async (username: string, password: string) => {
-      const data = await dbGet('authAccounts');
       const normalised = normalizeAccounts(data);
       await ensureDefaultAdmin(normalised);
       const latestAccounts = normalised.length === 0 ? [
