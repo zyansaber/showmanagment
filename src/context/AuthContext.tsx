@@ -19,6 +19,7 @@ type AuthContextValue = {
   accounts: AuthAccount[];
   loading: boolean;
   login: (username: string, password: string) => Promise<{ ok: boolean; message?: string }>;
+  registerUser: (username: string, password: string) => Promise<{ ok: boolean; message?: string }>;
   logout: () => void;
   refreshAccounts: () => Promise<void>;
   createAccount: (account: AuthAccount) => Promise<void>;
@@ -29,6 +30,11 @@ type AuthContextValue = {
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
 const STORAGE_KEY = 'show-manager-auth-user';
+const DEFAULT_ADMIN: AuthAccount = {
+  username: 'admin',
+  password: 'admin',
+  role: 'admin',
+};
 
 const loadStoredUser = () => {
   const stored = localStorage.getItem(STORAGE_KEY);
@@ -55,40 +61,33 @@ const normalizeAccounts = (data: unknown): AuthAccount[] => {
 
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [accounts, setAccounts] = useState<AuthAccount[]>([]);
+  const [userAccounts, setUserAccounts] = useState<AuthAccount[]>([]);
   const [user, setUser] = useState<AuthUser | null>(() => loadStoredUser());
   const [loading, setLoading] = useState(true);
   const [accountsSource, setAccountsSource] = useState<'db' | 'unknown'>('unknown');
 
   const ensureDefaultAdmin = useCallback(async (data: AuthAccount[]) => {
     if (data.length > 0) return;
-    const defaultAdmin: AuthAccount = {
-      username: 'admin',
-      password: 'admin',
-      role: 'admin',
-    };
     await dbSet('authAccounts', {
-      [defaultAdmin.username]: defaultAdmin,
+      [DEFAULT_ADMIN.username]: DEFAULT_ADMIN,
     });
   }, []);
 
   const refreshAccounts = useCallback(async () => {
-    const data = await dbGet('authAccounts');
-    if (data === null) {
+    try {
+      const [authData, userData] = await Promise.all([dbGet('authAccounts'), dbGet('userAccounts')]);
+      const normalised = normalizeAccounts(authData);
+      await ensureDefaultAdmin(normalised);
+      const updatedData = normalised.length === 0 ? [DEFAULT_ADMIN] : normalised;
+      setAccounts(updatedData);
+      setUserAccounts(normalizeAccounts(userData));
+      setAccountsSource('db');
+    } catch (error) {
+      console.error(error);
       setAccounts([]);
+      setUserAccounts([]);
       setAccountsSource('unknown');
-      return;
     }
-    const normalised = normalizeAccounts(data);
-    await ensureDefaultAdmin(normalised);
-    const updatedData = normalised.length === 0 ? [
-      {
-        username: 'admin',
-        password: 'admin',
-        role: 'admin',
-      },
-    ] : normalised;
-    setAccounts(updatedData);
-    setAccountsSource('db');
   }, [ensureDefaultAdmin]);
 
   useEffect(() => {
@@ -102,37 +101,69 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   useEffect(() => {
     if (!user) return;
     if (accountsSource !== 'db') return;
-    const exists = accounts.find((account) => account.username === user.username);
+    const exists = [...accounts, ...userAccounts].find((account) => account.username === user.username);
     if (!exists) {
       setUser(null);
       persistUser(null);
     }
-  }, [accounts, accountsSource, user]);
+  }, [accounts, accountsSource, user, userAccounts]);
 
   const login = useCallback(
     async (username: string, password: string) => {
-      const data = await dbGet('authAccounts');
-      const normalised = normalizeAccounts(data);
-      await ensureDefaultAdmin(normalised);
-      const latestAccounts = normalised.length === 0 ? [
-        {
-          username: 'admin',
-          password: 'admin',
-          role: 'admin',
-        },
-      ] : normalised;
-      setAccounts(latestAccounts);
-      const account = latestAccounts.find((item) => item.username === username.trim());
-      if (!account || account.password !== password) {
-        return { ok: false, message: 'Invalid username or password.' };
+      try {
+        const [authData, userData] = await Promise.all([dbGet('authAccounts'), dbGet('userAccounts')]);
+        const normalised = normalizeAccounts(authData);
+        await ensureDefaultAdmin(normalised);
+        const latestAccounts = normalised.length === 0 ? [DEFAULT_ADMIN] : normalised;
+        const latestUserAccounts = normalizeAccounts(userData);
+        setAccounts(latestAccounts);
+        setUserAccounts(latestUserAccounts);
+        const account = [...latestAccounts, ...latestUserAccounts].find(
+          (item) => item.username === username.trim()
+        );
+        if (!account || account.password !== password) {
+          return { ok: false, message: 'Invalid username or password.' };
+        }
+        const nextUser = { username: account.username, role: account.role } satisfies AuthUser;
+        setUser(nextUser);
+        persistUser(nextUser);
+        return { ok: true };
+      } catch (error) {
+        console.error(error);
+        return { ok: false, message: 'Unable to reach authentication service.' };
       }
-      const nextUser = { username: account.username, role: account.role } satisfies AuthUser;
-      setUser(nextUser);
-      persistUser(nextUser);
-      return { ok: true };
     },
     [ensureDefaultAdmin]
   );
+
+  const registerUser = useCallback(async (username: string, password: string) => {
+    const trimmedUsername = username.trim();
+    if (!trimmedUsername || !password) {
+      return { ok: false, message: 'Please enter username and password.' };
+    }
+    try {
+      const [authData, userData] = await Promise.all([dbGet('authAccounts'), dbGet('userAccounts')]);
+      const adminAccounts = normalizeAccounts(authData);
+      const existingUserAccounts = normalizeAccounts(userData);
+      const exists = [...adminAccounts, ...existingUserAccounts].some(
+        (account) => account.username === trimmedUsername
+      );
+      if (exists) {
+        return { ok: false, message: 'Username already exists.' };
+      }
+      const account: AuthAccount = {
+        username: trimmedUsername,
+        password,
+        role: 'user',
+      };
+      await dbSet(`userAccounts/${trimmedUsername}`, account as unknown as Record<string, unknown>);
+      setUserAccounts((prev) => [...prev, account]);
+      return { ok: true };
+    } catch (error) {
+      console.error(error);
+      return { ok: false, message: 'Unable to register right now.' };
+    }
+  }, []);
 
   const logout = useCallback(() => {
     setUser(null);
@@ -165,13 +196,25 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       accounts,
       loading,
       login,
+      registerUser,
       logout,
       refreshAccounts,
       createAccount,
       updateAccount,
       deleteAccount,
     }),
-    [accounts, createAccount, deleteAccount, login, loading, logout, refreshAccounts, updateAccount, user]
+    [
+      accounts,
+      createAccount,
+      deleteAccount,
+      login,
+      loading,
+      logout,
+      refreshAccounts,
+      registerUser,
+      updateAccount,
+      user,
+    ]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
