@@ -78,6 +78,40 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       setAccountsSource('unknown');
       return;
     }
+    const normalised = normalizeAccounts(data);
+    await ensureDefaultAdmin(normalised);
+    const updatedData = normalised.length === 0 ? [
+      {
+        username: 'admin',
+        password: 'admin',
+        role: 'admin',
+      },
+    ] : normalised;
+    setAccounts(updatedData);
+    setAccountsSource('db');
+  }, [ensureDefaultAdmin]);
+
+  useEffect(() => {
+    const load = async () => {
+      await refreshAccounts();
+      setLoading(false);
+    };
+    load();
+  }, [refreshAccounts]);
+
+  useEffect(() => {
+    if (!user) return;
+    if (accountsSource !== 'db') return;
+    const exists = accounts.find((account) => account.username === user.username);
+    if (!exists) {
+      setUser(null);
+      persistUser(null);
+    }
+  }, [accounts, accountsSource, user]);
+
+  const login = useCallback(
+    async (username: string, password: string) => {
+      const data = await dbGet('authAccounts');
       const normalised = normalizeAccounts(data);
       await ensureDefaultAdmin(normalised);
       const latestAccounts = normalised.length === 0 ? [
