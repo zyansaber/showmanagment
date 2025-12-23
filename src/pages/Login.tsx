@@ -9,19 +9,19 @@ import { useAuth } from '@/context/AuthContext';
 
 export default function Login() {
   const navigate = useNavigate();
-  const { login, user } = useAuth();
+  const auth = useAuth();
   const [username, setUsername] = useState('admin');
   const [password, setPassword] = useState('admin');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  if (user) {
+  if (auth.user) {
     return <Navigate to="/" replace />;
   }
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setIsSubmitting(true);
-    const result = await login(username, password);
+    const result = await auth.login(username, password);
     setIsSubmitting(false);
     if (!result.ok) {
       toast.error(result.message || 'Login failed');
