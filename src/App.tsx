@@ -51,18 +51,15 @@ function Sidebar({ isOpen, setIsOpen }: { isOpen: boolean; setIsOpen: (open: boo
 
   const menuSections = [
     {
-      title: null,
+      title: 'Basic Show Info.',
       items: [
         { icon: LayoutDashboard, label: 'Dashboard', path: '/' },
         { icon: Calendar, label: 'Show Calendar', path: '/calendar' },
         { icon: Briefcase, label: 'Show Management', path: '/shows' },
         { icon: PenTool, label: 'Show Layout Studio', path: '/layout-studio' },
         { icon: FileSpreadsheet, label: 'Orders & Sales', path: '/orders' },
-        { icon: ClipboardList, label: 'Process Templates', path: '/process-templates' },
-        { icon: Users, label: 'Team Management', path: '/team' },
         { icon: FileText, label: 'Show Report', path: '/show-report' },
         { icon: BarChart3, label: 'Power BI Reports', path: '/powerbi' },
-        { icon: Users, label: 'Admin Settings', path: '/admin', adminOnly: true },
       ],
     },
     {
@@ -71,6 +68,14 @@ function Sidebar({ isOpen, setIsOpen }: { isOpen: boolean; setIsOpen: (open: boo
         { icon: Banknote, label: 'Finance', path: '/finance' },
         { icon: Wallet, label: 'Finance Result', path: '/budget' },
         { icon: Calculator, label: 'Budget setting', path: '/budget-setting', adminOnly: true },
+      ],
+    },
+    {
+      title: 'Admin',
+      items: [
+        { icon: ClipboardList, label: 'Process Templates', path: '/process-templates' },
+        { icon: Users, label: 'Team Management', path: '/team' },
+        { icon: Users, label: 'Admin Settings', path: '/admin', adminOnly: true },
       ],
     },
   ];
