@@ -38,6 +38,26 @@ type BudgetRow = {
   clawBack: number;
 };
 
+const parseNumber = (value: unknown): number => {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return 0;
+    const parsed = Number(trimmed.replace(/,/g, ''));
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+  return 0;
+};
+
+const computeDealerTotal = (draft: Record<string, unknown>) =>
+  parseNumber(draft.standCosts) +
+  parseNumber(draft.dealerDayRates) +
+  parseNumber(draft.dealerCommission) +
+  parseNumber(draft.dealerCostsTransport);
+
+const computeFactoryTotal = (draft: Record<string, unknown>) =>
+  parseNumber(draft.factoryCommission) + parseNumber(draft.factoryTravelCosts);
+
 const formatNumber = (value: number) =>
   Number.isFinite(value) ? value.toLocaleString('en-AU', { maximumFractionDigits: 0 }) : '0';
 
@@ -55,6 +75,18 @@ export default function ShowBudgetExpense() {
         const budgetMap = budgetsData ?? {};
 
         const mapped: BudgetRow[] = showList.map((show) => {
+          const budget = (budgetMap?.[show.id] ?? {}) as Record<string, unknown>;
+          const dealerBudget =
+            parseNumber(budget.totalDealerCost) || parseNumber(budget.dealerBudget) || computeDealerTotal(budget);
+          const factoryBudget =
+            parseNumber(budget.totalFactoryCosts ?? budget.totalFactoryCost) ||
+            parseNumber(budget.factoryBudget) ||
+            computeFactoryTotal(budget);
+          const totalBudget = dealerBudget + factoryBudget;
+          const actual = parseNumber(budget.actual);
+          const dealerActual = parseNumber(budget.dealerActual);
+          const factoryActual = parseNumber(budget.factoryActual);
+          const chargeBack = parseNumber(budget.chargeBack);
           const budget = budgetMap?.[show.id] ?? {};
           const totalBudget = Number(budget.totalBudget ?? 0);
           const dealerBudget = Number(budget.dealerBudget ?? 0);
