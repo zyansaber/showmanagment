@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { Download, Eraser, Loader2, RefreshCw, Save, Upload, Pencil } from 'lucide-react';
+import { Download, Loader2, RefreshCw, Save, Upload, Pencil } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -46,7 +46,7 @@ const parseNumber = (value: unknown): number => {
   return 0;
 };
 
-const formatCurrency = (value: number) => `$(AUD) ${parseNumber(value).toLocaleString('en-AU')}`;
+const formatCurrency = (value: number) => `$${parseNumber(value).toLocaleString('en-AU')}`;
 
 const computeDealerTotal = (row: Pick<BudgetFields, 'standCosts' | 'dealerDayRates' | 'dealerCommission' | 'dealerCostsTransport'>) =>
   parseNumber(row.standCosts) +
@@ -153,7 +153,6 @@ export default function BudgetSetting() {
   const [savingId, setSavingId] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [filter, setFilter] = useState<'all' | 'missing'>('all');
-  const [clearingDurations, setClearingDurations] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [rows, setRows] = useState<BudgetRow[]>([]);
   const [budgetSnapshot, setBudgetSnapshot] = useState<Record<string, Record<string, unknown>>>({});
@@ -434,37 +433,6 @@ export default function BudgetSetting() {
     }
   };
 
-  const handleClearDurations = async () => {
-    if (clearingDurations) return;
-    setClearingDurations(true);
-    try {
-      const updates: Record<string, unknown> = {};
-      Object.keys(budgetSnapshot).forEach((showId) => {
-        updates[`${showId}/durationDays`] = null;
-      });
-      if (Object.keys(updates).length === 0) {
-        toast.info('No durationDays fields found to clear.');
-        return;
-      }
-      await dbUpdate('showBudgets', updates);
-      setBudgetSnapshot((prev) => {
-        const next: Record<string, Record<string, unknown>> = {};
-        Object.entries(prev).forEach(([key, value]) => {
-          const entry = { ...value };
-          delete entry.durationDays;
-          next[key] = entry;
-        });
-        return next;
-      });
-      toast.success('All durationDays fields removed from showBudgets.');
-    } catch (error) {
-      console.error('Failed to clear durationDays', error);
-      toast.error('Unable to clear durationDays from showBudgets.');
-    } finally {
-      setClearingDurations(false);
-    }
-  };
-
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-4">
@@ -494,10 +462,6 @@ export default function BudgetSetting() {
           </Select>
           <Button variant="outline" size="icon" onClick={() => window.location.reload()} aria-label="Refresh">
             <RefreshCw className="h-4 w-4" />
-          </Button>
-          <Button variant="outline" size="sm" onClick={handleClearDurations} disabled={clearingDurations}>
-            {clearingDurations ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Eraser className="mr-2 h-4 w-4" />}
-            {clearingDurations ? 'Clearing...' : 'Clear durationDays'}
           </Button>
         </div>
       </div>
@@ -559,6 +523,12 @@ export default function BudgetSetting() {
             <Table className="text-xs">
               <TableHeader>
                 <TableRow className="bg-slate-50 text-[11px] uppercase text-slate-700">
+                  <TableHead colSpan={2} className="border-r bg-white text-left text-slate-600">Show details</TableHead>
+                  <TableHead colSpan={5} className="border-r text-left text-emerald-700">Dealer costs</TableHead>
+                  <TableHead colSpan={3} className="border-r text-left text-blue-700">Factory costs</TableHead>
+                  <TableHead colSpan={2} className="text-left text-slate-600">Status</TableHead>
+                </TableRow>
+                <TableRow className="bg-slate-50/70 text-[11px] uppercase tracking-wide text-slate-600">
                   <TableHead className="min-w-[180px]">Show Name</TableHead>
                   <TableHead className="min-w-[140px]">Dealership</TableHead>
                   <TableHead className="min-w-[110px]">Stand Costs</TableHead>
@@ -568,7 +538,7 @@ export default function BudgetSetting() {
                   <TableHead className="min-w-[130px] text-emerald-700">Total Dealer Cost</TableHead>
                   <TableHead className="min-w-[130px]">Factory Commission</TableHead>
                   <TableHead className="min-w-[150px]">Factory Travel Costs</TableHead>
-                  <TableHead className="min-w-[140px] text-blue-700">TOTAL Factory Costs</TableHead>
+                  <TableHead className="min-w-[140px] text-blue-700">Total Factory Costs</TableHead>
                   <TableHead className="min-w-[120px]">Last Updated</TableHead>
                   <TableHead className="min-w-[110px] text-right">Actions</TableHead>
                 </TableRow>
@@ -581,12 +551,24 @@ export default function BudgetSetting() {
                     </TableCell>
                   </TableRow>
                 ) : (
-                      filteredRows.map((row) => (
-                    <TableRow key={row.showId} className="align-middle">
+                  filteredRows.map((row, index) => (
+                    <TableRow
+                      key={row.showId}
+                      className={`${index % 2 === 0 ? 'bg-white' : 'bg-slate-50/40'} align-middle`}
+                    >
                       <TableCell>
-                        <div className="flex flex-col">
+                        <div className="flex flex-col gap-1">
                           <span className="font-semibold text-slate-900">{row.showName}</span>
-                          <span className="text-[11px] text-slate-500">ID: {row.showId}</span>
+                          <div className="flex flex-wrap gap-2 text-[11px] text-slate-500">
+                            <Badge variant="secondary" className="bg-slate-100 text-slate-700">
+                              ID: {row.showId}
+                            </Badge>
+                            {row.startDate ? (
+                              <Badge variant="outline" className="border-blue-200 text-blue-700">
+                                {new Date(row.startDate).toLocaleDateString()}
+                              </Badge>
+                            ) : null}
+                          </div>
                         </div>
                       </TableCell>
                       <TableCell className="font-medium text-slate-800">{row.dealership}</TableCell>
@@ -594,18 +576,18 @@ export default function BudgetSetting() {
                         (field) => {
                           const isEditing = editingId === row.showId;
                           return (
-                            <TableCell key={field}>
+                            <TableCell key={field} className="text-right">
                               {isEditing ? (
                                 <Input
                                   type="number"
-                                  className="h-8"
+                                  className="h-8 text-right"
                                   value={parseNumber((row as unknown as Record<string, number>)[field])}
                                   onChange={(event) =>
                                     handleFieldChange(row.showId, field, parseNumber(event.target.value))
                                   }
                                 />
                               ) : (
-                                <span className="text-slate-900">
+                                <span className="font-medium text-slate-900">
                                   {formatCurrency((row as Record<string, number>)[field])}
                                 </span>
                               )}
@@ -613,27 +595,29 @@ export default function BudgetSetting() {
                           );
                         }
                       )}
-                      <TableCell className="font-semibold text-emerald-700">{formatCurrency(row.totalDealerCost)}</TableCell>
+                      <TableCell className="text-right font-semibold text-emerald-700">
+                        {formatCurrency(row.totalDealerCost)}
+                      </TableCell>
                       {(['factoryCommission', 'factoryTravelCosts'] as Array<keyof BudgetFields>).map((field) => {
                         const isEditing = editingId === row.showId;
                         return (
-                          <TableCell key={field}>
+                          <TableCell key={field} className="text-right">
                             {isEditing ? (
                               <Input
                                 type="number"
-                                className="h-8"
+                                className="h-8 text-right"
                                 value={parseNumber((row as unknown as Record<string, number>)[field])}
                                 onChange={(event) => handleFieldChange(row.showId, field, parseNumber(event.target.value))}
                               />
                             ) : (
-                              <span className="text-slate-900">
+                              <span className="font-medium text-slate-900">
                                 {formatCurrency((row as Record<string, number>)[field])}
                               </span>
                             )}
                           </TableCell>
                         );
                       })}
-                      <TableCell className="font-semibold text-blue-700">{formatCurrency(row.totalFactoryCosts)}</TableCell>
+                      <TableCell className="text-right font-semibold text-blue-700">{formatCurrency(row.totalFactoryCosts)}</TableCell>
                       <TableCell>
                         {row.lastUpdated ? (
                           <Badge variant="outline" className="text-[11px] font-normal">
