@@ -87,14 +87,6 @@ export default function ShowBudgetExpense() {
           const dealerActual = parseNumber(budget.dealerActual);
           const factoryActual = parseNumber(budget.factoryActual);
           const chargeBack = parseNumber(budget.chargeBack);
-          const budget = budgetMap?.[show.id] ?? {};
-          const totalBudget = Number(budget.totalBudget ?? 0);
-          const dealerBudget = Number(budget.dealerBudget ?? 0);
-          const factoryBudget = Number(budget.factoryBudget ?? 0);
-          const actual = Number(budget.actual ?? 0);
-          const dealerActual = Number(budget.dealerActual ?? 0);
-          const factoryActual = Number(budget.factoryActual ?? 0);
-          const chargeBack = Number(budget.chargeBack ?? 0);
           const diff = Number.isFinite(actual - totalBudget) ? actual - totalBudget : 0;
           return {
             showId: show.id,
