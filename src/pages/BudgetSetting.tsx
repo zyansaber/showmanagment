@@ -300,11 +300,8 @@ export default function BudgetSetting() {
       'Dealer Day Rates',
       'Dealer Commission',
       'Dealer Costs Transport',
-      'Total Dealer Cost',
       'Factory Commission',
       'Factory Travel Costs',
-      'Total Factory Costs',
-      'Last Updated',
     ];
 
     const csvRows = [headers.join(',')];
@@ -318,11 +315,8 @@ export default function BudgetSetting() {
         row.dealerDayRates,
         row.dealerCommission,
         row.dealerCostsTransport,
-        row.totalDealerCost,
         row.factoryCommission,
         row.factoryTravelCosts,
-        row.totalFactoryCosts,
-        row.lastUpdated || '',
       ].map(stringifyCell);
       csvRows.push(values.join(','));
     });
