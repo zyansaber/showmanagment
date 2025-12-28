@@ -1,22 +1,23 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { Download, Loader2, RefreshCw, Save, Upload } from 'lucide-react';
+import { Download, Eraser, Loader2, RefreshCw, Save, Upload, Pencil } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { dbGet, dbUpdate } from '@/lib/firebase';
 
 type ShowRecord = {
   id: string;
   name?: string;
   dealership?: string;
+  startDate?: string;
 };
 
 type BudgetFields = {
   showId: string;
-  durationDays: number;
   standCosts: number;
   dealerDayRates: number;
   dealerCommission: number;
@@ -31,6 +32,7 @@ type BudgetFields = {
 type BudgetRow = BudgetFields & {
   showName: string;
   dealership: string;
+  startDate?: string;
 };
 
 const parseNumber = (value: unknown): number => {
@@ -43,6 +45,8 @@ const parseNumber = (value: unknown): number => {
   }
   return 0;
 };
+
+const formatCurrency = (value: number) => `$(AUD) ${parseNumber(value).toLocaleString('en-AU')}`;
 
 const computeDealerTotal = (row: Pick<BudgetFields, 'standCosts' | 'dealerDayRates' | 'dealerCommission' | 'dealerCostsTransport'>) =>
   parseNumber(row.standCosts) +
@@ -58,7 +62,6 @@ const normaliseBudget = (value: unknown, fallbackShowId?: string): BudgetFields 
     if (!fallbackShowId) return null;
     return {
       showId: fallbackShowId,
-      durationDays: 0,
       standCosts: 0,
       dealerDayRates: 0,
       dealerCommission: 0,
@@ -79,7 +82,6 @@ const normaliseBudget = (value: unknown, fallbackShowId?: string): BudgetFields 
   const dealerCostsTransport = parseNumber(raw.dealerCostsTransport ?? raw.dealerTransport);
   const factoryCommission = parseNumber(raw.factoryCommission ?? raw.factoryCommissions);
   const factoryTravelCosts = parseNumber(raw.factoryTravelCosts ?? raw.factoryTravelCost);
-  const durationDays = parseNumber(raw.durationDays ?? raw.duration ?? raw.days);
   const lastUpdated = typeof raw.lastUpdated === 'string' ? raw.lastUpdated : undefined;
 
   const totalDealerCost =
@@ -91,7 +93,6 @@ const normaliseBudget = (value: unknown, fallbackShowId?: string): BudgetFields 
 
   return {
     showId,
-    durationDays,
     standCosts,
     dealerDayRates,
     dealerCommission,
@@ -151,6 +152,9 @@ export default function BudgetSetting() {
   const [importing, setImporting] = useState(false);
   const [savingId, setSavingId] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const [filter, setFilter] = useState<'all' | 'missing'>('all');
+  const [clearingDurations, setClearingDurations] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [rows, setRows] = useState<BudgetRow[]>([]);
   const [budgetSnapshot, setBudgetSnapshot] = useState<Record<string, Record<string, unknown>>>({});
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -164,6 +168,7 @@ export default function BudgetSetting() {
           ? (Object.entries(showsData) as Array<[string, ShowRecord]>).map(([key, value]) => ({
               ...value,
               id: value.id || key,
+              startDate: value.startDate,
             }))
           : [];
 
@@ -187,7 +192,6 @@ export default function BudgetSetting() {
           const base: BudgetFields =
             budget || {
               showId: show.id,
-              durationDays: 0,
               standCosts: 0,
               dealerDayRates: 0,
               dealerCommission: 0,
@@ -203,6 +207,7 @@ export default function BudgetSetting() {
             totalFactoryCosts: computeFactoryTotal(base),
             showName: show.name || show.id,
             dealership: show.dealership || '—',
+            startDate: show.startDate,
           };
         });
 
@@ -218,11 +223,33 @@ export default function BudgetSetting() {
     loadData();
   }, []);
 
+  const sortedRows = useMemo(() => {
+    return [...rows].sort((a, b) => {
+      const aTime = a.startDate ? new Date(a.startDate).getTime() : Number.POSITIVE_INFINITY;
+      const bTime = b.startDate ? new Date(b.startDate).getTime() : Number.POSITIVE_INFINITY;
+      if (Number.isNaN(aTime) && Number.isNaN(bTime)) return (a.showName || '').localeCompare(b.showName || '');
+      if (Number.isNaN(aTime)) return 1;
+      if (Number.isNaN(bTime)) return -1;
+      return aTime - bTime;
+    });
+  }, [rows]);
+
   const filteredRows = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
-    if (!term) return rows;
-    return rows.filter((row) => `${row.showName} ${row.dealership}`.toLowerCase().includes(term));
-  }, [rows, searchTerm]);
+    const base = sortedRows.filter((row) => `${row.showName} ${row.dealership}`.toLowerCase().includes(term || ''));
+    if (filter === 'missing') {
+      return base.filter((row) => {
+        const budget = budgetSnapshot[row.showId];
+        const hasBudgetValues = budget
+          ? ['standCosts', 'dealerDayRates', 'dealerCommission', 'dealerCostsTransport', 'factoryCommission', 'factoryTravelCosts'].some(
+              (key) => parseNumber((budget as Record<string, unknown>)[key]) > 0
+            )
+          : false;
+        return !hasBudgetValues;
+      });
+    }
+    return base;
+  }, [sortedRows, searchTerm, filter, budgetSnapshot]);
 
   const summary = useMemo(
     () =>
@@ -256,7 +283,6 @@ export default function BudgetSetting() {
     const lastUpdated = new Date().toISOString();
     const payload: BudgetFields = {
       showId: row.showId,
-      durationDays: row.durationDays,
       standCosts: row.standCosts,
       dealerDayRates: row.dealerDayRates,
       dealerCommission: row.dealerCommission,
@@ -276,6 +302,7 @@ export default function BudgetSetting() {
         [row.showId]: { ...(prev[row.showId] ?? {}), ...payload },
       }));
       setRows((prev) => prev.map((r) => (r.showId === row.showId ? { ...r, lastUpdated } : r)));
+      setEditingId(null);
       toast.success(`${row.showName} budget updated.`);
     } catch (error) {
       console.error('Failed to save budget row', error);
@@ -295,7 +322,6 @@ export default function BudgetSetting() {
       'Show ID',
       'Show Name',
       'Dealership',
-      'Duration Days',
       'Stand Costs',
       'Dealer Day Rates',
       'Dealer Commission',
@@ -310,7 +336,6 @@ export default function BudgetSetting() {
         row.showId,
         row.showName,
         row.dealership,
-        row.durationDays,
         row.standCosts,
         row.dealerDayRates,
         row.dealerCommission,
@@ -344,7 +369,6 @@ export default function BudgetSetting() {
               ? record.showId.trim()
               : '';
         if (!showId) return;
-        const durationDays = parseNumber(record['Duration Days'] ?? record.durationDays);
         const standCosts = parseNumber(record['Stand Costs'] ?? record.standCosts);
         const dealerDayRates = parseNumber(record['Dealer Day Rates'] ?? record.dealerDayRates);
         const dealerCommission = parseNumber(record['Dealer Commission'] ?? record.dealerCommission);
@@ -354,7 +378,6 @@ export default function BudgetSetting() {
 
         const draft: BudgetFields = {
           showId,
-          durationDays,
           standCosts,
           dealerDayRates,
           dealerCommission,
@@ -411,6 +434,37 @@ export default function BudgetSetting() {
     }
   };
 
+  const handleClearDurations = async () => {
+    if (clearingDurations) return;
+    setClearingDurations(true);
+    try {
+      const updates: Record<string, unknown> = {};
+      Object.keys(budgetSnapshot).forEach((showId) => {
+        updates[`${showId}/durationDays`] = null;
+      });
+      if (Object.keys(updates).length === 0) {
+        toast.info('No durationDays fields found to clear.');
+        return;
+      }
+      await dbUpdate('showBudgets', updates);
+      setBudgetSnapshot((prev) => {
+        const next: Record<string, Record<string, unknown>> = {};
+        Object.entries(prev).forEach(([key, value]) => {
+          const entry = { ...value };
+          delete entry.durationDays;
+          next[key] = entry;
+        });
+        return next;
+      });
+      toast.success('All durationDays fields removed from showBudgets.');
+    } catch (error) {
+      console.error('Failed to clear durationDays', error);
+      toast.error('Unable to clear durationDays from showBudgets.');
+    } finally {
+      setClearingDurations(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-4">
@@ -425,12 +479,25 @@ export default function BudgetSetting() {
         <div className="flex flex-wrap items-center gap-2">
           <Input
             placeholder="Search show or dealership"
-            className="h-9 w-64"
+            className="h-9 w-48 sm:w-64"
             value={searchTerm}
             onChange={(event) => setSearchTerm(event.target.value)}
           />
+          <Select value={filter} onValueChange={(value) => setFilter(value as 'all' | 'missing')}>
+            <SelectTrigger className="h-9 w-44">
+              <SelectValue placeholder="Filter shows" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All shows</SelectItem>
+              <SelectItem value="missing">Missing budget</SelectItem>
+            </SelectContent>
+          </Select>
           <Button variant="outline" size="icon" onClick={() => window.location.reload()} aria-label="Refresh">
             <RefreshCw className="h-4 w-4" />
+          </Button>
+          <Button variant="outline" size="sm" onClick={handleClearDurations} disabled={clearingDurations}>
+            {clearingDurations ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Eraser className="mr-2 h-4 w-4" />}
+            {clearingDurations ? 'Clearing...' : 'Clear durationDays'}
           </Button>
         </div>
       </div>
@@ -445,13 +512,13 @@ export default function BudgetSetting() {
         <Card className="border-slate-200">
           <CardHeader className="pb-2">
             <CardDescription>Total Dealer Cost</CardDescription>
-            <CardTitle className="text-2xl text-emerald-700">{summary.dealerCost.toLocaleString()}</CardTitle>
+            <CardTitle className="text-2xl text-emerald-700">{formatCurrency(summary.dealerCost)}</CardTitle>
           </CardHeader>
         </Card>
         <Card className="border-slate-200">
           <CardHeader className="pb-2">
             <CardDescription>TOTAL Factory Costs</CardDescription>
-            <CardTitle className="text-2xl text-blue-700">{summary.factoryCost.toLocaleString()}</CardTitle>
+            <CardTitle className="text-2xl text-blue-700">{formatCurrency(summary.factoryCost)}</CardTitle>
           </CardHeader>
         </Card>
       </div>
@@ -494,7 +561,6 @@ export default function BudgetSetting() {
                 <TableRow className="bg-slate-50 text-[11px] uppercase text-slate-700">
                   <TableHead className="min-w-[180px]">Show Name</TableHead>
                   <TableHead className="min-w-[140px]">Dealership</TableHead>
-                  <TableHead className="min-w-[80px]">Duration Days</TableHead>
                   <TableHead className="min-w-[110px]">Stand Costs</TableHead>
                   <TableHead className="min-w-[130px]">Dealer Day Rates</TableHead>
                   <TableHead className="min-w-[130px]">Dealer Commission</TableHead>
@@ -510,12 +576,12 @@ export default function BudgetSetting() {
               <TableBody>
                 {filteredRows.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={13} className="py-6 text-center text-sm text-slate-500">
+                    <TableCell colSpan={12} className="py-6 text-center text-sm text-slate-500">
                       No rows found. Add a show or import a template to begin.
                     </TableCell>
                   </TableRow>
                 ) : (
-                  filteredRows.map((row) => (
+                      filteredRows.map((row) => (
                     <TableRow key={row.showId} className="align-middle">
                       <TableCell>
                         <div className="flex flex-col">
@@ -524,76 +590,50 @@ export default function BudgetSetting() {
                         </div>
                       </TableCell>
                       <TableCell className="font-medium text-slate-800">{row.dealership}</TableCell>
-                      <TableCell>
-                        <Input
-                          type="number"
-                          className="h-8"
-                          value={row.durationDays ?? 0}
-                          onChange={(event) =>
-                            handleFieldChange(row.showId, 'durationDays', parseNumber(event.target.value))
-                          }
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <Input
-                          type="number"
-                          className="h-8"
-                          value={row.standCosts ?? 0}
-                          onChange={(event) => handleFieldChange(row.showId, 'standCosts', parseNumber(event.target.value))}
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <Input
-                          type="number"
-                          className="h-8"
-                          value={row.dealerDayRates ?? 0}
-                          onChange={(event) =>
-                            handleFieldChange(row.showId, 'dealerDayRates', parseNumber(event.target.value))
-                          }
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <Input
-                          type="number"
-                          className="h-8"
-                          value={row.dealerCommission ?? 0}
-                          onChange={(event) =>
-                            handleFieldChange(row.showId, 'dealerCommission', parseNumber(event.target.value))
-                          }
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <Input
-                          type="number"
-                          className="h-8"
-                          value={row.dealerCostsTransport ?? 0}
-                          onChange={(event) =>
-                            handleFieldChange(row.showId, 'dealerCostsTransport', parseNumber(event.target.value))
-                          }
-                        />
-                      </TableCell>
-                      <TableCell className="font-semibold text-emerald-700">{row.totalDealerCost.toLocaleString()}</TableCell>
-                      <TableCell>
-                        <Input
-                          type="number"
-                          className="h-8"
-                          value={row.factoryCommission ?? 0}
-                          onChange={(event) =>
-                            handleFieldChange(row.showId, 'factoryCommission', parseNumber(event.target.value))
-                          }
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <Input
-                          type="number"
-                          className="h-8"
-                          value={row.factoryTravelCosts ?? 0}
-                          onChange={(event) =>
-                            handleFieldChange(row.showId, 'factoryTravelCosts', parseNumber(event.target.value))
-                          }
-                        />
-                      </TableCell>
-                      <TableCell className="font-semibold text-blue-700">{row.totalFactoryCosts.toLocaleString()}</TableCell>
+                      {(['standCosts', 'dealerDayRates', 'dealerCommission', 'dealerCostsTransport'] as Array<keyof BudgetFields>).map(
+                        (field) => {
+                          const isEditing = editingId === row.showId;
+                          return (
+                            <TableCell key={field}>
+                              {isEditing ? (
+                                <Input
+                                  type="number"
+                                  className="h-8"
+                                  value={parseNumber((row as unknown as Record<string, number>)[field])}
+                                  onChange={(event) =>
+                                    handleFieldChange(row.showId, field, parseNumber(event.target.value))
+                                  }
+                                />
+                              ) : (
+                                <span className="text-slate-900">
+                                  {formatCurrency((row as Record<string, number>)[field])}
+                                </span>
+                              )}
+                            </TableCell>
+                          );
+                        }
+                      )}
+                      <TableCell className="font-semibold text-emerald-700">{formatCurrency(row.totalDealerCost)}</TableCell>
+                      {(['factoryCommission', 'factoryTravelCosts'] as Array<keyof BudgetFields>).map((field) => {
+                        const isEditing = editingId === row.showId;
+                        return (
+                          <TableCell key={field}>
+                            {isEditing ? (
+                              <Input
+                                type="number"
+                                className="h-8"
+                                value={parseNumber((row as unknown as Record<string, number>)[field])}
+                                onChange={(event) => handleFieldChange(row.showId, field, parseNumber(event.target.value))}
+                              />
+                            ) : (
+                              <span className="text-slate-900">
+                                {formatCurrency((row as Record<string, number>)[field])}
+                              </span>
+                            )}
+                          </TableCell>
+                        );
+                      })}
+                      <TableCell className="font-semibold text-blue-700">{formatCurrency(row.totalFactoryCosts)}</TableCell>
                       <TableCell>
                         {row.lastUpdated ? (
                           <Badge variant="outline" className="text-[11px] font-normal">
@@ -604,14 +644,23 @@ export default function BudgetSetting() {
                         )}
                       </TableCell>
                       <TableCell className="text-right">
-                        <Button size="sm" onClick={() => persistRow(row)} disabled={savingId === row.showId}>
-                          {savingId === row.showId ? (
-                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          ) : (
-                            <Save className="mr-2 h-4 w-4" />
-                          )}
-                          {savingId === row.showId ? 'Saving...' : 'Save'}
-                        </Button>
+                        <div className="flex items-center justify-end gap-2">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => setEditingId(row.showId)}
+                            aria-label="Edit row"
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                          <Button size="icon" onClick={() => persistRow(row)} disabled={savingId === row.showId}>
+                            {savingId === row.showId ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <Save className="h-4 w-4" />
+                            )}
+                          </Button>
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))
