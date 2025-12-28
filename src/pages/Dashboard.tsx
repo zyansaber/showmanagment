@@ -25,6 +25,7 @@ export default function Dashboard() {
   const [shows, setShows] = useState<Show[]>([]);
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
   const [orders, setOrders] = useState<ShowOrder[]>([]);
+  const [budgets, setBudgets] = useState<Record<string, Record<string, unknown>>>({});
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -33,20 +34,50 @@ export default function Dashboard() {
 
   const loadData = async () => {
     try {
-      const [showsData, membersData, ordersData] = await Promise.all([
+      const [showsData, membersData, ordersData, budgetsData] = await Promise.all([
         dbGet('shows'),
         dbGet('teamMembers'),
         dbGet('showOrders'),
+        dbGet('showBudgets'),
       ]);
 
       setShows(showsData ? Object.values(showsData) : []);
       setTeamMembers(membersData ? Object.values(membersData) : []);
       setOrders(ordersData ? Object.values(ordersData) : []);
+      setBudgets(budgetsData ?? {});
     } catch (error) {
       console.error('Error loading data:', error);
     } finally {
       setLoading(false);
     }
+  };
+
+  const parseNumber = (value: unknown): number => {
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      if (!trimmed) return 0;
+      const parsed = Number(trimmed.replace(/,/g, ''));
+      return Number.isFinite(parsed) ? parsed : 0;
+    }
+    return 0;
+  };
+
+  const computeDealerBudget = (entry: Record<string, unknown>) => {
+    const total = parseNumber(entry.totalDealerCost);
+    if (total > 0) return total;
+    return (
+      parseNumber(entry.standCosts) +
+      parseNumber(entry.dealerDayRates) +
+      parseNumber(entry.dealerCommission) +
+      parseNumber(entry.dealerCostsTransport)
+    );
+  };
+
+  const computeFactoryBudget = (entry: Record<string, unknown>) => {
+    const total = parseNumber(entry.totalFactoryCosts ?? entry.totalFactoryCost);
+    if (total > 0) return total;
+    return parseNumber(entry.factoryCommission) + parseNumber(entry.factoryTravelCosts);
   };
 
   // Calculate employee statistics
@@ -273,6 +304,7 @@ export default function Dashboard() {
   const ytdPercent = target2026 > 0 ? Math.round((completedShowTarget2026 / target2026) * 100) : 0;
 
   const formatNumber = (value: number) => value.toLocaleString();
+  const formatCurrency = (value: number) => `$${value.toLocaleString('en-AU')}`;
 
   const getRingStyle = (percent: number, color: string) => {
     const safePercent = Math.min(Math.max(percent, 0), 100);
@@ -304,6 +336,88 @@ export default function Dashboard() {
     },
   ];
 
+  const timelineShows = useMemo(() => {
+    const safeDate = (value?: string) => {
+      if (!value) return null;
+      const parsed = new Date(value);
+      return Number.isNaN(parsed.getTime()) ? null : parsed;
+    };
+
+    const now = new Date();
+    const enriched = shows
+      .map((show) => ({
+        ...show,
+        start: safeDate(show.startDate),
+        finish: safeDate(show.finishDate),
+      }))
+      .filter((entry) => entry.start || entry.finish);
+
+    const ongoing = enriched
+      .filter((entry) => {
+        const start = entry.start?.getTime() ?? -Infinity;
+        const finish = entry.finish?.getTime() ?? Infinity;
+        return start <= now.getTime() && now.getTime() <= finish;
+      })
+      .sort((a, b) => (a.start?.getTime() ?? 0) - (b.start?.getTime() ?? 0));
+
+    const upcoming = enriched
+      .filter((entry) => (entry.start?.getTime() ?? Infinity) >= now.getTime())
+      .sort((a, b) => (a.start?.getTime() ?? 0) - (b.start?.getTime() ?? 0));
+
+    const completed = enriched
+      .filter((entry) => (entry.finish?.getTime() ?? entry.start?.getTime() ?? 0) < now.getTime())
+      .sort(
+        (a, b) =>
+          (b.finish?.getTime() ?? b.start?.getTime() ?? 0) - (a.finish?.getTime() ?? a.start?.getTime() ?? 0)
+      );
+
+    return {
+      currentShow: ongoing[0] || upcoming[0] || null,
+      lastShow: completed[0] || null,
+    };
+  }, [shows]);
+
+  const buildShowSnapshot = (showEntry: (Show & { start?: Date | null; finish?: Date | null }) | null) => {
+    if (!showEntry) return null;
+    const showBudget = (budgets?.[showEntry.id] as Record<string, unknown>) || {};
+    const targetSales =
+      showEntry.target2026 ||
+      showEntry.target2025 ||
+      showEntry.target2024 ||
+      parseNumber((showBudget as Record<string, unknown>).salesTarget) ||
+      0;
+    const salesActual = orders.filter((order) => order.showId === showEntry.id).length;
+
+    const dealerTarget = computeDealerBudget(showBudget);
+    const factoryTarget = computeFactoryBudget(showBudget);
+    const dealerActual = parseNumber(showBudget.dealerActual ?? dealerTarget);
+    const factoryActual = parseNumber(showBudget.factoryActual ?? factoryTarget);
+
+    const startLabel = showEntry.start
+      ? formatDate(showEntry.start, 'dd MMM yyyy')
+      : showEntry.startDate
+        ? showEntry.startDate
+        : 'TBC';
+    const endLabel = showEntry.finish ? formatDate(showEntry.finish, 'dd MMM yyyy') : showEntry.finishDate || 'TBC';
+
+    return {
+      id: showEntry.id,
+      name: showEntry.name || 'Unnamed show',
+      dealership: showEntry.dealership || '',
+      startLabel,
+      endLabel,
+      salesActual,
+      targetSales,
+      dealerActual,
+      dealerTarget,
+      factoryActual,
+      factoryTarget,
+    };
+  };
+
+  const currentShowSnapshot = useMemo(() => buildShowSnapshot(timelineShows.currentShow), [timelineShows, budgets, orders]);
+  const lastShowSnapshot = useMemo(() => buildShowSnapshot(timelineShows.lastShow), [timelineShows, budgets, orders]);
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-96">
@@ -314,6 +428,88 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6">
+      <Card className="hover:shadow-lg transition-shadow border-blue-100">
+        <CardHeader>
+          <CardTitle>Current and Last Show</CardTitle>
+          <CardDescription>Quick pulse on the most recent shows with performance versus targets.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+            {[
+              { title: 'Current / Upcoming Show', data: currentShowSnapshot, tone: 'blue' },
+              { title: 'Last Completed Show', data: lastShowSnapshot, tone: 'emerald' },
+            ].map((entry) => (
+              <Card key={entry.title} className="border-slate-200 shadow-sm">
+                <CardHeader className="pb-3">
+                  <CardTitle className="flex items-center justify-between text-base">
+                    <span>{entry.title}</span>
+                    {entry.data ? (
+                      <span
+                        className={`rounded-full px-3 py-1 text-[11px] font-semibold ${entry.tone === 'blue' ? 'bg-blue-50 text-blue-700' : 'bg-emerald-50 text-emerald-700'}`}
+                      >
+                        {entry.data.dealership || 'Show on deck'}
+                      </span>
+                    ) : null}
+                  </CardTitle>
+                  <CardDescription>
+                    {entry.data ? `${entry.data.startLabel} → ${entry.data.endLabel}` : 'No show available'}
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {entry.data ? (
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between rounded-lg border bg-slate-50 px-3 py-2">
+                        <div>
+                          <p className="text-xs uppercase tracking-wide text-slate-500">Sales</p>
+                          <p className="text-lg font-semibold text-slate-900">{formatNumber(entry.data.salesActual)}</p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-xs text-slate-500">Target</p>
+                          <p className="text-sm font-semibold text-blue-700">{formatNumber(entry.data.targetSales)}</p>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        {[
+                          {
+                            label: 'Dealer Cost',
+                            actual: entry.data.dealerActual,
+                            target: entry.data.dealerTarget,
+                            textClass: 'text-amber-700',
+                          },
+                          {
+                            label: 'Factory Cost',
+                            actual: entry.data.factoryActual,
+                            target: entry.data.factoryTarget,
+                            textClass: 'text-indigo-700',
+                          },
+                        ].map((metric) => (
+                          <div key={metric.label} className="rounded-lg border p-3 shadow-[0_1px_6px_rgba(0,0,0,0.04)]">
+                            <p className="text-xs uppercase tracking-wide text-slate-500">{metric.label}</p>
+                            <div className="flex items-end justify-between">
+                              <p className={`text-lg font-bold ${metric.textClass}`}>
+                                {formatCurrency(metric.actual)}
+                              </p>
+                              <div className="text-right text-xs text-slate-500">
+                                <p>Target</p>
+                                <p className="font-semibold text-slate-700">{formatCurrency(metric.target)}</p>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-center text-sm text-slate-500">
+                      No show data found. Add show dates to see live insights.
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+
       {/* Target Completion Gauge & Stats */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <Card className="lg:col-span-2 hover:shadow-lg transition-shadow">
