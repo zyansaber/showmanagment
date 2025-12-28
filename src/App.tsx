@@ -20,6 +20,7 @@ import {
   PenTool,
   Wallet,
   Banknote,
+  Calculator,
 } from 'lucide-react';
 import Dashboard from './pages/Dashboard';
 import ShowCalendar from './pages/ShowCalendar';
@@ -36,6 +37,7 @@ import AIHelpAssistant from './components/AIHelpAssistant';
 import Finance from './pages/Finance';
 import Login from './pages/Login';
 import AdminSettings from './pages/AdminSettings';
+import BudgetSetting from './pages/BudgetSetting';
 import ProtectedRoute from './components/ProtectedRoute';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { Navigate } from 'react-router-dom';
@@ -60,6 +62,7 @@ function Sidebar({ isOpen, setIsOpen }: { isOpen: boolean; setIsOpen: (open: boo
     { icon: Banknote, label: 'Finance', path: '/finance' },
     { icon: BarChart3, label: 'Power BI Reports', path: '/powerbi' },
     { icon: Users, label: 'Admin Settings', path: '/admin', adminOnly: true },
+    { icon: Calculator, label: 'Budget setting', path: '/budget-setting', adminOnly: true },
   ];
 
 
@@ -315,6 +318,14 @@ function AppLayout() {
               element={
                 <ProtectedRoute>
                   <Finance />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/budget-setting"
+              element={
+                <ProtectedRoute requiredRole="admin">
+                  <BudgetSetting />
                 </ProtectedRoute>
               }
             />
