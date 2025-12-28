@@ -49,20 +49,30 @@ function Sidebar({ isOpen, setIsOpen }: { isOpen: boolean; setIsOpen: (open: boo
   const location = useLocation();
   const { user, logout } = useAuth();
 
-  const menuItems = [
-    { icon: LayoutDashboard, label: 'Dashboard', path: '/' },
-    { icon: Calendar, label: 'Show Calendar', path: '/calendar' },
-    { icon: Briefcase, label: 'Show Management', path: '/shows' },
-    { icon: PenTool, label: 'Show Layout Studio', path: '/layout-studio' },
-    { icon: FileSpreadsheet, label: 'Orders & Sales', path: '/orders' },
-    { icon: ClipboardList, label: 'Process Templates', path: '/process-templates' },
-    { icon: Users, label: 'Team Management', path: '/team' },
-    { icon: FileText, label: 'Show Report', path: '/show-report' },
-    { icon: Wallet, label: 'Show Budget & Expense', path: '/budget' },
-    { icon: Banknote, label: 'Finance', path: '/finance' },
-    { icon: BarChart3, label: 'Power BI Reports', path: '/powerbi' },
-    { icon: Users, label: 'Admin Settings', path: '/admin', adminOnly: true },
-    { icon: Calculator, label: 'Budget setting', path: '/budget-setting', adminOnly: true },
+  const menuSections = [
+    {
+      title: null,
+      items: [
+        { icon: LayoutDashboard, label: 'Dashboard', path: '/' },
+        { icon: Calendar, label: 'Show Calendar', path: '/calendar' },
+        { icon: Briefcase, label: 'Show Management', path: '/shows' },
+        { icon: PenTool, label: 'Show Layout Studio', path: '/layout-studio' },
+        { icon: FileSpreadsheet, label: 'Orders & Sales', path: '/orders' },
+        { icon: ClipboardList, label: 'Process Templates', path: '/process-templates' },
+        { icon: Users, label: 'Team Management', path: '/team' },
+        { icon: FileText, label: 'Show Report', path: '/show-report' },
+        { icon: BarChart3, label: 'Power BI Reports', path: '/powerbi' },
+        { icon: Users, label: 'Admin Settings', path: '/admin', adminOnly: true },
+      ],
+    },
+    {
+      title: 'Finance',
+      items: [
+        { icon: Banknote, label: 'Finance', path: '/finance' },
+        { icon: Wallet, label: 'Finance Result', path: '/budget' },
+        { icon: Calculator, label: 'Budget setting', path: '/budget-setting', adminOnly: true },
+      ],
+    },
   ];
 
 
@@ -108,32 +118,39 @@ function Sidebar({ isOpen, setIsOpen }: { isOpen: boolean; setIsOpen: (open: boo
 
           {/* Navigation */}
           <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
-            {menuItems.map((item) => {
-              if (item.adminOnly && user?.role !== 'admin') {
-                return null;
-              }
-              const Icon = item.icon;
-              const isActive = location.pathname === item.path;
-              
-              return (
-                <Button
-                  key={item.path}
-                  variant="ghost"
-                  className={`
-                    w-full justify-start gap-3 text-white hover:bg-slate-700
-                    ${isActive ? 'bg-slate-700' : ''}
-                    ${!isOpen ? 'lg:justify-center' : ''}
-                  `}
-                  onClick={() => {
-                    navigate(item.path);
-                    if (window.innerWidth < 1024) setIsOpen(false);
-                  }}
-                >
-                  <Icon className="h-5 w-5 flex-shrink-0" />
-                  {isOpen && <span className="text-sm leading-tight break-words">{item.label}</span>}
-                </Button>
-              );
-            })}
+            {menuSections.map((section, index) => (
+              <div key={section.title ?? index} className="space-y-2">
+                {section.title && isOpen && (
+                  <p className="px-3 text-xs uppercase tracking-wide text-slate-400">{section.title}</p>
+                )}
+                {section.items.map((item) => {
+                  if (item.adminOnly && user?.role !== 'admin') {
+                    return null;
+                  }
+                  const Icon = item.icon;
+                  const isActive = location.pathname === item.path;
+
+                  return (
+                    <Button
+                      key={item.path}
+                      variant="ghost"
+                      className={`
+                        w-full justify-start gap-3 text-white hover:bg-slate-700
+                        ${isActive ? 'bg-slate-700' : ''}
+                        ${!isOpen ? 'lg:justify-center' : ''}
+                      `}
+                      onClick={() => {
+                        navigate(item.path);
+                        if (window.innerWidth < 1024) setIsOpen(false);
+                      }}
+                    >
+                      <Icon className="h-5 w-5 flex-shrink-0" />
+                      {isOpen && <span className="text-sm leading-tight break-words">{item.label}</span>}
+                    </Button>
+                  );
+                })}
+              </div>
+            ))}
           </nav>
 
           <div className="px-4 pb-4">
