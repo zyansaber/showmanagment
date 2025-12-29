@@ -435,7 +435,6 @@ export default function Finance() {
     const templateRows = [
       {
         'Show ID': 'ABC123',
-        Dealership: 'Dealership Name',
         'Internal Sales Order Number': 'ISO-12345',
         'Internal Sales Order Number (Dealer)': 'ISO-Dealer-12345',
       },
