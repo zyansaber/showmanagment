@@ -65,7 +65,7 @@ function Sidebar({ isOpen, setIsOpen }: { isOpen: boolean; setIsOpen: (open: boo
     {
       title: 'Finance',
       items: [
-        { icon: Banknote, label: 'Finance', path: '/finance' },
+        { icon: Banknote, label: 'Finance Code', path: '/finance' },
         { icon: Wallet, label: 'Finance Result', path: '/budget' },
         { icon: Calculator, label: 'Budget setting', path: '/budget-setting', adminOnly: true },
       ],
