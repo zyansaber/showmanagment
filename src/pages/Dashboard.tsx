@@ -67,7 +67,7 @@ export default function Dashboard() {
     const total = parseNumber(entry.totalDealerCost);
     if (total > 0) return total;
     return (
-      parseNumber(entry.standCosts) +
+      parseNumber(entry.standCosts) / 2 +
       parseNumber(entry.dealerDayRates) +
       parseNumber(entry.dealerCommission) +
       parseNumber(entry.dealerCostsTransport)
@@ -77,7 +77,7 @@ export default function Dashboard() {
   const computeFactoryBudget = (entry: Record<string, unknown>) => {
     const total = parseNumber(entry.totalFactoryCosts ?? entry.totalFactoryCost);
     if (total > 0) return total;
-    return parseNumber(entry.factoryCommission) + parseNumber(entry.factoryTravelCosts);
+    return parseNumber(entry.factoryCommission) + parseNumber(entry.factoryTravelCosts) + parseNumber(entry.standCosts) / 2;
   };
 
   // Calculate employee statistics
