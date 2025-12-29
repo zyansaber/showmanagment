@@ -21,10 +21,17 @@ import { dbGet } from '@/lib/firebase';
 import type { Show, ShowOrder, TeamMember } from '@/types';
 import { format as formatDate } from 'date-fns';
 
+type InternalSalesOrderRecord = {
+  showId: string;
+  internalSalesOrderNumber?: string;
+  internalSalesOrderNumberDealer?: string;
+};
+
 export default function Dashboard() {
   const [shows, setShows] = useState<Show[]>([]);
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
   const [orders, setOrders] = useState<ShowOrder[]>([]);
+  const [internalOrders, setInternalOrders] = useState<InternalSalesOrderRecord[]>([]);
   const [budgets, setBudgets] = useState<Record<string, Record<string, unknown>>>({});
   const [loading, setLoading] = useState(true);
 
@@ -34,17 +41,23 @@ export default function Dashboard() {
 
   const loadData = async () => {
     try {
-      const [showsData, membersData, ordersData, budgetsData] = await Promise.all([
+      const [showsData, membersData, ordersData, budgetsData, internalOrdersData] = await Promise.all([
         dbGet('shows'),
         dbGet('teamMembers'),
         dbGet('showOrders'),
         dbGet('showBudgets'),
+        dbGet('finance/internalSalesOrders'),
       ]);
 
       setShows(showsData ? Object.values(showsData) : []);
       setTeamMembers(membersData ? Object.values(membersData) : []);
       setOrders(ordersData ? Object.values(ordersData) : []);
       setBudgets(budgetsData ?? {});
+      setInternalOrders(
+        internalOrdersData
+          ? Object.values(internalOrdersData as Record<string, InternalSalesOrderRecord>)
+          : []
+      );
     } catch (error) {
       console.error('Error loading data:', error);
     } finally {
@@ -392,6 +405,7 @@ export default function Dashboard() {
     const factoryTarget = computeFactoryBudget(showBudget);
     const dealerActual = parseNumber(showBudget.dealerActual ?? dealerTarget);
     const factoryActual = parseNumber(showBudget.factoryActual ?? factoryTarget);
+    const internalOrder = internalOrders.find((order) => order.showId === showEntry.id);
 
     const startLabel = showEntry.start
       ? formatDate(showEntry.start, 'dd MMM yyyy')
@@ -412,11 +426,19 @@ export default function Dashboard() {
       dealerTarget,
       factoryActual,
       factoryTarget,
+      internalSalesOrderNumber: internalOrder?.internalSalesOrderNumber || '',
+      internalSalesOrderNumberDealer: internalOrder?.internalSalesOrderNumberDealer || '',
     };
   };
 
-  const currentShowSnapshot = useMemo(() => buildShowSnapshot(timelineShows.currentShow), [timelineShows, budgets, orders]);
-  const lastShowSnapshot = useMemo(() => buildShowSnapshot(timelineShows.lastShow), [timelineShows, budgets, orders]);
+  const currentShowSnapshot = useMemo(
+    () => buildShowSnapshot(timelineShows.currentShow),
+    [timelineShows, budgets, orders, internalOrders]
+  );
+  const lastShowSnapshot = useMemo(
+    () => buildShowSnapshot(timelineShows.lastShow),
+    [timelineShows, budgets, orders, internalOrders]
+  );
 
   if (loading) {
     return (
@@ -457,7 +479,28 @@ export default function Dashboard() {
                 </CardHeader>
                 <CardContent>
                   {entry.data ? (
-                    <div className="space-y-3">
+                    <div className="space-y-4">
+                      <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 shadow-sm">
+                        <p className="text-[11px] uppercase tracking-wide text-slate-500">{entry.title}</p>
+                        <p className="text-lg font-bold text-slate-900">{entry.data.name}</p>
+                        <p className="text-xs text-slate-600">
+                          {entry.data.startLabel} → {entry.data.endLabel}
+                        </p>
+                        {(entry.data.internalSalesOrderNumber || entry.data.internalSalesOrderNumberDealer) && (
+                          <div className="mt-2 flex flex-wrap gap-2 text-xs">
+                            {entry.data.internalSalesOrderNumber ? (
+                              <span className="rounded-full bg-blue-50 px-3 py-1 font-semibold text-blue-700">
+                                Internal Sales Order: {entry.data.internalSalesOrderNumber}
+                              </span>
+                            ) : null}
+                            {entry.data.internalSalesOrderNumberDealer ? (
+                              <span className="rounded-full bg-emerald-50 px-3 py-1 font-semibold text-emerald-700">
+                                Dealer Internal: {entry.data.internalSalesOrderNumberDealer}
+                              </span>
+                            ) : null}
+                          </div>
+                        )}
+                      </div>
                       <div className="flex items-center justify-between rounded-lg border bg-slate-50 px-3 py-2">
                         <div>
                           <p className="text-xs uppercase tracking-wide text-slate-500">Sales</p>
