@@ -14,6 +14,8 @@ type Show = {
   dealership?: string;
   target2025?: number;
   sales2025?: number;
+  target2026?: number;
+  sales2026?: number;
 };
 
 type BudgetRow = {
@@ -110,8 +112,8 @@ export default function ShowBudgetExpense() {
             factoryActual,
             chargeBack,
             diff,
-            showTarget: Number(budget.salesTarget ?? show.target2025 ?? 0),
-            showSales: Number(budget.sales ?? show.sales2025 ?? 0),
+            showTarget: Number(budget.salesTarget2026 ?? budget.salesTarget ?? show.target2026 ?? show.target2025 ?? 0),
+            showSales: Number(budget.sales2026 ?? budget.sales ?? show.sales2026 ?? show.sales2025 ?? 0),
             salesByShowTeam: Number(budget.salesByShowTeam ?? 0),
             salesByNetwork: Number(budget.salesByNetwork ?? 0),
             salesOffice: Number(budget.salesOffice ?? 0),
@@ -238,7 +240,7 @@ export default function ShowBudgetExpense() {
                 </Card>
                 <Card className="border-slate-200">
                   <CardContent className="pt-4">
-                    <p className="text-xs uppercase tracking-wide text-slate-500">Total Sales</p>
+                    <p className="text-xs uppercase tracking-wide text-slate-500">Total Sales 2026</p>
                     <p className="text-xl font-semibold text-slate-900">{formatNumber(aggregates.totalSales)}</p>
                   </CardContent>
                 </Card>
