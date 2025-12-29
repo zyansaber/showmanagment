@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { Banknote, Loader2, Plus, Save, Upload, XCircle } from 'lucide-react';
+import { Banknote, Loader2, Pencil, Plus, Save, Upload, XCircle } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -152,6 +152,11 @@ export default function Finance() {
     category: '',
     glCode: '',
     contains: '',
+  });
+  const [editingExpenseId, setEditingExpenseId] = useState<string | null>(null);
+  const [editingExpenseDraft, setEditingExpenseDraft] = useState<Pick<ExpenseItem, 'contains' | 'glCode'>>({
+    contains: '',
+    glCode: '',
   });
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -336,6 +341,43 @@ export default function Finance() {
 
   const handleDeleteExpense = (id: string) => {
     setExpenses((prev) => prev.filter((item) => item.id !== id));
+  };
+
+  const beginEditingExpense = (item: ExpenseItem) => {
+    setEditingExpenseId(item.id);
+    setEditingExpenseDraft({
+      contains: item.contains ?? '',
+      glCode: item.glCode,
+    });
+  };
+
+  const handleSaveExpenseDraft = (id: string) => {
+    handleExpenseChange(id, {
+      contains: editingExpenseDraft.contains,
+      glCode: editingExpenseDraft.glCode,
+    });
+    setEditingExpenseId(null);
+  };
+
+  const renderContainsTags = (value?: string) => {
+    const tags = (value ?? '')
+      .split(/[,\n]/)
+      .map((entry) => entry.trim())
+      .filter(Boolean);
+
+    if (tags.length === 0) {
+      return <span className="text-slate-500">—</span>;
+    }
+
+    return (
+      <div className="flex flex-wrap gap-1">
+        {tags.map((tag, index) => (
+          <Badge key={`${tag}-${index}`} variant="secondary" className="bg-slate-100 text-slate-800">
+            {tag}
+          </Badge>
+        ))}
+      </div>
+    );
   };
 
   const handleSaveExpenses = async () => {
@@ -655,30 +697,64 @@ export default function Finance() {
                             <TableRow key={item.id}>
                               <TableCell className="align-middle font-medium text-slate-900">{item.category}</TableCell>
                               <TableCell className="align-middle">
-                                <Input
-                                  value={item.contains || ''}
-                                  onChange={(event) => handleExpenseChange(item.id, { contains: event.target.value })}
-                                  placeholder="Describe contents"
-                                  className="h-9"
-                                />
+                                {editingExpenseId === item.id ? (
+                                  <Input
+                                    value={editingExpenseDraft.contains}
+                                    onChange={(event) =>
+                                      setEditingExpenseDraft((prev) => ({ ...prev, contains: event.target.value }))
+                                    }
+                                    placeholder="Describe contents"
+                                    className="h-9"
+                                  />
+                                ) : (
+                                  renderContainsTags(item.contains)
+                                )}
                               </TableCell>
                               <TableCell className="align-middle">
-                                <Input
-                                  value={item.glCode}
-                                  onChange={(event) => handleExpenseChange(item.id, { glCode: event.target.value })}
-                                  placeholder="GL code"
-                                  className="h-9"
-                                />
+                                {editingExpenseId === item.id ? (
+                                  <Input
+                                    value={editingExpenseDraft.glCode}
+                                    onChange={(event) =>
+                                      setEditingExpenseDraft((prev) => ({ ...prev, glCode: event.target.value }))
+                                    }
+                                    placeholder="GL code"
+                                    className="h-9"
+                                  />
+                                ) : (
+                                  <span className="font-semibold text-slate-900">{item.glCode || '—'}</span>
+                                )}
                               </TableCell>
                               <TableCell className="text-right align-middle">
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="text-red-500 hover:text-red-600"
-                                  onClick={() => handleDeleteExpense(item.id)}
-                                >
-                                  <XCircle className="h-4 w-4" />
-                                </Button>
+                                <div className="flex items-center justify-end gap-1">
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="text-slate-700 hover:text-slate-900"
+                                    onClick={() => beginEditingExpense(item)}
+                                    aria-label="Edit GL account"
+                                  >
+                                    <Pencil className="h-4 w-4" />
+                                  </Button>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="text-emerald-600 hover:text-emerald-700"
+                                    onClick={() => handleSaveExpenseDraft(item.id)}
+                                    disabled={editingExpenseId !== item.id}
+                                    aria-label="Save GL account"
+                                  >
+                                    <Save className="h-4 w-4" />
+                                  </Button>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="text-red-500 hover:text-red-600"
+                                    onClick={() => handleDeleteExpense(item.id)}
+                                    aria-label="Delete GL account"
+                                  >
+                                    <XCircle className="h-4 w-4" />
+                                  </Button>
+                                </div>
                               </TableCell>
                             </TableRow>
                           ))
