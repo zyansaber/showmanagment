@@ -742,17 +742,17 @@ export default function Dashboard() {
                   <ResponsiveContainer width="100%" height={350}>
                     <BarChart data={salespersonStats}>
                       <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="name" interval={0} angle={-30} textAnchor="end" height={70} />
+                      <XAxis dataKey="name" interval={0} angle={-30} textAnchor="end" height={70} />
                       <YAxis />
                       <Tooltip />
                       <Bar dataKey="avgDaily" fill="#10b981" name="Avg Daily Sales" />
-                  </BarChart>
-                </ResponsiveContainer>
-              ) : (
-                <div className="text-center py-8 text-gray-500">No show data available</div>
-              )}
-            </CardContent>
-          </Card>
+                    </BarChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="text-center py-8 text-gray-500">No show data available</div>
+                )}
+              </CardContent>
+            </Card>
 
           <Card>
             <CardHeader>
@@ -843,14 +843,15 @@ export default function Dashboard() {
                   </div>
                   <div className="flex justify-between items-center p-3 border rounded-lg">
                     <span className="text-sm font-medium">Total Registered</span>
-                      <span className="text-lg font-bold text-gray-900">{totalShows}</span>
+                    <span className="text-lg font-bold text-gray-900">{totalShows}</span>
                   </div>
                 </div>
               </CardContent>
             </Card>
           </div>
+        </div>
         </TabsContent>
-
+        
         {/* Vehicle Distribution Tab */}
         <TabsContent value="caravans" className="space-y-6">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
