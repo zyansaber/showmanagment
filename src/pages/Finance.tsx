@@ -680,8 +680,8 @@ export default function Finance() {
                       <TableHeader>
                         <TableRow>
                           <TableHead className="w-32">Subcategory</TableHead>
-                          <TableHead className="w-48">Contains</TableHead>
-                          <TableHead className="w-32">GL Code</TableHead>
+                          <TableHead className="w-64">Contains</TableHead>
+                          <TableHead className="w-24">GL Code</TableHead>
                           <TableHead className="w-16 text-right">Actions</TableHead>
                         </TableRow>
                       </TableHeader>
