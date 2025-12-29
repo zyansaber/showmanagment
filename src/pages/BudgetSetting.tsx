@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { Download, Loader2, RefreshCw, Save, Upload, Pencil } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -157,6 +157,9 @@ export default function BudgetSetting() {
   const [rows, setRows] = useState<BudgetRow[]>([]);
   const [budgetSnapshot, setBudgetSnapshot] = useState<Record<string, Record<string, unknown>>>({});
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const tableViewportRef = useRef<HTMLDivElement | null>(null);
+  const tableContentRef = useRef<HTMLDivElement | null>(null);
+  const [tableScale, setTableScale] = useState(1);
 
   useEffect(() => {
     const loadData = async () => {
@@ -277,6 +280,18 @@ export default function BudgetSetting() {
       })
     );
   };
+
+  const recalcTableScale = useCallback(() => {
+    const viewportWidth = tableViewportRef.current?.clientWidth ?? 0;
+    const tableWidth = tableContentRef.current?.scrollWidth ?? 0;
+    if (!viewportWidth || !tableWidth) {
+      setTableScale(1);
+      return;
+    }
+
+    const nextScale = Math.min(1, viewportWidth / tableWidth);
+    setTableScale(Number(nextScale.toFixed(3)));
+  }, []);
 
   const persistRow = async (row: BudgetRow) => {
     const lastUpdated = new Date().toISOString();
@@ -433,6 +448,29 @@ export default function BudgetSetting() {
     }
   };
 
+  useEffect(() => {
+    recalcTableScale();
+  }, [filteredRows, recalcTableScale]);
+
+  useEffect(() => {
+    const handleResize = () => recalcTableScale();
+    window.addEventListener('resize', handleResize);
+
+    let observer: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== 'undefined') {
+      observer = new ResizeObserver(() => recalcTableScale());
+      if (tableViewportRef.current) observer.observe(tableViewportRef.current);
+      if (tableContentRef.current) observer.observe(tableContentRef.current);
+    } else {
+      handleResize();
+    }
+
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      observer?.disconnect();
+    };
+  }, [recalcTableScale]);
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-4">
@@ -514,162 +552,173 @@ export default function BudgetSetting() {
             </Button>
           </div>
         </CardHeader>
-        <CardContent className="overflow-x-auto">
+        <CardContent className="overflow-hidden">
           {loading ? (
             <div className="flex items-center gap-2 py-4 text-slate-600">
               <Loader2 className="h-4 w-4 animate-spin" /> Loading budgets...
             </div>
           ) : (
-            <Table className="text-xs">
-              <TableHeader>
-                <TableRow className="bg-slate-50 text-[11px] uppercase text-slate-700">
-                  <TableHead colSpan={2} className="border-r bg-white text-left text-slate-600">Show details</TableHead>
-                  <TableHead colSpan={5} className="border-r text-left text-emerald-700">Dealer costs (includes 50% stand costs)</TableHead>
-                  <TableHead colSpan={4} className="border-r text-left text-blue-700">Factory costs (includes 50% stand costs)</TableHead>
-                  <TableHead colSpan={2} className="text-left text-slate-600">Status</TableHead>
-                </TableRow>
-                <TableRow className="bg-slate-50/70 text-[11px] uppercase tracking-wide text-slate-600">
-                  <TableHead className="min-w-[180px]">Show Name</TableHead>
-                  <TableHead className="min-w-[140px]">Dealership</TableHead>
-                  <TableHead className="min-w-[140px]">Stand Costs (Dealer 50%)</TableHead>
-                  <TableHead className="min-w-[130px]">Dealer Day Rates</TableHead>
-                  <TableHead className="min-w-[130px]">Dealer Commission</TableHead>
-                  <TableHead className="min-w-[150px]">Dealer Costs Transport</TableHead>
-                  <TableHead className="min-w-[130px] text-emerald-700">Total Dealer Cost</TableHead>
-                  <TableHead className="min-w-[140px]">Stand Costs (Factory 50%)</TableHead>
-                  <TableHead className="min-w-[130px]">Factory Commission</TableHead>
-                  <TableHead className="min-w-[150px]">Factory Travel Costs</TableHead>
-                  <TableHead className="min-w-[140px] text-blue-700">Total Factory Costs</TableHead>
-                  <TableHead className="min-w-[120px]">Last Updated</TableHead>
-                  <TableHead className="min-w-[110px] text-right">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filteredRows.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={13} className="py-6 text-center text-sm text-slate-500">
-                      No rows found. Add a show or import a template to begin.
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  filteredRows.map((row, index) => (
-                    <TableRow
-                      key={row.showId}
-                      className={`${index % 2 === 0 ? 'bg-white' : 'bg-slate-50/40'} align-middle`}
-                    >
-                      <TableCell>
-                        <div className="flex flex-col gap-1">
-                          <span className="font-semibold text-slate-900">{row.showName}</span>
-                          <div className="flex flex-wrap gap-2 text-[11px] text-slate-500">
-                            <Badge variant="secondary" className="bg-slate-100 text-slate-700">
-                              ID: {row.showId}
-                            </Badge>
-                            {row.startDate ? (
-                              <Badge variant="outline" className="border-blue-200 text-blue-700">
-                                {new Date(row.startDate).toLocaleDateString('en-GB')}
-                              </Badge>
-                            ) : null}
-                          </div>
-                        </div>
-                      </TableCell>
-                      <TableCell className="font-medium text-slate-800">{row.dealership}</TableCell>
-                      {(['standCosts', 'dealerDayRates', 'dealerCommission', 'dealerCostsTransport'] as Array<keyof BudgetFields>).map(
-                        (field) => {
-                          const isEditing = editingId === row.showId;
-                          const isStandCost = field === 'standCosts';
-                          const displayValue = isStandCost
-                            ? parseNumber((row as unknown as Record<string, number>)[field]) / 2
-                            : parseNumber((row as unknown as Record<string, number>)[field]);
-                          return (
-                            <TableCell key={field} className="text-right">
-                              {isEditing && isStandCost ? (
-                                <Input
-                                  type="number"
-                                  className="h-8 text-right"
-                                  value={parseNumber((row as unknown as Record<string, number>)[field])}
-                                  onChange={(event) =>
-                                    handleFieldChange(row.showId, field, parseNumber(event.target.value))
-                                  }
-                                  aria-label="Total stand costs (will be split 50/50)"
-                                />
-                              ) : (
-                                <div className="flex flex-col items-end gap-1">
-                                  <span className="font-medium text-slate-900">{formatCurrency(displayValue)}</span>
-                                  {isStandCost ? (
-                                    <span className="text-[10px] text-slate-500">
-                                      of total {formatCurrency(parseNumber((row as unknown as Record<string, number>)[field]))}
-                                    </span>
-                                  ) : null}
-                                </div>
-                              )}
-                            </TableCell>
-                          );
-                        }
-                      )}
-                      <TableCell className="text-right font-semibold text-emerald-700">
-                        {formatCurrency(row.totalDealerCost)}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex flex-col items-end gap-1">
-                          <span className="font-medium text-slate-900">
-                            {formatCurrency(parseNumber((row as unknown as Record<string, number>).standCosts) / 2)}
-                          </span>
-                          <span className="text-[10px] text-slate-500">Stand costs (50%)</span>
-                        </div>
-                      </TableCell>
-                      {(['factoryCommission', 'factoryTravelCosts'] as Array<keyof BudgetFields>).map((field) => {
-                        const isEditing = editingId === row.showId;
-                        return (
-                          <TableCell key={field} className="text-right">
-                            {isEditing ? (
-                              <Input
-                                type="number"
-                                className="h-8 text-right"
-                                value={parseNumber((row as unknown as Record<string, number>)[field])}
-                                onChange={(event) => handleFieldChange(row.showId, field, parseNumber(event.target.value))}
-                              />
-                            ) : (
+            <div ref={tableViewportRef} className="w-full overflow-x-auto">
+              <div
+                ref={tableContentRef}
+                className="inline-block origin-top-left"
+                style={{
+                  transform: `scale(${tableScale})`,
+                  transformOrigin: 'top left',
+                }}
+              >
+                <Table className="text-xs min-w-[1200px]">
+                  <TableHeader>
+                    <TableRow className="bg-slate-50 text-[11px] uppercase text-slate-700">
+                      <TableHead colSpan={2} className="border-r bg-white text-left text-slate-600">Show details</TableHead>
+                      <TableHead colSpan={5} className="border-r text-left text-emerald-700">Dealer costs (includes 50% stand costs)</TableHead>
+                      <TableHead colSpan={4} className="border-r text-left text-blue-700">Factory costs (includes 50% stand costs)</TableHead>
+                      <TableHead colSpan={2} className="text-left text-slate-600">Status</TableHead>
+                    </TableRow>
+                    <TableRow className="bg-slate-50/70 text-[11px] uppercase tracking-wide text-slate-600">
+                      <TableHead className="min-w-[180px]">Show Name</TableHead>
+                      <TableHead className="min-w-[140px]">Dealership</TableHead>
+                      <TableHead className="min-w-[140px]">Stand Costs (Dealer 50%)</TableHead>
+                      <TableHead className="min-w-[130px]">Dealer Day Rates</TableHead>
+                      <TableHead className="min-w-[130px]">Dealer Commission</TableHead>
+                      <TableHead className="min-w-[150px]">Dealer Costs Transport</TableHead>
+                      <TableHead className="min-w-[130px] text-emerald-700">Total Dealer Cost</TableHead>
+                      <TableHead className="min-w-[140px]">Stand Costs (Factory 50%)</TableHead>
+                      <TableHead className="min-w-[130px]">Factory Commission</TableHead>
+                      <TableHead className="min-w-[150px]">Factory Travel Costs</TableHead>
+                      <TableHead className="min-w-[140px] text-blue-700">Total Factory Costs</TableHead>
+                      <TableHead className="min-w-[120px]">Last Updated</TableHead>
+                      <TableHead className="min-w-[110px] text-right">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {filteredRows.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={13} className="py-6 text-center text-sm text-slate-500">
+                          No rows found. Add a show or import a template to begin.
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      filteredRows.map((row, index) => (
+                        <TableRow
+                          key={row.showId}
+                          className={`${index % 2 === 0 ? 'bg-white' : 'bg-slate-50/40'} align-middle`}
+                        >
+                          <TableCell>
+                            <div className="flex flex-col gap-1">
+                              <span className="font-semibold text-slate-900">{row.showName}</span>
+                              <div className="flex flex-wrap gap-2 text-[11px] text-slate-500">
+                                <Badge variant="secondary" className="bg-slate-100 text-slate-700">
+                                  ID: {row.showId}
+                                </Badge>
+                                {row.startDate ? (
+                                  <Badge variant="outline" className="border-blue-200 text-blue-700">
+                                    {new Date(row.startDate).toLocaleDateString('en-GB')}
+                                  </Badge>
+                                ) : null}
+                              </div>
+                            </div>
+                          </TableCell>
+                          <TableCell className="font-medium text-slate-800">{row.dealership}</TableCell>
+                          {(['standCosts', 'dealerDayRates', 'dealerCommission', 'dealerCostsTransport'] as Array<keyof BudgetFields>).map(
+                            (field) => {
+                              const isEditing = editingId === row.showId;
+                              const isStandCost = field === 'standCosts';
+                              const displayValue = isStandCost
+                                ? parseNumber((row as unknown as Record<string, number>)[field]) / 2
+                                : parseNumber((row as unknown as Record<string, number>)[field]);
+                              return (
+                                <TableCell key={field} className="text-right">
+                                  {isEditing && isStandCost ? (
+                                    <Input
+                                      type="number"
+                                      className="h-8 text-right"
+                                      value={parseNumber((row as unknown as Record<string, number>)[field])}
+                                      onChange={(event) =>
+                                        handleFieldChange(row.showId, field, parseNumber(event.target.value))
+                                      }
+                                      aria-label="Total stand costs (will be split 50/50)"
+                                    />
+                                  ) : (
+                                    <div className="flex flex-col items-end gap-1">
+                                      <span className="font-medium text-slate-900">{formatCurrency(displayValue)}</span>
+                                      {isStandCost ? (
+                                        <span className="text-[10px] text-slate-500">
+                                          of total {formatCurrency(parseNumber((row as unknown as Record<string, number>)[field]))}
+                                        </span>
+                                      ) : null}
+                                    </div>
+                                  )}
+                                </TableCell>
+                              );
+                            }
+                          )}
+                          <TableCell className="text-right font-semibold text-emerald-700">
+                            {formatCurrency(row.totalDealerCost)}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <div className="flex flex-col items-end gap-1">
                               <span className="font-medium text-slate-900">
-                                {formatCurrency((row as Record<string, number>)[field])}
+                                {formatCurrency(parseNumber((row as unknown as Record<string, number>).standCosts) / 2)}
                               </span>
+                              <span className="text-[10px] text-slate-500">Stand costs (50%)</span>
+                            </div>
+                          </TableCell>
+                          {(['factoryCommission', 'factoryTravelCosts'] as Array<keyof BudgetFields>).map((field) => {
+                            const isEditing = editingId === row.showId;
+                            return (
+                              <TableCell key={field} className="text-right">
+                                {isEditing ? (
+                                  <Input
+                                    type="number"
+                                    className="h-8 text-right"
+                                    value={parseNumber((row as unknown as Record<string, number>)[field])}
+                                    onChange={(event) => handleFieldChange(row.showId, field, parseNumber(event.target.value))}
+                                  />
+                                ) : (
+                                  <span className="font-medium text-slate-900">
+                                    {formatCurrency((row as Record<string, number>)[field])}
+                                  </span>
+                                )}
+                              </TableCell>
+                            );
+                          })}
+                          <TableCell className="text-right font-semibold text-blue-700">{formatCurrency(row.totalFactoryCosts)}</TableCell>
+                          <TableCell>
+                            {row.lastUpdated ? (
+                              <Badge variant="outline" className="text-[11px] font-normal">
+                                {new Date(row.lastUpdated).toLocaleDateString('en-GB')}
+                              </Badge>
+                            ) : (
+                              <span className="text-[11px] text-slate-500">Not saved yet</span>
                             )}
                           </TableCell>
-                        );
-                      })}
-                      <TableCell className="text-right font-semibold text-blue-700">{formatCurrency(row.totalFactoryCosts)}</TableCell>
-                      <TableCell>
-                        {row.lastUpdated ? (
-                          <Badge variant="outline" className="text-[11px] font-normal">
-                            {new Date(row.lastUpdated).toLocaleDateString('en-GB')}
-                          </Badge>
-                        ) : (
-                          <span className="text-[11px] text-slate-500">Not saved yet</span>
-                        )}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex items-center justify-end gap-2">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => setEditingId(row.showId)}
-                            aria-label="Edit row"
-                          >
-                            <Pencil className="h-4 w-4" />
-                          </Button>
-                          <Button size="icon" onClick={() => persistRow(row)} disabled={savingId === row.showId}>
-                            {savingId === row.showId ? (
-                              <Loader2 className="h-4 w-4 animate-spin" />
-                            ) : (
-                              <Save className="h-4 w-4" />
-                            )}
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
+                          <TableCell className="text-right">
+                            <div className="flex items-center justify-end gap-2">
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => setEditingId(row.showId)}
+                                aria-label="Edit row"
+                              >
+                                <Pencil className="h-4 w-4" />
+                              </Button>
+                              <Button size="icon" onClick={() => persistRow(row)} disabled={savingId === row.showId}>
+                                {savingId === row.showId ? (
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                ) : (
+                                  <Save className="h-4 w-4" />
+                                )}
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+            </div>
           )}
         </CardContent>
       </Card>
