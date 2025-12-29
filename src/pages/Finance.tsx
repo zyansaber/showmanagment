@@ -276,6 +276,7 @@ export default function Finance() {
             for (const key of keys) {
               const candidate = normalisedRow[key];
               if (typeof candidate === 'string' && candidate.trim()) return candidate.trim();
+              if (typeof candidate === 'number' && !Number.isNaN(candidate)) return String(candidate);
             }
             return '';
           };
@@ -292,6 +293,8 @@ export default function Finance() {
             'internalsalesordernumberdealer',
             'internaldealer',
             'internalorderdealer',
+            'dealer',
+            'dealerinternal',
           ]);
           return {
             id: newId(),
