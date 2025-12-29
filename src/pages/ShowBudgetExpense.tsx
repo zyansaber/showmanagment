@@ -50,13 +50,13 @@ const parseNumber = (value: unknown): number => {
 };
 
 const computeDealerTotal = (draft: Record<string, unknown>) =>
-  parseNumber(draft.standCosts) +
+  parseNumber(draft.standCosts) / 2 +
   parseNumber(draft.dealerDayRates) +
   parseNumber(draft.dealerCommission) +
   parseNumber(draft.dealerCostsTransport);
 
 const computeFactoryTotal = (draft: Record<string, unknown>) =>
-  parseNumber(draft.factoryCommission) + parseNumber(draft.factoryTravelCosts);
+  parseNumber(draft.factoryCommission) + parseNumber(draft.factoryTravelCosts) + parseNumber(draft.standCosts) / 2;
 
 const formatNumber = (value: number) =>
   Number.isFinite(value) ? value.toLocaleString('en-AU', { maximumFractionDigits: 0 }) : '0';
