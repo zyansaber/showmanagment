@@ -7,10 +7,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { dbGet, dbSet } from '@/lib/firebase';
-
-type ExpenseCategory = 'Dealer Cost' | 'Factory Cost' | 'Factory Commissions';
 
 type ShowRecord = {
   id?: string;
@@ -29,20 +26,10 @@ type InternalSalesOrder = {
 
 type ExpenseItem = {
   id: string;
-  category: ExpenseCategory;
-  name: string;
+  category: string;
   glCode: string;
   contains?: string;
 };
-
-const DEFAULT_EXPENSE_ITEMS: ExpenseItem[] = [
-  { id: 'dealer-stand-cost', category: 'Dealer Cost', name: 'Stand Cost', glCode: '', contains: '' },
-  { id: 'dealer-day-rates', category: 'Dealer Cost', name: 'Dealer Day Rates', glCode: '', contains: '' },
-  { id: 'dealer-commission', category: 'Dealer Cost', name: 'Dealer Commission', glCode: '', contains: '' },
-  { id: 'dealer-transport', category: 'Dealer Cost', name: 'Dealer Costs Transport', glCode: '', contains: '' },
-  { id: 'factory-cost', category: 'Factory Cost', name: 'Factory Cost', glCode: '', contains: '' },
-  { id: 'factory-commissions', category: 'Factory Commissions', name: 'Factory Commissions', glCode: '', contains: '' },
-];
 
 const newId = () =>
   typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `finance-${Date.now()}-${Math.random()}`;
@@ -92,14 +79,16 @@ const normaliseExpenseItems = (value: unknown): ExpenseItem[] => {
         typeof raw.id === 'string' && raw.id.trim().length > 0
           ? raw.id.trim()
           : `expense-${Math.random().toString(16).slice(2)}`;
-      const category =
-        raw.category === 'Dealer Cost' || raw.category === 'Factory Cost' || raw.category === 'Factory Commissions'
-          ? raw.category
-          : 'Dealer Cost';
-      const name = typeof raw.name === 'string' && raw.name.trim().length > 0 ? raw.name.trim() : 'Unnamed Item';
+      const categoryCandidate =
+        typeof raw.category === 'string' && raw.category.trim().length > 0
+          ? raw.category.trim()
+          : typeof raw.name === 'string' && raw.name.trim().length > 0
+            ? raw.name.trim()
+            : '';
+      const category = categoryCandidate || 'Uncategorised';
       const glCode = typeof raw.glCode === 'string' ? raw.glCode.trim() : '';
       const contains = typeof raw.contains === 'string' ? raw.contains.trim() : '';
-      return { id, category, name, glCode, contains };
+      return { id, category, glCode, contains };
     })
     .filter(Boolean) as ExpenseItem[];
 };
@@ -153,15 +142,14 @@ export default function Finance() {
   const [loading, setLoading] = useState(true);
   const [shows, setShows] = useState<ShowRecord[]>([]);
   const [internalOrders, setInternalOrders] = useState<InternalSalesOrder[]>([]);
-  const [expenses, setExpenses] = useState<ExpenseItem[]>(DEFAULT_EXPENSE_ITEMS);
+  const [expenses, setExpenses] = useState<ExpenseItem[]>([]);
   const [savingOrders, setSavingOrders] = useState(false);
   const [savingExpenses, setSavingExpenses] = useState(false);
   const [importing, setImporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeTable, setActiveTable] = useState<'orders' | 'expenses'>('orders');
-  const [newExpense, setNewExpense] = useState<Pick<ExpenseItem, 'category' | 'name' | 'glCode' | 'contains'>>({
-    category: 'Dealer Cost',
-    name: '',
+  const [newExpense, setNewExpense] = useState<Pick<ExpenseItem, 'category' | 'glCode' | 'contains'>>({
+    category: '',
     glCode: '',
     contains: '',
   });
@@ -188,7 +176,7 @@ export default function Finance() {
         setInternalOrders(normaliseInternalOrders(ordersData));
 
         const expenseList = normaliseExpenseItems(expensesData);
-        setExpenses(expenseList.length > 0 ? expenseList : DEFAULT_EXPENSE_ITEMS);
+        setExpenses(expenseList);
 
         setError(null);
       } catch (err) {
@@ -334,12 +322,12 @@ export default function Finance() {
   };
 
   const handleAddExpenseItem = () => {
-    if (!newExpense.name.trim()) {
-      toast.error('Please enter a subcategory name.');
+    if (!newExpense.category.trim()) {
+      toast.error('Please enter a category.');
       return;
     }
     setExpenses((prev) => [...prev, { ...newExpense, id: newId() }]);
-    setNewExpense({ category: 'Dealer Cost', name: '', glCode: '', contains: '' });
+    setNewExpense({ category: '', glCode: '', contains: '' });
   };
 
   const handleExpenseChange = (id: string, updates: Partial<ExpenseItem>) => {
@@ -363,14 +351,71 @@ export default function Finance() {
     }
   };
 
-  const groupedExpenses = useMemo(
-    () =>
-      ['Dealer Cost', 'Factory Cost', 'Factory Commissions'].map((category) => ({
-        category: category as ExpenseCategory,
-        items: expenses.filter((item) => item.category === category),
-      })),
-    [expenses]
-  );
+  const exportSpreadsheet = async (rows: Record<string, unknown>[], fileName: string) => {
+    try {
+      const xlsx = await loadXlsxModule();
+      if (xlsx) {
+        const worksheet = xlsx.utils.json_to_sheet(rows);
+        const workbook = xlsx.utils.book_new();
+        xlsx.utils.book_append_sheet(workbook, worksheet, 'Sheet1');
+        const arrayBuffer = xlsx.write(workbook, { bookType: 'xlsx', type: 'array' });
+        const blob = new Blob([arrayBuffer], {
+          type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = fileName;
+        link.click();
+        URL.revokeObjectURL(url);
+        return;
+      }
+
+      const headers = Object.keys(rows[0] ?? {});
+      const csvLines = [headers.join(',')];
+      rows.forEach((row) => {
+        csvLines.push(headers.map((header) => (row[header] ?? '').toString().replace(/,/g, '')).join(','));
+      });
+      const blob = new Blob([csvLines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = fileName.replace(/\.xlsx$/, '.csv');
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Failed to export spreadsheet', err);
+      toast.error('Failed to export spreadsheet.');
+    }
+  };
+
+  const handleDownloadTemplate = async () => {
+    const templateRows = [
+      {
+        'Show ID': 'ABC123',
+        Dealership: 'Dealership Name',
+        'Internal Sales Order Number': 'ISO-12345',
+        'Internal Sales Order Number (Dealer)': 'ISO-Dealer-12345',
+      },
+    ];
+    await exportSpreadsheet(templateRows, 'internal-sales-order-template.xlsx');
+  };
+
+  const handleDownloadOrders = async () => {
+    if (internalOrders.length === 0) {
+      toast.error('No data available to download.');
+      return;
+    }
+
+    const rows = internalOrders.map((order) => ({
+      'Show ID': order.showId,
+      Dealership: order.dealership,
+      'Internal Sales Order Number': order.internalSalesOrderNumber,
+      'Internal Sales Order Number (Dealer)': order.internalSalesOrderNumberDealer,
+    }));
+
+    await exportSpreadsheet(rows, 'internal-sales-orders.xlsx');
+  };
 
   return (
     <div className="space-y-6">
@@ -428,6 +473,12 @@ export default function Finance() {
                   if (file) handleImportOrders(file);
                 }}
               />
+              <Button variant="outline" size="sm" onClick={handleDownloadTemplate}>
+                Download Template
+              </Button>
+              <Button variant="outline" size="sm" onClick={handleDownloadOrders} disabled={importing}>
+                Download Data
+              </Button>
               <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()} disabled={importing}>
                 {importing ? (
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -537,27 +588,11 @@ export default function Finance() {
             <>
               <div className="grid gap-4 md:grid-cols-4">
                 <div className="space-y-2">
-                  <Label>Category</Label>
-                  <Select
-                    value={newExpense.category}
-                    onValueChange={(value) => setNewExpense((prev) => ({ ...prev, category: value as ExpenseCategory }))}
-                  >
-                    <SelectTrigger className="h-9">
-                      <SelectValue placeholder="Select category" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="Dealer Cost">Dealer Cost</SelectItem>
-                      <SelectItem value="Factory Cost">Factory Cost</SelectItem>
-                      <SelectItem value="Factory Commissions">Factory Commissions</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
                   <Label>Subcategory</Label>
                   <Input
-                    value={newExpense.name}
-                    onChange={(event) => setNewExpense((prev) => ({ ...prev, name: event.target.value }))}
-                    placeholder="e.g. Stand Cost"
+                    value={newExpense.category}
+                    onChange={(event) => setNewExpense((prev) => ({ ...prev, category: event.target.value }))}
+                    placeholder="e.g. Freight"
                     className="h-9"
                   />
                 </div>
@@ -588,72 +623,70 @@ export default function Finance() {
               </div>
 
               <div className="space-y-4">
-                {groupedExpenses.map(({ category, items }) => (
-                  <Card key={category} className="border-slate-200">
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0">
-                      <div>
-                        <CardTitle className="text-base">{category}</CardTitle>
-                        <CardDescription>Update GL codes or extend the list with new subcategories.</CardDescription>
-                      </div>
-                      <Badge variant="outline" className="text-slate-700">
-                        {items.length} item{items.length === 1 ? '' : 's'}
-                      </Badge>
-                    </CardHeader>
-                    <CardContent className="overflow-x-auto">
-                      <Table className="text-xs">
-                        <TableHeader>
+                <Card className="border-slate-200">
+                  <CardHeader className="flex flex-row items-center justify-between space-y-0">
+                    <div>
+                      <CardTitle className="text-base">GL Accounts</CardTitle>
+                      <CardDescription>Update GL codes or extend the list with new subcategories.</CardDescription>
+                    </div>
+                    <Badge variant="outline" className="text-slate-700">
+                      {expenses.length} item{expenses.length === 1 ? '' : 's'}
+                    </Badge>
+                  </CardHeader>
+                  <CardContent className="overflow-x-auto">
+                    <Table className="text-xs">
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead className="w-32">Subcategory</TableHead>
+                          <TableHead className="w-48">Contains</TableHead>
+                          <TableHead className="w-32">GL Code</TableHead>
+                          <TableHead className="w-16 text-right">Actions</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {expenses.length === 0 ? (
                           <TableRow>
-                            <TableHead className="w-32">Subcategory</TableHead>
-                            <TableHead className="w-48">Contains</TableHead>
-                            <TableHead className="w-32">GL Code</TableHead>
-                            <TableHead className="w-16 text-right">Actions</TableHead>
+                            <TableCell colSpan={4} className="text-center text-sm text-slate-500">
+                              No GL accounts yet. Add a subcategory above.
+                            </TableCell>
                           </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {items.length === 0 ? (
-                            <TableRow>
-                              <TableCell colSpan={4} className="text-center text-sm text-slate-500">
-                                No entries yet for {category}. Add a subcategory above.
+                        ) : (
+                          expenses.map((item) => (
+                            <TableRow key={item.id}>
+                              <TableCell className="align-middle font-medium text-slate-900">{item.category}</TableCell>
+                              <TableCell className="align-middle">
+                                <Input
+                                  value={item.contains || ''}
+                                  onChange={(event) => handleExpenseChange(item.id, { contains: event.target.value })}
+                                  placeholder="Describe contents"
+                                  className="h-9"
+                                />
+                              </TableCell>
+                              <TableCell className="align-middle">
+                                <Input
+                                  value={item.glCode}
+                                  onChange={(event) => handleExpenseChange(item.id, { glCode: event.target.value })}
+                                  placeholder="GL code"
+                                  className="h-9"
+                                />
+                              </TableCell>
+                              <TableCell className="text-right align-middle">
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="text-red-500 hover:text-red-600"
+                                  onClick={() => handleDeleteExpense(item.id)}
+                                >
+                                  <XCircle className="h-4 w-4" />
+                                </Button>
                               </TableCell>
                             </TableRow>
-                          ) : (
-                            items.map((item) => (
-                              <TableRow key={item.id}>
-                                <TableCell className="align-middle font-medium text-slate-900">{item.name}</TableCell>
-                                <TableCell className="align-middle">
-                                  <Input
-                                    value={item.contains || ''}
-                                    onChange={(event) => handleExpenseChange(item.id, { contains: event.target.value })}
-                                    placeholder="Describe contents"
-                                    className="h-9"
-                                  />
-                                </TableCell>
-                                <TableCell className="align-middle">
-                                  <Input
-                                    value={item.glCode}
-                                    onChange={(event) => handleExpenseChange(item.id, { glCode: event.target.value })}
-                                    placeholder="GL code"
-                                    className="h-9"
-                                  />
-                                </TableCell>
-                                <TableCell className="text-right align-middle">
-                                  <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    className="text-red-500 hover:text-red-600"
-                                    onClick={() => handleDeleteExpense(item.id)}
-                                  >
-                                    <XCircle className="h-4 w-4" />
-                                  </Button>
-                                </TableCell>
-                              </TableRow>
-                            ))
-                          )}
-                        </TableBody>
-                      </Table>
-                    </CardContent>
-                  </Card>
-                ))}
+                          ))
+                        )}
+                      </TableBody>
+                    </Table>
+                  </CardContent>
+                </Card>
               </div>
             </>
           )}
