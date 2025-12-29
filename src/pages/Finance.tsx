@@ -125,9 +125,19 @@ const parseSpreadsheetRows = async (file: File): Promise<Record<string, unknown>
 
   if (!headerRow) return [];
 
-  const headers = headerRow.split(',').map((cell) => cell.trim());
+  const delimiterCandidates = [',', '\t', ';', '|'];
+  const bestDelimiter =
+    delimiterCandidates.reduce(
+      (best, candidate) => {
+        const count = (headerRow.match(new RegExp(candidate, 'g')) || []).length;
+        return count > best.count ? { delimiter: candidate, count } : best;
+      },
+      { delimiter: ',', count: 0 }
+    ).delimiter || ',';
+
+  const headers = headerRow.split(bestDelimiter).map((cell) => cell.trim());
   return dataRows.map((row) => {
-    const values = row.split(',').map((cell) => cell.trim());
+    const values = row.split(bestDelimiter).map((cell) => cell.trim());
     const record: Record<string, string> = {};
     headers.forEach((header, index) => {
       record[header] = values[index] ?? '';
@@ -251,31 +261,38 @@ export default function Finance() {
       const rows = await parseSpreadsheetRows(file);
       const uploaded = rows
         .map((row) => {
-          const showId =
-            typeof row['Show ID'] === 'string' && row['Show ID'].trim()
-              ? row['Show ID'].trim()
-              : typeof row['showId'] === 'string'
-                ? row['showId'].trim()
-                : '';
+          const normalisedRow = Object.entries(row).reduce((acc, [key, value]) => {
+            const lower = key.toLowerCase();
+            const collapsed = lower.replace(/[\s_-]+/g, '');
+            const stripped = collapsed.replace(/[()]/g, '');
+            acc[key] = value;
+            acc[lower] = value;
+            acc[collapsed] = value;
+            acc[stripped] = value;
+            return acc;
+          }, {} as Record<string, unknown>);
+
+          const readString = (keys: string[]) => {
+            for (const key of keys) {
+              const candidate = normalisedRow[key];
+              if (typeof candidate === 'string' && candidate.trim()) return candidate.trim();
+            }
+            return '';
+          };
+
+          const showId = readString(['showid', 'show', 'show_id', 'id']);
           if (!showId) return null;
-          const dealership =
-            typeof row.Dealership === 'string'
-              ? row.Dealership.trim()
-              : typeof row.dealership === 'string'
-                ? row.dealership.trim()
-                : '';
-          const internalSalesOrderNumber =
-            typeof row['Internal Sales Order Number'] === 'string'
-              ? row['Internal Sales Order Number'].trim()
-              : typeof row.internalSalesOrderNumber === 'string'
-                ? row.internalSalesOrderNumber.trim()
-                : '';
-          const internalSalesOrderNumberDealer =
-            typeof row['Internal Sales Order Number (dealer)'] === 'string'
-              ? row['Internal Sales Order Number (dealer)'].trim()
-              : typeof row.internalSalesOrderNumberDealer === 'string'
-                ? row.internalSalesOrderNumberDealer.trim()
-                : '';
+          const dealership = readString(['dealership']);
+          const internalSalesOrderNumber = readString([
+            'internalsalesordernumber',
+            'internal',
+            'internalorder',
+          ]);
+          const internalSalesOrderNumberDealer = readString([
+            'internalsalesordernumberdealer',
+            'internaldealer',
+            'internalorderdealer',
+          ]);
           return {
             id: newId(),
             showId,
