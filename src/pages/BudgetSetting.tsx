@@ -49,13 +49,13 @@ const parseNumber = (value: unknown): number => {
 const formatCurrency = (value: number) => `$${parseNumber(value).toLocaleString('en-AU')}`;
 
 const computeDealerTotal = (row: Pick<BudgetFields, 'standCosts' | 'dealerDayRates' | 'dealerCommission' | 'dealerCostsTransport'>) =>
-  parseNumber(row.standCosts) +
+  parseNumber(row.standCosts) / 2 +
   parseNumber(row.dealerDayRates) +
   parseNumber(row.dealerCommission) +
   parseNumber(row.dealerCostsTransport);
 
-const computeFactoryTotal = (row: Pick<BudgetFields, 'factoryCommission' | 'factoryTravelCosts'>) =>
-  parseNumber(row.factoryCommission) + parseNumber(row.factoryTravelCosts);
+const computeFactoryTotal = (row: Pick<BudgetFields, 'factoryCommission' | 'factoryTravelCosts' | 'standCosts'>) =>
+  parseNumber(row.factoryCommission) + parseNumber(row.factoryTravelCosts) + parseNumber(row.standCosts) / 2;
 
 const normaliseBudget = (value: unknown, fallbackShowId?: string): BudgetFields | null => {
   if (!value || typeof value !== 'object') {
@@ -524,18 +524,19 @@ export default function BudgetSetting() {
               <TableHeader>
                 <TableRow className="bg-slate-50 text-[11px] uppercase text-slate-700">
                   <TableHead colSpan={2} className="border-r bg-white text-left text-slate-600">Show details</TableHead>
-                  <TableHead colSpan={5} className="border-r text-left text-emerald-700">Dealer costs</TableHead>
-                  <TableHead colSpan={3} className="border-r text-left text-blue-700">Factory costs</TableHead>
+                  <TableHead colSpan={5} className="border-r text-left text-emerald-700">Dealer costs (includes 50% stand costs)</TableHead>
+                  <TableHead colSpan={4} className="border-r text-left text-blue-700">Factory costs (includes 50% stand costs)</TableHead>
                   <TableHead colSpan={2} className="text-left text-slate-600">Status</TableHead>
                 </TableRow>
                 <TableRow className="bg-slate-50/70 text-[11px] uppercase tracking-wide text-slate-600">
                   <TableHead className="min-w-[180px]">Show Name</TableHead>
                   <TableHead className="min-w-[140px]">Dealership</TableHead>
-                  <TableHead className="min-w-[110px]">Stand Costs</TableHead>
+                  <TableHead className="min-w-[140px]">Stand Costs (Dealer 50%)</TableHead>
                   <TableHead className="min-w-[130px]">Dealer Day Rates</TableHead>
                   <TableHead className="min-w-[130px]">Dealer Commission</TableHead>
                   <TableHead className="min-w-[150px]">Dealer Costs Transport</TableHead>
                   <TableHead className="min-w-[130px] text-emerald-700">Total Dealer Cost</TableHead>
+                  <TableHead className="min-w-[140px]">Stand Costs (Factory 50%)</TableHead>
                   <TableHead className="min-w-[130px]">Factory Commission</TableHead>
                   <TableHead className="min-w-[150px]">Factory Travel Costs</TableHead>
                   <TableHead className="min-w-[140px] text-blue-700">Total Factory Costs</TableHead>
@@ -546,7 +547,7 @@ export default function BudgetSetting() {
               <TableBody>
                 {filteredRows.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={12} className="py-6 text-center text-sm text-slate-500">
+                    <TableCell colSpan={13} className="py-6 text-center text-sm text-slate-500">
                       No rows found. Add a show or import a template to begin.
                     </TableCell>
                   </TableRow>
@@ -565,7 +566,7 @@ export default function BudgetSetting() {
                             </Badge>
                             {row.startDate ? (
                               <Badge variant="outline" className="border-blue-200 text-blue-700">
-                                {new Date(row.startDate).toLocaleDateString()}
+                                {new Date(row.startDate).toLocaleDateString('en-GB')}
                               </Badge>
                             ) : null}
                           </div>
@@ -575,9 +576,13 @@ export default function BudgetSetting() {
                       {(['standCosts', 'dealerDayRates', 'dealerCommission', 'dealerCostsTransport'] as Array<keyof BudgetFields>).map(
                         (field) => {
                           const isEditing = editingId === row.showId;
+                          const isStandCost = field === 'standCosts';
+                          const displayValue = isStandCost
+                            ? parseNumber((row as unknown as Record<string, number>)[field]) / 2
+                            : parseNumber((row as unknown as Record<string, number>)[field]);
                           return (
                             <TableCell key={field} className="text-right">
-                              {isEditing ? (
+                              {isEditing && isStandCost ? (
                                 <Input
                                   type="number"
                                   className="h-8 text-right"
@@ -585,11 +590,17 @@ export default function BudgetSetting() {
                                   onChange={(event) =>
                                     handleFieldChange(row.showId, field, parseNumber(event.target.value))
                                   }
+                                  aria-label="Total stand costs (will be split 50/50)"
                                 />
                               ) : (
-                                <span className="font-medium text-slate-900">
-                                  {formatCurrency((row as Record<string, number>)[field])}
-                                </span>
+                                <div className="flex flex-col items-end gap-1">
+                                  <span className="font-medium text-slate-900">{formatCurrency(displayValue)}</span>
+                                  {isStandCost ? (
+                                    <span className="text-[10px] text-slate-500">
+                                      of total {formatCurrency(parseNumber((row as unknown as Record<string, number>)[field]))}
+                                    </span>
+                                  ) : null}
+                                </div>
                               )}
                             </TableCell>
                           );
@@ -597,6 +608,14 @@ export default function BudgetSetting() {
                       )}
                       <TableCell className="text-right font-semibold text-emerald-700">
                         {formatCurrency(row.totalDealerCost)}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex flex-col items-end gap-1">
+                          <span className="font-medium text-slate-900">
+                            {formatCurrency(parseNumber((row as unknown as Record<string, number>).standCosts) / 2)}
+                          </span>
+                          <span className="text-[10px] text-slate-500">Stand costs (50%)</span>
+                        </div>
                       </TableCell>
                       {(['factoryCommission', 'factoryTravelCosts'] as Array<keyof BudgetFields>).map((field) => {
                         const isEditing = editingId === row.showId;
@@ -621,7 +640,7 @@ export default function BudgetSetting() {
                       <TableCell>
                         {row.lastUpdated ? (
                           <Badge variant="outline" className="text-[11px] font-normal">
-                            {new Date(row.lastUpdated).toLocaleDateString()}
+                            {new Date(row.lastUpdated).toLocaleDateString('en-GB')}
                           </Badge>
                         ) : (
                           <span className="text-[11px] text-slate-500">Not saved yet</span>
