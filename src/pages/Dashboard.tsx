@@ -18,7 +18,7 @@ import {
 } from 'recharts';
 import { TrendingUp, Calendar } from 'lucide-react';
 import { dbGet } from '@/lib/firebase';
-import type { Show, ShowOrder, ShowTask, TeamMember } from '@/types';
+import type { Show, ShowOrder, TeamMember } from '@/types';
 import { format as formatDate } from 'date-fns';
 
 type InternalSalesOrderRecord = {
@@ -32,7 +32,6 @@ export default function Dashboard() {
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
   const [orders, setOrders] = useState<ShowOrder[]>([]);
   const [internalOrders, setInternalOrders] = useState<InternalSalesOrderRecord[]>([]);
-  const [tasks, setTasks] = useState<ShowTask[]>([]);
   const [budgets, setBudgets] = useState<Record<string, Record<string, unknown>>>({});
   const [loading, setLoading] = useState(true);
 
@@ -42,13 +41,12 @@ export default function Dashboard() {
 
   const loadData = async () => {
     try {
-      const [showsData, membersData, ordersData, budgetsData, internalOrdersData, tasksData] = await Promise.all([
+      const [showsData, membersData, ordersData, budgetsData, internalOrdersData] = await Promise.all([
         dbGet('shows'),
         dbGet('teamMembers'),
         dbGet('showOrders'),
         dbGet('showBudgets'),
         dbGet('finance/internalSalesOrders'),
-        dbGet('showTasks'),
       ]);
 
       setShows(showsData ? Object.values(showsData) : []);
@@ -60,7 +58,6 @@ export default function Dashboard() {
           ? Object.values(internalOrdersData as Record<string, InternalSalesOrderRecord>)
           : []
       );
-      setTasks(tasksData ? Object.values(tasksData as Record<string, ShowTask>) : []);
     } catch (error) {
       console.error('Error loading data:', error);
     } finally {
@@ -443,41 +440,6 @@ export default function Dashboard() {
     [timelineShows, budgets, orders, internalOrders]
   );
 
-  const activeTeamMembers = useMemo(
-    () => teamMembers.filter((member) => member.activeFlag === 1 || member.activeFlag === true).length,
-    [teamMembers]
-  );
-
-  const showNameMap = useMemo(
-    () =>
-      shows.reduce((acc, show) => {
-        if (show.id) acc[show.id] = show.name || show.id;
-        return acc;
-      }, {} as Record<string, string>),
-    [shows]
-  );
-
-  const taskCompletionList = useMemo(() => {
-    const summary = tasks.reduce((acc, task) => {
-      const eventId = typeof task.eventId === 'string' ? task.eventId.trim() : '';
-      if (!eventId) return acc;
-      if (!acc[eventId]) acc[eventId] = { completed: 0, total: 0 };
-      acc[eventId].total += 1;
-      if (task.status === 'Done') acc[eventId].completed += 1;
-      return acc;
-    }, {} as Record<string, { completed: number; total: number }>);
-
-    return Object.entries(summary)
-      .filter(([, counts]) => counts.total > 0)
-      .map(([showId, counts]) => ({
-        showId,
-        showName: showNameMap[showId] || showId,
-        ...counts,
-        percent: Math.round((counts.completed / counts.total) * 100),
-      }))
-      .sort((a, b) => b.percent - a.percent || a.showName.localeCompare(b.showName));
-  }, [tasks, showNameMap]);
-
   if (loading) {
     return (
       <div className="flex items-center justify-center h-96">
@@ -592,8 +554,8 @@ export default function Dashboard() {
       </Card>
 
       {/* Target Completion Gauge & Stats */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <Card className="hover:shadow-lg transition-shadow">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <Card className="lg:col-span-2 hover:shadow-lg transition-shadow">
           <CardHeader>
             <CardTitle>2026 Target Completion</CardTitle>
             <CardDescription>
@@ -648,78 +610,23 @@ export default function Dashboard() {
           </CardContent>
         </Card>
 
-        <div className="space-y-4">
-          <Card className="hover:shadow-lg transition-shadow">
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium text-gray-600">Active Team Members</CardTitle>
-              <TrendingUp className="h-5 w-5 text-emerald-600" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-3xl font-bold text-gray-900">{activeTeamMembers}</div>
-              <p className="text-xs text-gray-500 mt-1">Currently marked as active</p>
-            </CardContent>
-          </Card>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {stats.map((stat, index) => (
-              <Card key={index} className="hover:shadow-lg transition-shadow">
-                <CardHeader className="flex flex-row items-center justify-between pb-2">
-                  <CardTitle className="text-sm font-medium text-gray-600">
-                    {stat.title}
-                  </CardTitle>
-                  <stat.icon className={`h-5 w-5 ${stat.color}`} />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-3xl font-bold text-gray-900">{stat.value}</div>
-                  <p className="text-xs text-gray-500 mt-1">{stat.description}</p>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-1 gap-6">
+          {stats.map((stat, index) => (
+            <Card key={index} className="hover:shadow-lg transition-shadow">
+              <CardHeader className="flex flex-row items-center justify-between pb-2">
+                <CardTitle className="text-sm font-medium text-gray-600">
+                  {stat.title}
+                </CardTitle>
+                <stat.icon className={`h-5 w-5 ${stat.color}`} />
+              </CardHeader>
+              <CardContent>
+                <div className="text-3xl font-bold text-gray-900">{stat.value}</div>
+                <p className="text-xs text-gray-500 mt-1">{stat.description}</p>
+              </CardContent>
+            </Card>
+          ))}
         </div>
       </div>
-
-      {/* Show task completion */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Show Tasks Completion</CardTitle>
-          <CardDescription>Progress across shows, similar to Calendar.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {taskCompletionList.length === 0 ? (
-            <div className="rounded border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-center text-sm text-slate-500">
-              No tasks found. Add tasks to shows to see completion.
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="min-w-[520px] w-full text-sm">
-                <thead>
-                  <tr className="border-b text-left text-xs uppercase tracking-wide text-slate-500">
-                    <th className="py-2 pr-3">Show</th>
-                    <th className="py-2 pr-3 text-right">Completed</th>
-                    <th className="py-2 pr-3 text-right">Total</th>
-                    <th className="py-2 text-right">Progress</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {taskCompletionList.map((entry) => (
-                    <tr key={entry.showId} className="border-b last:border-b-0">
-                      <td className="py-2 pr-3 font-medium text-slate-900">{entry.showName}</td>
-                      <td className="py-2 pr-3 text-right text-slate-800">{entry.completed}</td>
-                      <td className="py-2 pr-3 text-right text-slate-800">{entry.total}</td>
-                      <td className="py-2 text-right">
-                        <span className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-800">
-                          <span className="h-2 w-2 rounded-full bg-emerald-500" />
-                          {entry.percent}%
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </CardContent>
-      </Card>
 
       {/* Main Content Tabs */}
       <Tabs defaultValue="employees" className="space-y-6">
@@ -742,17 +649,68 @@ export default function Dashboard() {
                   <ResponsiveContainer width="100%" height={350}>
                     <BarChart data={salespersonStats}>
                       <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="name" interval={0} angle={-30} textAnchor="end" height={70} />
+                    <XAxis dataKey="name" interval={0} angle={-30} textAnchor="end" height={70} />
                       <YAxis />
                       <Tooltip />
                       <Bar dataKey="avgDaily" fill="#10b981" name="Avg Daily Sales" />
                     </BarChart>
                   </ResponsiveContainer>
                 ) : (
-                  <div className="text-center py-8 text-gray-500">No show data available</div>
+                  <div className="text-center py-8 text-gray-500">No sales data available</div>
                 )}
               </CardContent>
             </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Total Sales Performance</CardTitle>
+                <CardDescription>Total sales counts by salesperson (Top 10)</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {salespersonStats.length > 0 ? (
+                  <ResponsiveContainer width="100%" height={350}>
+                    <BarChart data={salespersonStats}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="name" interval={0} angle={-30} textAnchor="end" height={70} />
+                      <YAxis />
+                      <Tooltip />
+                      <Bar dataKey="sales" fill="#f59e0b" name="Total Sales" />
+                    </BarChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="text-center py-8 text-gray-500">No sales data available</div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
+
+        {/* Show Analytics Tab */}
+        <TabsContent value="shows" className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>Shows by State</CardTitle>
+              <CardDescription>Show count and daily sales performance by Australian state</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {stateData.length > 0 ? (
+                <ResponsiveContainer width="100%" height={400}>
+                  <BarChart data={stateData}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="state" />
+                    <YAxis yAxisId="left" />
+                    <YAxis yAxisId="right" orientation="right" />
+                    <Tooltip />
+                    <Legend />
+                    <Bar yAxisId="left" dataKey="shows" fill="#3b82f6" name="Number of Shows" />
+                    <Bar yAxisId="right" dataKey="dailySales" fill="#10b981" name="Avg Daily Sales" />
+                  </BarChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="text-center py-8 text-gray-500">No show data available</div>
+              )}
+            </CardContent>
+          </Card>
 
           <Card>
             <CardHeader>
@@ -843,15 +801,14 @@ export default function Dashboard() {
                   </div>
                   <div className="flex justify-between items-center p-3 border rounded-lg">
                     <span className="text-sm font-medium">Total Registered</span>
-                    <span className="text-lg font-bold text-gray-900">{totalShows}</span>
+                      <span className="text-lg font-bold text-gray-900">{totalShows}</span>
                   </div>
                 </div>
               </CardContent>
             </Card>
           </div>
-        </div>
         </TabsContent>
-        
+
         {/* Vehicle Distribution Tab */}
         <TabsContent value="caravans" className="space-y-6">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
