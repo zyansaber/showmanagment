@@ -292,9 +292,9 @@ export default function Dashboard() {
       color: 'text-blue-600',
     },
     {
-      title: 'Total Sales 2025',
-      value: totalSales2025.toString(),
-      description: `Target: ${target2025}`,
+      title: 'Total Sales 2026',
+      value: totalSales2026.toString(),
+      description: `Target: ${target2026}`,
       icon: TrendingUp,
       color: 'text-purple-600',
     },
