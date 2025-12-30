@@ -204,12 +204,13 @@ const formatAmountStyled = (value: number | undefined, currency?: string) => {
 };
 
 export default function FinanceDetail() {
+  const ALL_SHOWS = 'all';
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [summaries, setSummaries] = useState<SummaryRow[]>([]);
   const [lines, setLines] = useState<LineRow[]>([]);
   const [filters, setFilters] = useState<Filters>({
-    showId: '',
+    showId: ALL_SHOWS,
     glCode: '',
     company: '',
     search: '',
@@ -308,12 +309,12 @@ export default function FinanceDetail() {
         const matches = (value: string | undefined, needle: string) =>
           (value ?? '').toLowerCase().includes(needle.toLowerCase());
         return (
-          (filters.showId ? row.showId === filters.showId : true) &&
+          (filters.showId !== ALL_SHOWS ? row.showId === filters.showId : true) &&
           (filters.glCode ? matches(row.glAccountNorm, filters.glCode) : true) &&
           (filters.company ? row.companyCode === filters.company : true)
         );
       }),
-    [filters, summaries]
+    [filters, summaries, ALL_SHOWS]
   );
 
   const filteredLines = useMemo(
@@ -322,7 +323,7 @@ export default function FinanceDetail() {
         const matches = (value: string | undefined, needle: string) =>
           (value ?? '').toLowerCase().includes(needle.toLowerCase());
         return (
-          (filters.showId ? row.showId === filters.showId : true) &&
+          (filters.showId !== ALL_SHOWS ? row.showId === filters.showId : true) &&
           (filters.glCode ? matches(row.glAccountNorm, filters.glCode) : true) &&
           (filters.company ? row.companyCode === filters.company : true) &&
           (filters.search
@@ -332,7 +333,7 @@ export default function FinanceDetail() {
             : true)
         );
       }),
-    [filters, lines]
+    [filters, lines, ALL_SHOWS]
   );
 
   const summaryTotals = useMemo(() => {
@@ -351,7 +352,7 @@ export default function FinanceDetail() {
 
   const clearFilters = () =>
     setFilters({
-      showId: '',
+      showId: ALL_SHOWS,
       glCode: '',
       company: '',
       search: '',
@@ -390,7 +391,7 @@ export default function FinanceDetail() {
                 <SelectValue placeholder="All shows" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="">All shows</SelectItem>
+                <SelectItem value={ALL_SHOWS}>All shows</SelectItem>
                 {Object.values(showLookup)
                   .sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id))
                   .map((show) => (
@@ -493,7 +494,10 @@ export default function FinanceDetail() {
           <CardHeader className="pb-2">
             <CardDescription>当前过滤的 Show / GL / Company</CardDescription>
             <div className="flex flex-wrap gap-2 text-xs text-slate-600">
-              <Badge variant="outline">Show: {filters.showId ? showLookup[filters.showId]?.name || filters.showId : 'All'}</Badge>
+              <Badge variant="outline">
+                Show:{' '}
+                {filters.showId !== ALL_SHOWS ? showLookup[filters.showId]?.name || filters.showId : 'All'}
+              </Badge>
               <Badge variant="outline">
                 GL: {filters.glCode || 'All'} {filters.glCode ? `(${glNameLookup[filters.glCode] || 'Undefined GL Code'})` : ''}
               </Badge>
