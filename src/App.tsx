@@ -21,6 +21,7 @@ import {
   Wallet,
   Banknote,
   Calculator,
+  ListTree,
 } from 'lucide-react';
 import Dashboard from './pages/Dashboard';
 import ShowCalendar from './pages/ShowCalendar';
@@ -35,6 +36,7 @@ import ShowReport from './pages/ShowReport';
 import ShowBudgetExpense from './pages/ShowBudgetExpense';
 import AIHelpAssistant from './components/AIHelpAssistant';
 import Finance from './pages/Finance';
+import FinanceDetail from './pages/FinanceDetail';
 import Login from './pages/Login';
 import AdminSettings from './pages/AdminSettings';
 import BudgetSetting from './pages/BudgetSetting';
@@ -66,6 +68,7 @@ function Sidebar({ isOpen, setIsOpen }: { isOpen: boolean; setIsOpen: (open: boo
       title: 'Finance',
       items: [
         { icon: Banknote, label: 'Finance Code', path: '/finance' },
+        { icon: ListTree, label: 'Finance Detail', path: '/finance-detail' },
         { icon: Wallet, label: 'Finance Result', path: '/budget' },
         { icon: Calculator, label: 'Budget setting', path: '/budget-setting', adminOnly: true },
       ],
@@ -340,6 +343,14 @@ function AppLayout() {
               element={
                 <ProtectedRoute>
                   <Finance />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/finance-detail"
+              element={
+                <ProtectedRoute>
+                  <FinanceDetail />
                 </ProtectedRoute>
               }
             />
