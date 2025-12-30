@@ -1,3 +1,6 @@
++674
+-0
+
 import { useEffect, useMemo, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -252,24 +255,7 @@ export default function FinanceDetail() {
           }, {} as Record<string, string>)
         : {};
 
-      const aufnrShowMap: Record<string, { showId: string; showName?: string }> = {};
-      if (ordersData && typeof ordersData === 'object') {
-        Object.values(ordersData as Record<string, InternalOrder>).forEach((order) => {
-          if (!order || typeof order !== 'object') return;
-          const orderNumber =
-            typeof order.internalSalesOrderNumberDealer === 'string' && order.internalSalesOrderNumberDealer.trim().length > 0
-              ? order.internalSalesOrderNumberDealer.trim()
-              : typeof order.internalSalesOrderNumber === 'string'
-                ? order.internalSalesOrderNumber.trim()
-                : '';
-          if (!orderNumber) return;
-          const norm = leadingZeroSafe(orderNumber);
-          const showId = order.showId;
-          if (!showId) return;
-          const showName = shows[showId]?.name;
-          aufnrShowMap[norm] = { showId, showName };
-        });
-      }
+      const aufnrShowMap = buildAufnrShowMap(ordersData, shows);
 
       const annotateSummary = parsed.summaries.map((row) => ({
         ...row,
@@ -357,6 +343,32 @@ export default function FinanceDetail() {
       company: '',
       search: '',
     });
+
+  const buildAufnrShowMap = (
+    ordersData: unknown,
+    shows: Record<string, ShowRecord>
+  ): Record<string, { showId: string; showName?: string }> => {
+    const map: Record<string, { showId: string; showName?: string }> = {};
+    if (!ordersData || typeof ordersData !== 'object') return map;
+
+    Object.values(ordersData as Record<string, InternalOrder>).forEach((order) => {
+      if (!order || typeof order !== 'object') return;
+      const dealerNumber =
+        typeof order.internalSalesOrderNumberDealer === 'string' ? order.internalSalesOrderNumberDealer.trim() : '';
+      const internalNumber =
+        typeof order.internalSalesOrderNumber === 'string' ? order.internalSalesOrderNumber.trim() : '';
+      const candidates = [dealerNumber, internalNumber].filter(Boolean);
+      candidates.forEach((num) => {
+        const norm = leadingZeroSafe(num);
+        if (!norm) return;
+        const showId = order.showId;
+        if (!showId) return;
+        const showName = shows[showId]?.name;
+        map[norm] = { showId, showName };
+      });
+    });
+    return map;
+  };
 
   return (
     <div className="space-y-6">
@@ -448,7 +460,7 @@ export default function FinanceDetail() {
           <Card>
             <CardHeader>
               <CardTitle>Company</CardTitle>
-              <CardDescription>3110 / 3120 快速筛选</CardDescription>
+              <CardDescription>Factory Cost (3110) / Dealer Cost (3120)</CardDescription>
             </CardHeader>
             <CardContent className="grid gap-3 sm:grid-cols-2">
               {['3110', '3120'].map((company) => {
@@ -456,6 +468,7 @@ export default function FinanceDetail() {
                 const companyNet = summaries
                   .filter((row) => row.companyCode === company && (!filters.glCode || row.glAccountNorm === filters.glCode))
                   .reduce((acc, row) => acc + row.netAmount, 0);
+                const label = company === '3110' ? 'Factory Cost' : 'Dealer Cost';
                 return (
                   <button
                     key={company}
@@ -465,7 +478,7 @@ export default function FinanceDetail() {
                     onClick={() => setFilters((prev) => ({ ...prev, company: isActive ? '' : company }))}
                   >
                     <div className="flex items-center justify-between">
-                      <p className="text-sm font-semibold text-slate-900">Company {company}</p>
+                      <p className="text-sm font-semibold text-slate-900">{label}</p>
                       {isActive && <Badge variant="secondary">Selected</Badge>}
                     </div>
                     <p className="text-sm mt-2 font-semibold">Net: {formatAmountStyled(companyNet)}</p>
@@ -495,13 +508,14 @@ export default function FinanceDetail() {
             <CardDescription>当前过滤的 Show / GL / Company</CardDescription>
             <div className="flex flex-wrap gap-2 text-xs text-slate-600">
               <Badge variant="outline">
-                Show:{' '}
-                {filters.showId !== ALL_SHOWS ? showLookup[filters.showId]?.name || filters.showId : 'All'}
+                Show: {filters.showId !== ALL_SHOWS ? showLookup[filters.showId]?.name || filters.showId : 'All'}
               </Badge>
               <Badge variant="outline">
                 GL: {filters.glCode || 'All'} {filters.glCode ? `(${glNameLookup[filters.glCode] || 'Undefined GL Code'})` : ''}
               </Badge>
-              <Badge variant="outline">Company: {filters.company || 'All'}</Badge>
+              <Badge variant="outline">
+                Company: {filters.company === '3110' ? 'Factory Cost' : filters.company === '3120' ? 'Dealer Cost' : 'All'}
+              </Badge>
             </div>
           </CardHeader>
         </Card>
