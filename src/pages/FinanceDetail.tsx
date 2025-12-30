@@ -47,6 +47,7 @@ type LineRow = {
   creditAmount?: number;
   absAmount?: number;
   sgtxt?: string;
+  sfgxt?: string;
   costCenter?: string;
   profitCenter?: string;
   reference?: string;
@@ -58,6 +59,7 @@ type Filters = {
   showId: string;
   glCode: string;
   company: string;
+  fiscalYear: string;
   search: string;
 };
 
@@ -171,6 +173,7 @@ const normaliseSummaryRows = (data: unknown): { summaries: SummaryRow[]; lines: 
             creditAmount: numberOrZero(line.credit_amount),
             absAmount: numberOrZero(line.abs_amount),
             sgtxt: typeof line.sgtxt === 'string' ? line.sgtxt : undefined,
+            sfgxt: typeof (line as Record<string, unknown>).sfgxt === 'string' ? (line as Record<string, unknown>).sfgxt : undefined,
             costCenter: typeof line.cost_center === 'string' ? line.cost_center : undefined,
             profitCenter: typeof line.profit_center === 'string' ? line.profit_center : undefined,
             reference: typeof line.reference === 'string' ? line.reference : undefined,
@@ -205,6 +208,7 @@ const formatAmountStyled = (value: number | undefined, currency?: string) => {
 
 export default function FinanceDetail() {
   const ALL_SHOWS = 'all';
+  const ALL_YEARS = 'all-years';
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [summaries, setSummaries] = useState<SummaryRow[]>([]);
@@ -213,11 +217,13 @@ export default function FinanceDetail() {
     showId: ALL_SHOWS,
     glCode: '',
     company: '',
+    fiscalYear: ALL_YEARS,
     search: '',
   });
   const [showLookup, setShowLookup] = useState<Record<string, ShowRecord>>({});
   const [aufnrToShow, setAufnrToShow] = useState<Record<string, { showId: string; showName?: string }>>({});
   const [glNameLookup, setGlNameLookup] = useState<Record<string, string>>({});
+  const [availableYears, setAvailableYears] = useState<string[]>([]);
 
   const loadData = async () => {
     try {
@@ -273,6 +279,11 @@ export default function FinanceDetail() {
       setAufnrToShow(aufnrShowMap);
       setSummaries(annotateSummary);
       setLines(annotateLines);
+      const years = new Set<string>();
+      annotateSummary.forEach((row) => years.add(row.fiscalYear));
+      annotateLines.forEach((row) => years.add(row.fiscalYear));
+      const sortedYears = Array.from(years).filter(Boolean).sort();
+      setAvailableYears(sortedYears);
       setError(null);
     } catch (err) {
       console.error('Failed to load finance detail', err);
@@ -294,10 +305,11 @@ export default function FinanceDetail() {
         return (
           (filters.showId !== ALL_SHOWS ? row.showId === filters.showId : true) &&
           (filters.glCode ? matches(row.glAccountNorm, filters.glCode) : true) &&
-          (filters.company ? row.companyCode === filters.company : true)
+          (filters.company ? row.companyCode === filters.company : true) &&
+          (filters.fiscalYear !== ALL_YEARS ? row.fiscalYear === filters.fiscalYear : true)
         );
       }),
-    [filters, summaries, ALL_SHOWS]
+    [filters, summaries, ALL_SHOWS, ALL_YEARS]
   );
 
   const filteredLines = useMemo(
@@ -309,14 +321,16 @@ export default function FinanceDetail() {
           (filters.showId !== ALL_SHOWS ? row.showId === filters.showId : true) &&
           (filters.glCode ? matches(row.glAccountNorm, filters.glCode) : true) &&
           (filters.company ? row.companyCode === filters.company : true) &&
+          (filters.fiscalYear !== ALL_YEARS ? row.fiscalYear === filters.fiscalYear : true) &&
           (filters.search
             ? matches(row.sgtxt, filters.search) ||
+              matches(row.sfgxt, filters.search) ||
               matches(row.docNo, filters.search) ||
               matches(row.reference, filters.search)
             : true)
         );
       }),
-    [filters, lines, ALL_SHOWS]
+    [filters, lines, ALL_SHOWS, ALL_YEARS]
   );
 
   const summaryTotals = useMemo(() => {
@@ -338,6 +352,7 @@ export default function FinanceDetail() {
       showId: ALL_SHOWS,
       glCode: '',
       company: '',
+      fiscalYear: ALL_YEARS,
       search: '',
     });
 
@@ -366,6 +381,13 @@ export default function FinanceDetail() {
     });
     return map;
   };
+
+  const financeShowOptions = useMemo(() => {
+    const ids = new Set<string>();
+    summaries.forEach((row) => row.showId && ids.add(row.showId));
+    lines.forEach((row) => row.showId && ids.add(row.showId));
+    return Array.from(ids);
+  }, [summaries, lines]);
 
   return (
     <div className="space-y-6">
@@ -401,11 +423,15 @@ export default function FinanceDetail() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value={ALL_SHOWS}>All shows</SelectItem>
-                {Object.values(showLookup)
-                  .sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id))
+                {financeShowOptions
+                  .map((id) => ({
+                    id,
+                    name: showLookup[id]?.name || id,
+                  }))
+                  .sort((a, b) => a.name.localeCompare(b.name))
                   .map((show) => (
                     <SelectItem key={show.id} value={show.id}>
-                      {show.name || show.id}
+                      {show.name}
                     </SelectItem>
                   ))}
               </SelectContent>
@@ -417,6 +443,24 @@ export default function FinanceDetail() {
                 value={filters.search}
                 onChange={(e) => setFilters((prev) => ({ ...prev, search: e.target.value }))}
               />
+            </div>
+            <div className="md:col-span-1 lg:col-span-1">
+              <Select
+                value={filters.fiscalYear}
+                onValueChange={(value) => setFilters((prev) => ({ ...prev, fiscalYear: value }))}
+              >
+                <SelectTrigger className="h-9">
+                  <SelectValue placeholder="All fiscal years" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={ALL_YEARS}>All fiscal years</SelectItem>
+                  {availableYears.map((year) => (
+                    <SelectItem key={year} value={year}>
+                      {year}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
           </CardContent>
         </Card>
@@ -502,7 +546,7 @@ export default function FinanceDetail() {
         </Card>
         <Card className="bg-white shadow-sm md:col-span-2">
           <CardHeader className="pb-2">
-            <CardDescription>当前过滤的 Show / GL / Company</CardDescription>
+            <CardDescription>Current filters: Show / GL / Company / Fiscal Year</CardDescription>
             <div className="flex flex-wrap gap-2 text-xs text-slate-600">
               <Badge variant="outline">
                 Show: {filters.showId !== ALL_SHOWS ? showLookup[filters.showId]?.name || filters.showId : 'All'}
@@ -512,6 +556,9 @@ export default function FinanceDetail() {
               </Badge>
               <Badge variant="outline">
                 Company: {filters.company === '3110' ? 'Factory Cost' : filters.company === '3120' ? 'Dealer Cost' : 'All'}
+              </Badge>
+              <Badge variant="outline">
+                Fiscal Year: {filters.fiscalYear !== ALL_YEARS ? filters.fiscalYear : 'All'}
               </Badge>
             </div>
           </CardHeader>
