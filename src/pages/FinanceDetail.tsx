@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Loader2, RefreshCw, Search } from 'lucide-react';
 import { dbGet } from '@/lib/firebase';
 
@@ -13,6 +14,7 @@ type SummaryRow = {
   aufnrNorm: string;
   glAccountRaw: string;
   glAccountNorm: string;
+  glName: string;
   companyCode: string;
   fiscalYear: string;
   vkorg: string;
@@ -23,12 +25,15 @@ type SummaryRow = {
   absAmount: number;
   lineCount: number;
   updatedAt?: string;
+  showId?: string;
+  showName?: string;
 };
 
 type LineRow = {
   id: string;
   aufnrNorm: string;
   glAccountNorm: string;
+  glName: string;
   companyCode: string;
   fiscalYear: string;
   vkorg: string;
@@ -45,16 +50,31 @@ type LineRow = {
   costCenter?: string;
   profitCenter?: string;
   reference?: string;
+  showId?: string;
+  showName?: string;
 };
 
 type Filters = {
-  aufnr: string;
-  gl: string;
+  showId: string;
+  glCode: string;
   company: string;
-  fiscalYear: string;
-  currency: string;
-  vkorg: string;
   search: string;
+};
+
+type ShowRecord = {
+  id: string;
+  name?: string;
+};
+
+type InternalOrder = {
+  showId: string;
+  internalSalesOrderNumberDealer?: string;
+  internalSalesOrderNumber?: string;
+};
+
+type ExpenseItem = {
+  glCode?: string;
+  category?: string;
 };
 
 const leadingZeroSafe = (value: unknown) => {
@@ -104,6 +124,7 @@ const normaliseSummaryRows = (data: unknown): { summaries: SummaryRow[]; lines: 
                 : typeof summary.gl_norm === 'string'
                   ? summary.gl_norm
                   : glAccountNorm,
+            glName: '',
             companyCode: typeof summary.company_code === 'string' ? summary.company_code : 'NA',
             fiscalYear:
               typeof summary.fiscal_year === 'number'
@@ -131,6 +152,7 @@ const normaliseSummaryRows = (data: unknown): { summaries: SummaryRow[]; lines: 
             id: lineId,
             aufnrNorm,
             glAccountNorm,
+            glName: '',
             companyCode: typeof line.company_code === 'string' ? line.company_code : 'NA',
             fiscalYear:
               typeof line.fiscal_year === 'number'
@@ -169,28 +191,104 @@ const formatAmount = (value: number, currency?: string) => {
   })}`;
 };
 
+const formatAmountStyled = (value: number | undefined, currency?: string) => {
+  if (value === undefined || !Number.isFinite(value)) return <span className="text-slate-500">—</span>;
+  const formatted = formatAmount(Math.abs(value), currency);
+  if (value < 0) {
+    return <span className="text-red-600 font-semibold">({formatted})</span>;
+  }
+  if (value > 0) {
+    return <span className="text-emerald-600 font-semibold">{formatted}</span>;
+  }
+  return <span className="text-slate-700">{formatted}</span>;
+};
+
 export default function FinanceDetail() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [summaries, setSummaries] = useState<SummaryRow[]>([]);
   const [lines, setLines] = useState<LineRow[]>([]);
   const [filters, setFilters] = useState<Filters>({
-    aufnr: '',
-    gl: '',
+    showId: '',
+    glCode: '',
     company: '',
-    fiscalYear: '',
-    currency: '',
-    vkorg: '',
     search: '',
   });
+  const [showLookup, setShowLookup] = useState<Record<string, ShowRecord>>({});
+  const [aufnrToShow, setAufnrToShow] = useState<Record<string, { showId: string; showName?: string }>>({});
+  const [glNameLookup, setGlNameLookup] = useState<Record<string, string>>({});
 
   const loadData = async () => {
     try {
       setLoading(true);
-      const data = await dbGet('finance/glByAufnrGl');
-      const parsed = normaliseSummaryRows(data);
-      setSummaries(parsed.summaries);
-      setLines(parsed.lines);
+      const [glData, showsData, ordersData, expensesData] = await Promise.all([
+        dbGet('finance/glByAufnrGl'),
+        dbGet('shows'),
+        dbGet('finance/internalSalesOrders'),
+        dbGet('finance/expenses'),
+      ]);
+
+      const parsed = normaliseSummaryRows(glData);
+      const shows: Record<string, ShowRecord> = showsData
+        ? Object.entries(showsData).reduce((acc, [id, value]) => {
+            if (typeof id === 'string') {
+              const name = value && typeof value === 'object' && typeof (value as Record<string, unknown>).name === 'string'
+                ? (value as Record<string, unknown>).name
+                : undefined;
+              acc[id] = { id, name };
+            }
+            return acc;
+          }, {} as Record<string, ShowRecord>)
+        : {};
+
+      const glNames: Record<string, string> = expensesData
+        ? Object.values(expensesData as Record<string, ExpenseItem>).reduce((acc, item) => {
+            const gl = item?.glCode?.trim();
+            if (gl) {
+              acc[leadingZeroSafe(gl)] = item.category?.trim() || 'GL Code';
+            }
+            return acc;
+          }, {} as Record<string, string>)
+        : {};
+
+      const aufnrShowMap: Record<string, { showId: string; showName?: string }> = {};
+      if (ordersData && typeof ordersData === 'object') {
+        Object.values(ordersData as Record<string, InternalOrder>).forEach((order) => {
+          if (!order || typeof order !== 'object') return;
+          const orderNumber =
+            typeof order.internalSalesOrderNumberDealer === 'string' && order.internalSalesOrderNumberDealer.trim().length > 0
+              ? order.internalSalesOrderNumberDealer.trim()
+              : typeof order.internalSalesOrderNumber === 'string'
+                ? order.internalSalesOrderNumber.trim()
+                : '';
+          if (!orderNumber) return;
+          const norm = leadingZeroSafe(orderNumber);
+          const showId = order.showId;
+          if (!showId) return;
+          const showName = shows[showId]?.name;
+          aufnrShowMap[norm] = { showId, showName };
+        });
+      }
+
+      const annotateSummary = parsed.summaries.map((row) => ({
+        ...row,
+        glName: glNames[row.glAccountNorm] || 'Undefined GL Code',
+        showId: aufnrShowMap[row.aufnrNorm]?.showId,
+        showName: aufnrShowMap[row.aufnrNorm]?.showName || aufnrShowMap[row.aufnrNorm]?.showId,
+      }));
+
+      const annotateLines = parsed.lines.map((row) => ({
+        ...row,
+        glName: glNames[row.glAccountNorm] || 'Undefined GL Code',
+        showId: aufnrShowMap[row.aufnrNorm]?.showId,
+        showName: aufnrShowMap[row.aufnrNorm]?.showName || aufnrShowMap[row.aufnrNorm]?.showId,
+      }));
+
+      setShowLookup(shows);
+      setGlNameLookup(glNames);
+      setAufnrToShow(aufnrShowMap);
+      setSummaries(annotateSummary);
+      setLines(annotateLines);
       setError(null);
     } catch (err) {
       console.error('Failed to load finance detail', err);
@@ -207,14 +305,12 @@ export default function FinanceDetail() {
   const filteredSummaries = useMemo(
     () =>
       summaries.filter((row) => {
-        const matches = (value: string, needle: string) => value.toLowerCase().includes(needle.toLowerCase());
+        const matches = (value: string | undefined, needle: string) =>
+          (value ?? '').toLowerCase().includes(needle.toLowerCase());
         return (
-          (filters.aufnr ? matches(row.aufnrNorm, filters.aufnr) : true) &&
-          (filters.gl ? matches(row.glAccountNorm, filters.gl) : true) &&
-          (filters.company ? matches(row.companyCode, filters.company) : true) &&
-          (filters.fiscalYear ? matches(row.fiscalYear, filters.fiscalYear) : true) &&
-          (filters.currency ? matches(row.currency, filters.currency) : true) &&
-          (filters.vkorg ? matches(row.vkorg, filters.vkorg) : true)
+          (filters.showId ? row.showId === filters.showId : true) &&
+          (filters.glCode ? matches(row.glAccountNorm, filters.glCode) : true) &&
+          (filters.company ? row.companyCode === filters.company : true)
         );
       }),
     [filters, summaries]
@@ -226,12 +322,9 @@ export default function FinanceDetail() {
         const matches = (value: string | undefined, needle: string) =>
           (value ?? '').toLowerCase().includes(needle.toLowerCase());
         return (
-          (filters.aufnr ? matches(row.aufnrNorm, filters.aufnr) : true) &&
-          (filters.gl ? matches(row.glAccountNorm, filters.gl) : true) &&
-          (filters.company ? matches(row.companyCode, filters.company) : true) &&
-          (filters.fiscalYear ? matches(row.fiscalYear, filters.fiscalYear) : true) &&
-          (filters.currency ? matches(row.currency, filters.currency) : true) &&
-          (filters.vkorg ? matches(row.vkorg, filters.vkorg) : true) &&
+          (filters.showId ? row.showId === filters.showId : true) &&
+          (filters.glCode ? matches(row.glAccountNorm, filters.glCode) : true) &&
+          (filters.company ? row.companyCode === filters.company : true) &&
           (filters.search
             ? matches(row.sgtxt, filters.search) ||
               matches(row.docNo, filters.search) ||
@@ -258,12 +351,9 @@ export default function FinanceDetail() {
 
   const clearFilters = () =>
     setFilters({
-      aufnr: '',
-      gl: '',
+      showId: '',
+      glCode: '',
       company: '',
-      fiscalYear: '',
-      currency: '',
-      vkorg: '',
       search: '',
     });
 
@@ -288,52 +378,103 @@ export default function FinanceDetail() {
         </div>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Filters</CardTitle>
-          <CardDescription>Filter by AUFNR, GL, company, fiscal year, currency, VKORG, or text search (lines).</CardDescription>
-        </CardHeader>
-        <CardContent className="grid gap-3 md:grid-cols-3 lg:grid-cols-4">
-          <Input
-            placeholder="AUFNR (e.g. 500439)"
-            value={filters.aufnr}
-            onChange={(e) => setFilters((prev) => ({ ...prev, aufnr: e.target.value.trim() }))}
-          />
-          <Input
-            placeholder="GL (e.g. 4000)"
-            value={filters.gl}
-            onChange={(e) => setFilters((prev) => ({ ...prev, gl: e.target.value.trim() }))}
-          />
-          <Input
-            placeholder="Company Code"
-            value={filters.company}
-            onChange={(e) => setFilters((prev) => ({ ...prev, company: e.target.value.trim() }))}
-          />
-          <Input
-            placeholder="Fiscal Year"
-            value={filters.fiscalYear}
-            onChange={(e) => setFilters((prev) => ({ ...prev, fiscalYear: e.target.value.trim() }))}
-          />
-          <Input
-            placeholder="Currency"
-            value={filters.currency}
-            onChange={(e) => setFilters((prev) => ({ ...prev, currency: e.target.value.trim() }))}
-          />
-          <Input
-            placeholder="VKORG"
-            value={filters.vkorg}
-            onChange={(e) => setFilters((prev) => ({ ...prev, vkorg: e.target.value.trim() }))}
-          />
-          <div className="md:col-span-2 lg:col-span-1 flex items-center gap-2">
-            <Search className="h-4 w-4 text-slate-500" />
-            <Input
-              placeholder="Search text (SGTXT / Doc / Reference)"
-              value={filters.search}
-              onChange={(e) => setFilters((prev) => ({ ...prev, search: e.target.value }))}
-            />
-          </div>
-        </CardContent>
-      </Card>
+      <div className="grid gap-4">
+        <Card>
+          <CardHeader>
+            <CardTitle>Show Filter</CardTitle>
+            <CardDescription>选择 Show（来自 internal sales order 的 AUFNR 映射）</CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-3 md:grid-cols-3 lg:grid-cols-4">
+            <Select value={filters.showId} onValueChange={(value) => setFilters((prev) => ({ ...prev, showId: value }))}>
+              <SelectTrigger className="h-9">
+                <SelectValue placeholder="All shows" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="">All shows</SelectItem>
+                {Object.values(showLookup)
+                  .sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id))
+                  .map((show) => (
+                    <SelectItem key={show.id} value={show.id}>
+                      {show.name || show.id}
+                    </SelectItem>
+                  ))}
+              </SelectContent>
+            </Select>
+            <div className="md:col-span-2 lg:col-span-3 flex items-center gap-2">
+              <Search className="h-4 w-4 text-slate-500" />
+              <Input
+                placeholder="Search text (SGTXT / Doc / Reference)"
+                value={filters.search}
+                onChange={(e) => setFilters((prev) => ({ ...prev, search: e.target.value }))}
+              />
+            </div>
+          </CardContent>
+        </Card>
+
+        <div className="grid gap-4 md:grid-cols-2">
+          <Card>
+            <CardHeader>
+              <CardTitle>GL Code</CardTitle>
+              <CardDescription>GL code 来源于 finance/expenses 的 glCode。未定义显示 Undefined GL Code。</CardDescription>
+            </CardHeader>
+            <CardContent className="grid gap-3 sm:grid-cols-2">
+              {[...new Set(summaries.map((row) => row.glAccountNorm))].map((gl) => {
+                const isActive = filters.glCode === gl;
+                const glName = glNameLookup[gl] || 'Undefined GL Code';
+                const glNet = summaries
+                  .filter((row) => row.glAccountNorm === gl && (!filters.company || row.companyCode === filters.company))
+                  .reduce((acc, row) => acc + row.netAmount, 0);
+                return (
+                  <button
+                    key={gl}
+                    className={`rounded-lg border p-3 text-left shadow-sm transition hover:shadow-md ${
+                      isActive ? 'border-blue-500 ring-2 ring-blue-200 bg-blue-50' : 'border-slate-200 bg-white'
+                    }`}
+                    onClick={() => setFilters((prev) => ({ ...prev, glCode: isActive ? '' : gl }))}
+                  >
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm font-semibold text-slate-900">{gl || '—'}</p>
+                      {isActive && <Badge variant="secondary">Selected</Badge>}
+                    </div>
+                    <p className="text-xs text-slate-600">备注: {glName}</p>
+                    <p className="mt-2 text-sm font-semibold">{formatAmountStyled(glNet)}</p>
+                  </button>
+                );
+              })}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Company</CardTitle>
+              <CardDescription>3110 / 3120 快速筛选</CardDescription>
+            </CardHeader>
+            <CardContent className="grid gap-3 sm:grid-cols-2">
+              {['3110', '3120'].map((company) => {
+                const isActive = filters.company === company;
+                const companyNet = summaries
+                  .filter((row) => row.companyCode === company && (!filters.glCode || row.glAccountNorm === filters.glCode))
+                  .reduce((acc, row) => acc + row.netAmount, 0);
+                return (
+                  <button
+                    key={company}
+                    className={`rounded-lg border p-3 text-left shadow-sm transition hover:shadow-md ${
+                      isActive ? 'border-blue-500 ring-2 ring-blue-200 bg-blue-50' : 'border-slate-200 bg-white'
+                    }`}
+                    onClick={() => setFilters((prev) => ({ ...prev, company: isActive ? '' : company }))}
+                  >
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm font-semibold text-slate-900">Company {company}</p>
+                      {isActive && <Badge variant="secondary">Selected</Badge>}
+                    </div>
+                    <p className="text-sm mt-2 font-semibold">Net: {formatAmountStyled(companyNet)}</p>
+                  </button>
+                );
+              })}
+            </CardContent>
+          </Card>
+        </div>
+      </div>
 
       {error && (
         <Card className="border-red-200 bg-red-50">
@@ -341,29 +482,23 @@ export default function FinanceDetail() {
         </Card>
       )}
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <Card className="bg-white shadow-sm">
+      <div className="grid gap-4 md:grid-cols-3">
+        <Card className="bg-white shadow-sm md:col-span-1">
           <CardHeader className="pb-2">
             <CardDescription>Net Amount</CardDescription>
-            <CardTitle className="text-2xl text-slate-900">{formatAmount(summaryTotals.net)}</CardTitle>
+            <CardTitle className="text-3xl text-slate-900">{formatAmountStyled(summaryTotals.net)}</CardTitle>
           </CardHeader>
         </Card>
-        <Card className="bg-white shadow-sm">
+        <Card className="bg-white shadow-sm md:col-span-2">
           <CardHeader className="pb-2">
-            <CardDescription>Debit</CardDescription>
-            <CardTitle className="text-2xl text-slate-900">{formatAmount(summaryTotals.debit)}</CardTitle>
-          </CardHeader>
-        </Card>
-        <Card className="bg-white shadow-sm">
-          <CardHeader className="pb-2">
-            <CardDescription>Credit</CardDescription>
-            <CardTitle className="text-2xl text-slate-900">{formatAmount(summaryTotals.credit)}</CardTitle>
-          </CardHeader>
-        </Card>
-        <Card className="bg-white shadow-sm">
-          <CardHeader className="pb-2">
-            <CardDescription>Total Lines</CardDescription>
-            <CardTitle className="text-2xl text-slate-900">{summaryTotals.lines.toLocaleString()}</CardTitle>
+            <CardDescription>当前过滤的 Show / GL / Company</CardDescription>
+            <div className="flex flex-wrap gap-2 text-xs text-slate-600">
+              <Badge variant="outline">Show: {filters.showId ? showLookup[filters.showId]?.name || filters.showId : 'All'}</Badge>
+              <Badge variant="outline">
+                GL: {filters.glCode || 'All'} {filters.glCode ? `(${glNameLookup[filters.glCode] || 'Undefined GL Code'})` : ''}
+              </Badge>
+              <Badge variant="outline">Company: {filters.company || 'All'}</Badge>
+            </div>
           </CardHeader>
         </Card>
       </div>
@@ -387,16 +522,14 @@ export default function FinanceDetail() {
             <Table className="text-xs">
               <TableHeader>
                 <TableRow>
-                  <TableHead className="min-w-[90px]">AUFNR</TableHead>
+                  <TableHead className="min-w-[140px]">Show</TableHead>
                   <TableHead className="min-w-[70px]">GL</TableHead>
+                  <TableHead>GL Name</TableHead>
                   <TableHead>Company</TableHead>
                   <TableHead>Year</TableHead>
                   <TableHead>Currency</TableHead>
                   <TableHead>VKORG</TableHead>
                   <TableHead className="text-right">Net</TableHead>
-                  <TableHead className="text-right">Debit</TableHead>
-                  <TableHead className="text-right">Credit</TableHead>
-                  <TableHead className="text-right">Abs</TableHead>
                   <TableHead className="text-right">Lines</TableHead>
                   <TableHead className="min-w-[140px]">Updated At</TableHead>
                 </TableRow>
@@ -411,16 +544,19 @@ export default function FinanceDetail() {
                 ) : (
                   filteredSummaries.map((row) => (
                     <TableRow key={row.id}>
-                      <TableCell className="font-semibold text-slate-900">{row.aufnrNorm}</TableCell>
+                      <TableCell className="font-semibold text-slate-900">
+                        <div className="flex flex-col">
+                          <span>{row.showName || 'Unknown Show'}</span>
+                          <span className="text-xs text-slate-600">AUFNR: {row.aufnrNorm}</span>
+                        </div>
+                      </TableCell>
                       <TableCell className="font-semibold text-slate-900">{row.glAccountNorm}</TableCell>
+                      <TableCell className="text-slate-700">{row.glName}</TableCell>
                       <TableCell>{row.companyCode}</TableCell>
                       <TableCell>{row.fiscalYear}</TableCell>
                       <TableCell>{row.currency}</TableCell>
                       <TableCell>{row.vkorg}</TableCell>
-                      <TableCell className="text-right">{formatAmount(row.netAmount, row.currency)}</TableCell>
-                      <TableCell className="text-right">{formatAmount(row.debitAmount, row.currency)}</TableCell>
-                      <TableCell className="text-right">{formatAmount(row.creditAmount, row.currency)}</TableCell>
-                      <TableCell className="text-right">{formatAmount(row.absAmount, row.currency)}</TableCell>
+                      <TableCell className="text-right">{formatAmountStyled(row.netAmount, row.currency)}</TableCell>
                       <TableCell className="text-right">{row.lineCount}</TableCell>
                       <TableCell className="text-slate-600">{row.updatedAt ?? '—'}</TableCell>
                     </TableRow>
@@ -451,7 +587,7 @@ export default function FinanceDetail() {
             <Table className="text-xs">
               <TableHeader>
                 <TableRow>
-                  <TableHead className="min-w-[90px]">AUFNR</TableHead>
+                  <TableHead className="min-w-[140px]">Show</TableHead>
                   <TableHead className="min-w-[70px]">GL</TableHead>
                   <TableHead>Company</TableHead>
                   <TableHead>Year</TableHead>
@@ -479,8 +615,18 @@ export default function FinanceDetail() {
                 ) : (
                   filteredLines.map((row) => (
                     <TableRow key={row.id}>
-                      <TableCell className="font-semibold text-slate-900">{row.aufnrNorm}</TableCell>
-                      <TableCell className="font-semibold text-slate-900">{row.glAccountNorm}</TableCell>
+                      <TableCell className="font-semibold text-slate-900">
+                        <div className="flex flex-col">
+                          <span>{row.showName || 'Unknown Show'}</span>
+                          <span className="text-xs text-slate-600">AUFNR: {row.aufnrNorm}</span>
+                        </div>
+                      </TableCell>
+                      <TableCell className="font-semibold text-slate-900">
+                        <div className="flex flex-col">
+                          <span>{row.glAccountNorm}</span>
+                          <span className="text-xs text-slate-600">{row.glName}</span>
+                        </div>
+                      </TableCell>
                       <TableCell>{row.companyCode}</TableCell>
                       <TableCell>{row.fiscalYear}</TableCell>
                       <TableCell>{row.currency}</TableCell>
@@ -492,10 +638,10 @@ export default function FinanceDetail() {
                       </TableCell>
                       <TableCell>{row.postingDate ?? '—'}</TableCell>
                       <TableCell>{row.dcInd ?? '—'}</TableCell>
-                      <TableCell className="text-right">{formatAmount(row.amount ?? 0, row.currency)}</TableCell>
-                      <TableCell className="text-right">{formatAmount(row.debitAmount ?? 0, row.currency)}</TableCell>
-                      <TableCell className="text-right">{formatAmount(row.creditAmount ?? 0, row.currency)}</TableCell>
-                      <TableCell className="text-right">{formatAmount(row.absAmount ?? 0, row.currency)}</TableCell>
+                      <TableCell className="text-right">{formatAmountStyled(row.amount ?? 0, row.currency)}</TableCell>
+                      <TableCell className="text-right">{formatAmountStyled(row.debitAmount ?? 0, row.currency)}</TableCell>
+                      <TableCell className="text-right">{formatAmountStyled(row.creditAmount ?? 0, row.currency)}</TableCell>
+                      <TableCell className="text-right">{formatAmountStyled(row.absAmount ?? 0, row.currency)}</TableCell>
                       <TableCell>{row.costCenter ?? '—'}</TableCell>
                       <TableCell>{row.profitCenter ?? '—'}</TableCell>
                       <TableCell>{row.reference ?? '—'}</TableCell>
