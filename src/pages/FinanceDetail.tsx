@@ -372,7 +372,7 @@ export default function FinanceDetail() {
         <CardHeader className="flex flex-wrap items-center justify-between gap-2">
           <div>
             <CardTitle>Summary by AUFNR / GL</CardTitle>
-            <CardDescription>One row per dimKey under finance/glByAufnrGl/{{aufnr}}/{{gl}}/summary</CardDescription>
+            <CardDescription>One row per dimKey under finance/glByAufnrGl/{'{aufnr}'}/{'{gl}'}/summary</CardDescription>
           </div>
           <Badge variant="outline" className="text-slate-700">
             {filteredSummaries.length} record{filteredSummaries.length === 1 ? '' : 's'}
@@ -436,7 +436,7 @@ export default function FinanceDetail() {
         <CardHeader className="flex flex-wrap items-center justify-between gap-2">
           <div>
             <CardTitle>Line Items</CardTitle>
-            <CardDescription>finance/glByAufnrGl/{{aufnr}}/{{gl}}/lines/{'{lineId}'}</CardDescription>
+            <CardDescription>finance/glByAufnrGl/{'{aufnr}'}/{'{gl}'}/lines/{'{lineId}'}</CardDescription>
           </div>
           <Badge variant="outline" className="text-slate-700">
             {filteredLines.length} line{filteredLines.length === 1 ? '' : 's'}
