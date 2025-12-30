@@ -18,7 +18,7 @@ import {
 } from 'recharts';
 import { TrendingUp, Calendar } from 'lucide-react';
 import { dbGet } from '@/lib/firebase';
-import type { Show, ShowOrder, TeamMember } from '@/types';
+import type { Show, ShowOrder, ShowTask, TeamMember } from '@/types';
 import { format as formatDate } from 'date-fns';
 
 type InternalSalesOrderRecord = {
@@ -32,6 +32,7 @@ export default function Dashboard() {
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
   const [orders, setOrders] = useState<ShowOrder[]>([]);
   const [internalOrders, setInternalOrders] = useState<InternalSalesOrderRecord[]>([]);
+  const [tasks, setTasks] = useState<ShowTask[]>([]);
   const [budgets, setBudgets] = useState<Record<string, Record<string, unknown>>>({});
   const [loading, setLoading] = useState(true);
 
@@ -41,12 +42,13 @@ export default function Dashboard() {
 
   const loadData = async () => {
     try {
-      const [showsData, membersData, ordersData, budgetsData, internalOrdersData] = await Promise.all([
+      const [showsData, membersData, ordersData, budgetsData, internalOrdersData, tasksData] = await Promise.all([
         dbGet('shows'),
         dbGet('teamMembers'),
         dbGet('showOrders'),
         dbGet('showBudgets'),
         dbGet('finance/internalSalesOrders'),
+        dbGet('showTasks'),
       ]);
 
       setShows(showsData ? Object.values(showsData) : []);
@@ -58,6 +60,7 @@ export default function Dashboard() {
           ? Object.values(internalOrdersData as Record<string, InternalSalesOrderRecord>)
           : []
       );
+      setTasks(tasksData ? Object.values(tasksData as Record<string, ShowTask>) : []);
     } catch (error) {
       console.error('Error loading data:', error);
     } finally {
@@ -406,6 +409,10 @@ export default function Dashboard() {
     const dealerActual = parseNumber(showBudget.dealerActual ?? dealerTarget);
     const factoryActual = parseNumber(showBudget.factoryActual ?? factoryTarget);
     const internalOrder = internalOrders.find((order) => order.showId === showEntry.id);
+    const taskSummary = taskCompletionByShow[showEntry.id];
+    const teamMemberCount = Array.isArray(showEntry.teamMembers)
+      ? showEntry.teamMembers.filter(Boolean).length
+      : 0;
 
     const startLabel = showEntry.start
       ? formatDate(showEntry.start, 'dd MMM yyyy')
@@ -428,16 +435,35 @@ export default function Dashboard() {
       factoryTarget,
       internalSalesOrderNumber: internalOrder?.internalSalesOrderNumber || '',
       internalSalesOrderNumberDealer: internalOrder?.internalSalesOrderNumberDealer || '',
+      taskCompletion: taskSummary && taskSummary.total > 0
+        ? {
+            completed: taskSummary.completed,
+            total: taskSummary.total,
+            percent: Math.round((taskSummary.completed / taskSummary.total) * 100),
+          }
+        : null,
+      teamMemberCount,
     };
   };
 
+  const taskCompletionByShow = useMemo(() => {
+    return tasks.reduce((acc, task) => {
+      const eventId = typeof task.eventId === 'string' ? task.eventId.trim() : '';
+      if (!eventId) return acc;
+      if (!acc[eventId]) acc[eventId] = { completed: 0, total: 0 };
+      acc[eventId].total += 1;
+      if (task.status === 'Done') acc[eventId].completed += 1;
+      return acc;
+    }, {} as Record<string, { completed: number; total: number }>);
+  }, [tasks]);
+
   const currentShowSnapshot = useMemo(
     () => buildShowSnapshot(timelineShows.currentShow),
-    [timelineShows, budgets, orders, internalOrders]
+    [timelineShows, budgets, orders, internalOrders, taskCompletionByShow, teamMembers]
   );
   const lastShowSnapshot = useMemo(
     () => buildShowSnapshot(timelineShows.lastShow),
-    [timelineShows, budgets, orders, internalOrders]
+    [timelineShows, budgets, orders, internalOrders, taskCompletionByShow, teamMembers]
   );
 
   if (loading) {
@@ -458,8 +484,8 @@ export default function Dashboard() {
         <CardContent>
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
             {[
-              { title: 'Current / Upcoming Show', data: currentShowSnapshot, tone: 'blue' },
-              { title: 'Last Completed Show', data: lastShowSnapshot, tone: 'emerald' },
+              { title: 'Current / Upcoming Show', data: currentShowSnapshot, tone: 'blue', isCurrent: true },
+              { title: 'Last Completed Show', data: lastShowSnapshot, tone: 'emerald', isCurrent: false },
             ].map((entry) => (
               <Card key={entry.title} className="border-slate-200 shadow-sm">
                 <CardHeader className="pb-3">
@@ -486,6 +512,13 @@ export default function Dashboard() {
                         <p className="text-xs text-slate-600">
                           {entry.data.startLabel} → {entry.data.endLabel}
                         </p>
+                        {entry.isCurrent && entry.data.taskCompletion ? (
+                          <div className="mt-2 inline-flex items-center gap-2 rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
+                            <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                            Tasks: {entry.data.taskCompletion.completed}/{entry.data.taskCompletion.total} (
+                            {entry.data.taskCompletion.percent}%)
+                          </div>
+                        ) : null}
                         {(entry.data.internalSalesOrderNumber || entry.data.internalSalesOrderNumberDealer) && (
                           <div className="mt-2 flex flex-wrap gap-2 text-xs">
                             {entry.data.internalSalesOrderNumber ? (
@@ -501,16 +534,38 @@ export default function Dashboard() {
                           </div>
                         )}
                       </div>
-                      <div className="flex items-center justify-between rounded-lg border bg-slate-50 px-3 py-2">
-                        <div>
-                          <p className="text-xs uppercase tracking-wide text-slate-500">Sales</p>
-                          <p className="text-lg font-semibold text-slate-900">{formatNumber(entry.data.salesActual)}</p>
+                      {entry.isCurrent ? (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <div className="flex items-center justify-between rounded-lg border bg-slate-50 px-3 py-2">
+                            <div>
+                              <p className="text-xs uppercase tracking-wide text-slate-500">Sales</p>
+                              <p className="text-lg font-semibold text-slate-900">{formatNumber(entry.data.salesActual)}</p>
+                            </div>
+                            <div className="text-right">
+                              <p className="text-xs text-slate-500">Target</p>
+                              <p className="text-sm font-semibold text-blue-700">{formatNumber(entry.data.targetSales)}</p>
+                            </div>
+                          </div>
+                          <div className="flex items-center justify-between rounded-lg border bg-slate-50 px-3 py-2">
+                            <div>
+                              <p className="text-xs uppercase tracking-wide text-slate-500">Team Members</p>
+                              <p className="text-lg font-semibold text-slate-900">{entry.data.teamMemberCount}</p>
+                            </div>
+                            <div className="text-right text-xs text-slate-500">Assigned to this show</div>
+                          </div>
                         </div>
-                        <div className="text-right">
-                          <p className="text-xs text-slate-500">Target</p>
-                          <p className="text-sm font-semibold text-blue-700">{formatNumber(entry.data.targetSales)}</p>
+                      ) : (
+                        <div className="flex items-center justify-between rounded-lg border bg-slate-50 px-3 py-2">
+                          <div>
+                            <p className="text-xs uppercase tracking-wide text-slate-500">Sales</p>
+                            <p className="text-lg font-semibold text-slate-900">{formatNumber(entry.data.salesActual)}</p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-xs text-slate-500">Target</p>
+                            <p className="text-sm font-semibold text-blue-700">{formatNumber(entry.data.targetSales)}</p>
+                          </div>
                         </div>
-                      </div>
+                      )}
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         {[
                           {
