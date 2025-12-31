@@ -328,12 +328,14 @@ export default function FinanceDetail() {
       const sortedYears = Array.from(years).filter(Boolean).sort();
       setAvailableYears(sortedYears);
       const personMap: Record<string, PersonOption> = {};
-      annotateLines.forEach((line) => {
-        const person = extractPersonKey(line.sgtxt);
-        if (person) {
-          personMap[person.key] = person;
-        }
-      });
+      annotateLines
+        .filter((line) => line.glAccountNorm === '688304')
+        .forEach((line) => {
+          const person = extractPersonKey(line.sgtxt);
+          if (person) {
+            personMap[person.key] = person;
+          }
+        });
       setPeople(Object.values(personMap));
       setError(null);
     } catch (err) {
@@ -370,7 +372,11 @@ export default function FinanceDetail() {
           (value ?? '').toLowerCase().includes(needle.toLowerCase());
         const personTokens = row.personTokens ?? extractPersonKey(row.sgtxt)?.tokens ?? [];
         const personMatches =
-          personFilter === ALL_PERSONS ? true : personTokens.some((token) => personFilter.split(' ').includes(token));
+          filters.glCode === '688304'
+            ? personFilter === ALL_PERSONS
+              ? true
+              : personTokens.some((token) => personFilter.split(' ').includes(token))
+            : true;
         return (
           (filters.showId !== ALL_SHOWS ? row.showId === filters.showId : true) &&
           (filters.glCode ? matches(row.glAccountNorm, filters.glCode) : true) &&
@@ -457,6 +463,12 @@ export default function FinanceDetail() {
     lines.forEach((row) => row.showId && ids.add(row.showId));
     return Array.from(ids);
   }, [summaries, lines]);
+
+  useEffect(() => {
+    if (filters.glCode !== '688304' && personFilter !== ALL_PERSONS) {
+      setPersonFilter(ALL_PERSONS);
+    }
+  }, [filters.glCode, personFilter]);
 
   return (
     <div className="space-y-6">
@@ -709,7 +721,7 @@ export default function FinanceDetail() {
               {filteredLines.length} line{filteredLines.length === 1 ? '' : 's'}
             </Badge>
           </CardHeader>
-          {people.length > 0 && (
+          {people.length > 0 && filters.glCode === '688304' && (
             <div className="px-6 pb-2 flex flex-wrap gap-2">
               <Badge
                 variant={personFilter === ALL_PERSONS ? 'default' : 'outline'}
