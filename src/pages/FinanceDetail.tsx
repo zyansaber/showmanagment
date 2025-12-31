@@ -45,7 +45,6 @@ type LineRow = {
   amount?: number;
   debitAmount?: number;
   creditAmount?: number;
-  absAmount?: number;
   sgtxt?: string;
   sfgxt?: string;
   personTokens?: string[];
@@ -62,6 +61,7 @@ type Filters = {
   company: string;
   fiscalYear: string;
   search: string;
+  member: string;
 };
 
 type ShowRecord = {
@@ -189,7 +189,6 @@ const normaliseSummaryRows = (data: unknown): { summaries: SummaryRow[]; lines: 
             amount: numberOrZero(line.amount),
             debitAmount: numberOrZero(line.debit_amount),
             creditAmount: numberOrZero(line.credit_amount),
-            absAmount: numberOrZero(line.abs_amount),
             sgtxt: typeof line.sgtxt === 'string' ? line.sgtxt : undefined,
             sfgxt: typeof (line as Record<string, unknown>).sfgxt === 'string' ? (line as Record<string, unknown>).sfgxt : undefined,
             costCenter: typeof line.cost_center === 'string' ? line.cost_center : undefined,
@@ -207,7 +206,7 @@ const normaliseSummaryRows = (data: unknown): { summaries: SummaryRow[]; lines: 
 
 const ALL_SHOWS = 'all';
 const ALL_YEARS = 'all-years';
-const ALL_PERSONS = 'all-persons';
+const ALL_MEMBERS = 'all-members';
 
 const formatAmount = (value: number, currency?: string) => {
   if (!Number.isFinite(value)) return '—';
@@ -265,17 +264,20 @@ export default function FinanceDetail() {
   const [aufnrToShow, setAufnrToShow] = useState<Record<string, { showId: string; showName?: string }>>({});
   const [glNameLookup, setGlNameLookup] = useState<Record<string, string>>({});
   const [availableYears, setAvailableYears] = useState<string[]>([]);
-  const [people, setPeople] = useState<PersonOption[]>([]);
-  const [personFilter, setPersonFilter] = useState<string>(ALL_PERSONS);
+  const [members, setMembers] = useState<PersonOption[]>([]);
+  const [memberFilter, setMemberFilter] = useState<string>(ALL_MEMBERS);
+  const [memberTokensLookup, setMemberTokensLookup] = useState<Record<string, string[]>>({});
+  const [members, setMembers] = useState<PersonOption[]>([]);
 
   const loadData = async () => {
     try {
       setLoading(true);
-      const [glData, showsData, ordersData, expensesData] = await Promise.all([
+      const [glData, showsData, ordersData, expensesData, teamData] = await Promise.all([
         dbGet('finance/glByAufnrGl'),
         dbGet('shows'),
         dbGet('finance/internalSalesOrders'),
         dbGet('finance/expenses'),
+        dbGet('teamMembers'),
       ]);
 
       const parsed = normaliseSummaryRows(glData);
@@ -327,16 +329,26 @@ export default function FinanceDetail() {
       annotateLines.forEach((row) => years.add(row.fiscalYear));
       const sortedYears = Array.from(years).filter(Boolean).sort();
       setAvailableYears(sortedYears);
-      const personMap: Record<string, PersonOption> = {};
-      annotateLines
-        .filter((line) => line.glAccountNorm === '688304')
-        .forEach((line) => {
-          const person = extractPersonKey(line.sgtxt);
-          if (person) {
-            personMap[person.key] = person;
-          }
-        });
-      setPeople(Object.values(personMap));
+      const memberList: PersonOption[] = teamData
+        ? Object.values(teamData as Record<string, { memberName?: string }>)
+            .map((member) => {
+              const name = member?.memberName?.trim();
+              if (!name) return null;
+              const tokens = name
+                .split(/\s+/)
+                .map((part) => part.trim().toLowerCase())
+                .filter(Boolean);
+              if (tokens.length === 0) return null;
+              return { key: name, tokens } as PersonOption;
+            })
+            .filter(Boolean) as PersonOption[]
+        : [];
+      setMembers(memberList);
+      const tokenLookup: Record<string, string[]> = {};
+      memberList.forEach((member) => {
+        tokenLookup[member.key] = member.tokens;
+      });
+      setMemberTokensLookup(tokenLookup);
       setError(null);
     } catch (err) {
       console.error('Failed to load finance detail', err);
@@ -371,18 +383,19 @@ export default function FinanceDetail() {
         const matches = (value: string | undefined, needle: string) =>
           (value ?? '').toLowerCase().includes(needle.toLowerCase());
         const personTokens = row.personTokens ?? extractPersonKey(row.sgtxt)?.tokens ?? [];
-        const personMatches =
+        const memberTokens = memberTokensLookup[filters.member] ?? [];
+        const memberMatches =
           filters.glCode === '688304'
-            ? personFilter === ALL_PERSONS
+            ? filters.member === ALL_MEMBERS
               ? true
-              : personTokens.some((token) => personFilter.split(' ').includes(token))
+              : memberTokens.some((token) => personTokens.includes(token) || (row.sgtxt ?? '').toLowerCase().includes(token))
             : true;
         return (
           (filters.showId !== ALL_SHOWS ? row.showId === filters.showId : true) &&
           (filters.glCode ? matches(row.glAccountNorm, filters.glCode) : true) &&
           (filters.company ? row.companyCode === filters.company : true) &&
           (filters.fiscalYear !== ALL_YEARS ? row.fiscalYear === filters.fiscalYear : true) &&
-          personMatches &&
+          memberMatches &&
           (filters.search
             ? matches(row.sgtxt, filters.search) ||
               matches(row.sfgxt, filters.search) ||
@@ -391,7 +404,7 @@ export default function FinanceDetail() {
             : true)
         );
       }),
-    [filters, lines, ALL_SHOWS, ALL_YEARS, personFilter]
+    [filters, lines, ALL_SHOWS, ALL_YEARS, memberTokensLookup]
   );
 
   const summaryTotals = useMemo(() => {
@@ -400,27 +413,12 @@ export default function FinanceDetail() {
         acc.net += row.netAmount;
         acc.debit += row.debitAmount;
         acc.credit += row.creditAmount;
-        acc.abs += row.absAmount;
         acc.lines += row.lineCount;
         return acc;
       },
-      { net: 0, debit: 0, credit: 0, abs: 0, lines: 0 }
+      { net: 0, debit: 0, credit: 0, lines: 0 }
     );
   }, [filteredSummaries]);
-
-  const personTotals = useMemo(() => {
-    const linesForPerson = filteredLines;
-    return linesForPerson.reduce(
-      (acc, line) => {
-        acc.amount += line.amount ?? 0;
-        acc.debit += line.debitAmount ?? 0;
-        acc.credit += line.creditAmount ?? 0;
-        acc.abs += line.absAmount ?? 0;
-        return acc;
-      },
-      { amount: 0, debit: 0, credit: 0, abs: 0 }
-    );
-  }, [filteredLines]);
 
   const clearFilters = () =>
     setFilters({
@@ -429,6 +427,7 @@ export default function FinanceDetail() {
       company: '',
       fiscalYear: ALL_YEARS,
       search: '',
+      member: ALL_MEMBERS,
     });
 
   const buildAufnrShowMap = (
@@ -465,10 +464,10 @@ export default function FinanceDetail() {
   }, [summaries, lines]);
 
   useEffect(() => {
-    if (filters.glCode !== '688304' && personFilter !== ALL_PERSONS) {
-      setPersonFilter(ALL_PERSONS);
+    if (filters.glCode !== '688304' && memberFilter !== ALL_MEMBERS) {
+      setMemberFilter(ALL_MEMBERS);
     }
-  }, [filters.glCode, personFilter]);
+  }, [filters.glCode, memberFilter]);
 
   return (
     <div className="space-y-6">
@@ -721,23 +720,23 @@ export default function FinanceDetail() {
               {filteredLines.length} line{filteredLines.length === 1 ? '' : 's'}
             </Badge>
           </CardHeader>
-          {people.length > 0 && filters.glCode === '688304' && (
+          {members.length > 0 && filters.glCode === '688304' && (
             <div className="px-6 pb-2 flex flex-wrap gap-2">
               <Badge
-                variant={personFilter === ALL_PERSONS ? 'default' : 'outline'}
+                variant={memberFilter === ALL_MEMBERS ? 'default' : 'outline'}
                 className="cursor-pointer"
-                onClick={() => setPersonFilter(ALL_PERSONS)}
+                onClick={() => setMemberFilter(ALL_MEMBERS)}
               >
-                All people
+                All members
               </Badge>
-              {people.map((person) => (
+              {members.map((member) => (
                 <Badge
-                  key={person.key}
-                  variant={personFilter === person.key ? 'default' : 'outline'}
+                  key={member.key}
+                  variant={memberFilter === member.key ? 'default' : 'outline'}
                   className="cursor-pointer"
-                  onClick={() => setPersonFilter((prev) => (prev === person.key ? ALL_PERSONS : person.key))}
+                  onClick={() => setMemberFilter((prev) => (prev === member.key ? ALL_MEMBERS : member.key))}
                 >
-                  {person.key}
+                  {member.key}
                 </Badge>
               ))}
             </div>
@@ -762,7 +761,6 @@ export default function FinanceDetail() {
                   <TableHead className="text-right">Amount</TableHead>
                   <TableHead className="text-right">Debit</TableHead>
                   <TableHead className="text-right">Credit</TableHead>
-                  <TableHead className="text-right">Abs</TableHead>
                   <TableHead>Cost Center</TableHead>
                   <TableHead>Profit Center</TableHead>
                   <TableHead>Reference</TableHead>
@@ -805,7 +803,6 @@ export default function FinanceDetail() {
                       <TableCell className="text-right">{formatAmountExpense(row.amount ?? 0, row.currency)}</TableCell>
                       <TableCell className="text-right">{formatDebitExpense(row.debitAmount ?? 0, row.currency)}</TableCell>
                       <TableCell className="text-right">{formatCreditExpense(row.creditAmount ?? 0, row.currency)}</TableCell>
-                      <TableCell className="text-right">{formatAmountStyled(row.absAmount ?? 0, row.currency)}</TableCell>
                       <TableCell>{row.costCenter ?? '—'}</TableCell>
                       <TableCell>{row.profitCenter ?? '—'}</TableCell>
                       <TableCell>{row.reference ?? '—'}</TableCell>
@@ -815,34 +812,6 @@ export default function FinanceDetail() {
                 )}
               </TableBody>
             </Table>
-          )}
-          {personFilter !== 'all-persons' && (
-            <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-              <Card className="border-slate-200">
-                <CardHeader className="pb-2">
-                  <CardDescription>{personFilter}</CardDescription>
-                  <CardTitle className="text-lg">Totals</CardTitle>
-                </CardHeader>
-                <CardContent className="grid gap-2 text-sm">
-                  <div className="flex items-center justify-between">
-                    <span>Amount</span>
-                    {formatAmountExpense(personTotals.amount)}
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span>Debit</span>
-                    {formatDebitExpense(personTotals.debit)}
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span>Credit</span>
-                    {formatCreditExpense(personTotals.credit)}
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span>Abs</span>
-                    {formatAmountStyled(personTotals.abs)}
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
           )}
         </CardContent>
       </Card>
