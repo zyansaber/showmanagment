@@ -68,6 +68,11 @@ type ShowRecord = {
   name?: string;
 };
 
+type PersonOption = {
+  key: string;
+  tokens: string[];
+};
+
 type InternalOrder = {
   showId: string;
   internalSalesOrderNumberDealer?: string;
@@ -206,6 +211,26 @@ const formatAmountStyled = (value: number | undefined, currency?: string) => {
   return <span className="text-slate-700">{formatted}</span>;
 };
 
+const formatAmountExpense = (value: number | undefined, currency?: string) => {
+  if (value === undefined || !Number.isFinite(value)) return <span className="text-slate-500">—</span>;
+  const formatted = formatAmount(Math.abs(value), currency);
+  if (value > 0) return <span className="text-red-600 font-semibold">({formatted})</span>;
+  if (value < 0) return <span className="text-emerald-600 font-semibold">{formatted}</span>;
+  return <span className="text-slate-700">{formatted}</span>;
+};
+
+const formatDebitExpense = (value: number | undefined, currency?: string) => {
+  if (value === undefined || !Number.isFinite(value)) return <span className="text-slate-500">—</span>;
+  const formatted = formatAmount(Math.abs(value), currency);
+  return <span className="text-red-600 font-semibold">({formatted})</span>;
+};
+
+const formatCreditExpense = (value: number | undefined, currency?: string) => {
+  if (value === undefined || !Number.isFinite(value)) return <span className="text-slate-500">—</span>;
+  const formatted = formatAmount(Math.abs(value), currency);
+  return <span className="text-emerald-600 font-semibold">{formatted}</span>;
+};
+
 export default function FinanceDetail() {
   const ALL_SHOWS = 'all';
   const ALL_YEARS = 'all-years';
@@ -224,6 +249,8 @@ export default function FinanceDetail() {
   const [aufnrToShow, setAufnrToShow] = useState<Record<string, { showId: string; showName?: string }>>({});
   const [glNameLookup, setGlNameLookup] = useState<Record<string, string>>({});
   const [availableYears, setAvailableYears] = useState<string[]>([]);
+  const [people, setPeople] = useState<PersonOption[]>([]);
+  const [personFilter, setPersonFilter] = useState<string>('all-persons');
 
   const loadData = async () => {
     try {
@@ -284,6 +311,14 @@ export default function FinanceDetail() {
       annotateLines.forEach((row) => years.add(row.fiscalYear));
       const sortedYears = Array.from(years).filter(Boolean).sort();
       setAvailableYears(sortedYears);
+      const personMap: Record<string, PersonOption> = {};
+      annotateLines.forEach((line) => {
+        const person = extractPersonKey(line.sgtxt);
+        if (person) {
+          personMap[person.key] = person;
+        }
+      });
+      setPeople(Object.values(personMap));
       setError(null);
     } catch (err) {
       console.error('Failed to load finance detail', err);
@@ -317,11 +352,17 @@ export default function FinanceDetail() {
       lines.filter((row) => {
         const matches = (value: string | undefined, needle: string) =>
           (value ?? '').toLowerCase().includes(needle.toLowerCase());
+        const personTokens = extractPersonKey(row.sgtxt)?.tokens ?? [];
+        const personMatches =
+          personFilter === 'all-persons'
+            ? true
+            : personTokens.some((token) => personFilter.split(' ').includes(token));
         return (
           (filters.showId !== ALL_SHOWS ? row.showId === filters.showId : true) &&
           (filters.glCode ? matches(row.glAccountNorm, filters.glCode) : true) &&
           (filters.company ? row.companyCode === filters.company : true) &&
           (filters.fiscalYear !== ALL_YEARS ? row.fiscalYear === filters.fiscalYear : true) &&
+          personMatches &&
           (filters.search
             ? matches(row.sgtxt, filters.search) ||
               matches(row.sfgxt, filters.search) ||
@@ -346,6 +387,20 @@ export default function FinanceDetail() {
       { net: 0, debit: 0, credit: 0, abs: 0, lines: 0 }
     );
   }, [filteredSummaries]);
+
+  const personTotals = useMemo(() => {
+    const linesForPerson = filteredLines;
+    return linesForPerson.reduce(
+      (acc, line) => {
+        acc.amount += line.amount ?? 0;
+        acc.debit += line.debitAmount ?? 0;
+        acc.credit += line.creditAmount ?? 0;
+        acc.abs += line.absAmount ?? 0;
+        return acc;
+      },
+      { amount: 0, debit: 0, credit: 0, abs: 0 }
+    );
+  }, [filteredLines]);
 
   const clearFilters = () =>
     setFilters({
@@ -382,6 +437,18 @@ export default function FinanceDetail() {
     return map;
   };
 
+  const extractPersonKey = (text: string | undefined): PersonOption | null => {
+    if (!text) return null;
+    const words = text
+      .split(/\s+/)
+      .map((w) => w.trim())
+      .filter(Boolean);
+    if (words.length === 0) return null;
+    const tokens = words.slice(-2).map((w) => w.toLowerCase());
+    if (tokens.length === 0) return null;
+    return { key: tokens.join(' '), tokens };
+  };
+
   const financeShowOptions = useMemo(() => {
     const ids = new Set<string>();
     summaries.forEach((row) => row.showId && ids.add(row.showId));
@@ -414,7 +481,7 @@ export default function FinanceDetail() {
         <Card>
           <CardHeader>
             <CardTitle>Show Filter</CardTitle>
-            <CardDescription>选择 Show（来自 internal sales order 的 AUFNR 映射）</CardDescription>
+            <CardDescription>Shows with finance records (mapped from internal sales order AUFNR)</CardDescription>
           </CardHeader>
           <CardContent className="grid gap-3 md:grid-cols-3 lg:grid-cols-4">
             <Select value={filters.showId} onValueChange={(value) => setFilters((prev) => ({ ...prev, showId: value }))}>
@@ -469,7 +536,7 @@ export default function FinanceDetail() {
           <Card>
             <CardHeader>
               <CardTitle>GL Code</CardTitle>
-              <CardDescription>GL code 来源于 finance/expenses 的 glCode。未定义显示 Undefined GL Code。</CardDescription>
+              <CardDescription>GL code from finance/expenses glCode (Undefined if not mapped).</CardDescription>
             </CardHeader>
             <CardContent className="grid gap-3 sm:grid-cols-2">
               {[...new Set(summaries.map((row) => row.glAccountNorm))].map((gl) => {
@@ -631,15 +698,36 @@ export default function FinanceDetail() {
       </Card>
 
       <Card>
-        <CardHeader className="flex flex-wrap items-center justify-between gap-2">
-          <div>
-            <CardTitle>Line Items</CardTitle>
-            <CardDescription>finance/glByAufnrGl/{'{aufnr}'}/{'{gl}'}/lines/{'{lineId}'}</CardDescription>
-          </div>
-          <Badge variant="outline" className="text-slate-700">
-            {filteredLines.length} line{filteredLines.length === 1 ? '' : 's'}
-          </Badge>
-        </CardHeader>
+          <CardHeader className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <CardTitle>Line Items</CardTitle>
+              <CardDescription>finance/glByAufnrGl/{'{aufnr}'}/{'{gl}'}/lines/{'{lineId}'}</CardDescription>
+            </div>
+            <Badge variant="outline" className="text-slate-700">
+              {filteredLines.length} line{filteredLines.length === 1 ? '' : 's'}
+            </Badge>
+          </CardHeader>
+          {people.length > 0 && (
+            <div className="px-6 pb-2 flex flex-wrap gap-2">
+              <Badge
+                variant={personFilter === 'all-persons' ? 'default' : 'outline'}
+                className="cursor-pointer"
+                onClick={() => setPersonFilter('all-persons')}
+              >
+                All people
+              </Badge>
+              {people.map((person) => (
+                <Badge
+                  key={person.key}
+                  variant={personFilter === person.key ? 'default' : 'outline'}
+                  className="cursor-pointer"
+                  onClick={() => setPersonFilter((prev) => (prev === person.key ? 'all-persons' : person.key))}
+                >
+                  {person.key}
+                </Badge>
+              ))}
+            </div>
+          )}
         <CardContent className="overflow-x-auto">
           {loading ? (
             <div className="flex items-center gap-2 text-slate-600">
@@ -700,9 +788,9 @@ export default function FinanceDetail() {
                       </TableCell>
                       <TableCell>{row.postingDate ?? '—'}</TableCell>
                       <TableCell>{row.dcInd ?? '—'}</TableCell>
-                      <TableCell className="text-right">{formatAmountStyled(row.amount ?? 0, row.currency)}</TableCell>
-                      <TableCell className="text-right">{formatAmountStyled(row.debitAmount ?? 0, row.currency)}</TableCell>
-                      <TableCell className="text-right">{formatAmountStyled(row.creditAmount ?? 0, row.currency)}</TableCell>
+                      <TableCell className="text-right">{formatAmountExpense(row.amount ?? 0, row.currency)}</TableCell>
+                      <TableCell className="text-right">{formatDebitExpense(row.debitAmount ?? 0, row.currency)}</TableCell>
+                      <TableCell className="text-right">{formatCreditExpense(row.creditAmount ?? 0, row.currency)}</TableCell>
                       <TableCell className="text-right">{formatAmountStyled(row.absAmount ?? 0, row.currency)}</TableCell>
                       <TableCell>{row.costCenter ?? '—'}</TableCell>
                       <TableCell>{row.profitCenter ?? '—'}</TableCell>
@@ -713,6 +801,34 @@ export default function FinanceDetail() {
                 )}
               </TableBody>
             </Table>
+          )}
+          {personFilter !== 'all-persons' && (
+            <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <Card className="border-slate-200">
+                <CardHeader className="pb-2">
+                  <CardDescription>{personFilter}</CardDescription>
+                  <CardTitle className="text-lg">Totals</CardTitle>
+                </CardHeader>
+                <CardContent className="grid gap-2 text-sm">
+                  <div className="flex items-center justify-between">
+                    <span>Amount</span>
+                    {formatAmountExpense(personTotals.amount)}
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span>Debit</span>
+                    {formatDebitExpense(personTotals.debit)}
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span>Credit</span>
+                    {formatCreditExpense(personTotals.credit)}
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span>Abs</span>
+                    {formatAmountStyled(personTotals.abs)}
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
           )}
         </CardContent>
       </Card>
