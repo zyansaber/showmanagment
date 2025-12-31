@@ -61,7 +61,6 @@ type Filters = {
   company: string;
   fiscalYear: string;
   search: string;
-  member: string;
 };
 
 type ShowRecord = {
@@ -402,13 +401,13 @@ export default function FinanceDetail() {
     [filters, summaries, ALL_SHOWS, ALL_YEARS]
   );
 
-const filteredLines = useMemo(
-  () =>
-    lines.filter((row) => {
-      const matches = (value: string | undefined, needle: string) =>
-        (value ?? '').toLowerCase().includes(needle.toLowerCase());
-      const personTokens = row.personTokens ?? extractPersonKey(row.sgtxt)?.tokens ?? [];
-      const memberTokens = memberTokensLookup[filters.member] ?? [];
+  const filteredLines = useMemo(
+    () =>
+      lines.filter((row) => {
+        const matches = (value: string | undefined, needle: string) =>
+          (value ?? '').toLowerCase().includes(needle.toLowerCase());
+        const personTokens = row.personTokens ?? extractPersonKey(row.sgtxt)?.tokens ?? [];
+        const memberTokens = memberTokensLookup[memberFilter] ?? [];
         const normalizedSgtxt = (row.sgtxt ?? '').toLowerCase();
         const sanitizedSgtxt = normalizedSgtxt.replace(/[^\p{L}\p{N}\s]/gu, ' ');
         const sgtxtTokens = sanitizedSgtxt
@@ -417,7 +416,7 @@ const filteredLines = useMemo(
           .filter(Boolean);
         const memberMatches =
           filters.glCode === '688304'
-            ? filters.member === ALL_MEMBERS
+            ? memberFilter === ALL_MEMBERS
               ? true
               : memberTokens.some(
                   (token) =>
