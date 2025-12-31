@@ -48,6 +48,7 @@ type LineRow = {
   absAmount?: number;
   sgtxt?: string;
   sfgxt?: string;
+  personTokens?: string[];
   costCenter?: string;
   profitCenter?: string;
   reference?: string;
@@ -182,6 +183,7 @@ const normaliseSummaryRows = (data: unknown): { summaries: SummaryRow[]; lines: 
             costCenter: typeof line.cost_center === 'string' ? line.cost_center : undefined,
             profitCenter: typeof line.profit_center === 'string' ? line.profit_center : undefined,
             reference: typeof line.reference === 'string' ? line.reference : undefined,
+            personTokens: extractPersonKey(line.sgtxt)?.tokens,
           });
         });
       }
@@ -190,6 +192,10 @@ const normaliseSummaryRows = (data: unknown): { summaries: SummaryRow[]; lines: 
 
   return { summaries, lines };
 };
+
+const ALL_SHOWS = 'all';
+const ALL_YEARS = 'all-years';
+const ALL_PERSONS = 'all-persons';
 
 const formatAmount = (value: number, currency?: string) => {
   if (!Number.isFinite(value)) return '—';
@@ -232,8 +238,6 @@ const formatCreditExpense = (value: number | undefined, currency?: string) => {
 };
 
 export default function FinanceDetail() {
-  const ALL_SHOWS = 'all';
-  const ALL_YEARS = 'all-years';
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [summaries, setSummaries] = useState<SummaryRow[]>([]);
@@ -250,7 +254,7 @@ export default function FinanceDetail() {
   const [glNameLookup, setGlNameLookup] = useState<Record<string, string>>({});
   const [availableYears, setAvailableYears] = useState<string[]>([]);
   const [people, setPeople] = useState<PersonOption[]>([]);
-  const [personFilter, setPersonFilter] = useState<string>('all-persons');
+  const [personFilter, setPersonFilter] = useState<string>(ALL_PERSONS);
 
   const loadData = async () => {
     try {
@@ -352,11 +356,9 @@ export default function FinanceDetail() {
       lines.filter((row) => {
         const matches = (value: string | undefined, needle: string) =>
           (value ?? '').toLowerCase().includes(needle.toLowerCase());
-        const personTokens = extractPersonKey(row.sgtxt)?.tokens ?? [];
+        const personTokens = row.personTokens ?? extractPersonKey(row.sgtxt)?.tokens ?? [];
         const personMatches =
-          personFilter === 'all-persons'
-            ? true
-            : personTokens.some((token) => personFilter.split(' ').includes(token));
+          personFilter === ALL_PERSONS ? true : personTokens.some((token) => personFilter.split(' ').includes(token));
         return (
           (filters.showId !== ALL_SHOWS ? row.showId === filters.showId : true) &&
           (filters.glCode ? matches(row.glAccountNorm, filters.glCode) : true) &&
@@ -371,7 +373,7 @@ export default function FinanceDetail() {
             : true)
         );
       }),
-    [filters, lines, ALL_SHOWS, ALL_YEARS]
+    [filters, lines, ALL_SHOWS, ALL_YEARS, personFilter]
   );
 
   const summaryTotals = useMemo(() => {
@@ -710,9 +712,9 @@ export default function FinanceDetail() {
           {people.length > 0 && (
             <div className="px-6 pb-2 flex flex-wrap gap-2">
               <Badge
-                variant={personFilter === 'all-persons' ? 'default' : 'outline'}
+                variant={personFilter === ALL_PERSONS ? 'default' : 'outline'}
                 className="cursor-pointer"
-                onClick={() => setPersonFilter('all-persons')}
+                onClick={() => setPersonFilter(ALL_PERSONS)}
               >
                 All people
               </Badge>
@@ -721,7 +723,7 @@ export default function FinanceDetail() {
                   key={person.key}
                   variant={personFilter === person.key ? 'default' : 'outline'}
                   className="cursor-pointer"
-                  onClick={() => setPersonFilter((prev) => (prev === person.key ? 'all-persons' : person.key))}
+                  onClick={() => setPersonFilter((prev) => (prev === person.key ? ALL_PERSONS : person.key))}
                 >
                   {person.key}
                 </Badge>
