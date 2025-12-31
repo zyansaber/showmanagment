@@ -101,6 +101,18 @@ const numberOrZero = (value: unknown) => {
   return 0;
 };
 
+function extractPersonKey(text: string | undefined): PersonOption | null {
+  if (!text) return null;
+  const words = text
+    .split(/\s+/)
+    .map((w) => w.trim())
+    .filter(Boolean);
+  if (words.length === 0) return null;
+  const tokens = words.slice(-2).map((w) => w.toLowerCase());
+  if (tokens.length === 0) return null;
+  return { key: tokens.join(' '), tokens };
+}
+
 const normaliseSummaryRows = (data: unknown): { summaries: SummaryRow[]; lines: LineRow[] } => {
   if (!data || typeof data !== 'object') return { summaries: [], lines: [] };
   const root = data as Record<string, unknown>;
@@ -437,18 +449,6 @@ export default function FinanceDetail() {
       });
     });
     return map;
-  };
-
-  const extractPersonKey = (text: string | undefined): PersonOption | null => {
-    if (!text) return null;
-    const words = text
-      .split(/\s+/)
-      .map((w) => w.trim())
-      .filter(Boolean);
-    if (words.length === 0) return null;
-    const tokens = words.slice(-2).map((w) => w.toLowerCase());
-    if (tokens.length === 0) return null;
-    return { key: tokens.join(' '), tokens };
   };
 
   const financeShowOptions = useMemo(() => {
