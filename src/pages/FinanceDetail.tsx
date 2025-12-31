@@ -132,6 +132,7 @@ const buildMemberTokens = (name: string): string[] => {
   const tokens = new Set<string>();
   parts.forEach((p) => tokens.add(p));
   tokens.add(parts.join(' ')); // full name
+  tokens.add(parts.join('')); // full name without spaces
   initials.forEach((i) => tokens.add(i));
   if (initials.length === 2) {
     tokens.add(initials.join('')); // combined initials
@@ -401,19 +402,29 @@ export default function FinanceDetail() {
     [filters, summaries, ALL_SHOWS, ALL_YEARS]
   );
 
-  const filteredLines = useMemo(
-    () =>
-      lines.filter((row) => {
-        const matches = (value: string | undefined, needle: string) =>
-          (value ?? '').toLowerCase().includes(needle.toLowerCase());
-        const personTokens = row.personTokens ?? extractPersonKey(row.sgtxt)?.tokens ?? [];
-        const memberTokens = memberTokensLookup[filters.member] ?? [];
+const filteredLines = useMemo(
+  () =>
+    lines.filter((row) => {
+      const matches = (value: string | undefined, needle: string) =>
+        (value ?? '').toLowerCase().includes(needle.toLowerCase());
+      const personTokens = row.personTokens ?? extractPersonKey(row.sgtxt)?.tokens ?? [];
+      const memberTokens = memberTokensLookup[filters.member] ?? [];
         const normalizedSgtxt = (row.sgtxt ?? '').toLowerCase();
+        const sanitizedSgtxt = normalizedSgtxt.replace(/[^\p{L}\p{N}\s]/gu, ' ');
+        const sgtxtTokens = sanitizedSgtxt
+          .split(/\s+/)
+          .map((t) => t.trim())
+          .filter(Boolean);
         const memberMatches =
           filters.glCode === '688304'
             ? filters.member === ALL_MEMBERS
               ? true
-              : memberTokens.some((token) => personTokens.includes(token) || normalizedSgtxt.includes(token))
+              : memberTokens.some(
+                  (token) =>
+                    personTokens.includes(token) ||
+                    sgtxtTokens.includes(token) ||
+                    sanitizedSgtxt.replace(/\s+/g, '').includes(token.replace(/\s+/g, ''))
+                )
             : true;
         return (
           (filters.showId !== ALL_SHOWS ? row.showId === filters.showId : true) &&
