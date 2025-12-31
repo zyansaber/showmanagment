@@ -113,6 +113,34 @@ function extractPersonKey(text: string | undefined): PersonOption | null {
   return { key: tokens.join(' '), tokens };
 }
 
+const buildMemberTokens = (name: string): string[] => {
+  const lower = name.toLowerCase().trim();
+  if (!lower) return [];
+  const parts = lower
+    .split(/\s+/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+
+  if (parts.length === 0) return [];
+
+  const firstName = parts[0];
+  const lastName = parts[parts.length - 1];
+  const initials: string[] = [];
+  if (firstName) initials.push(firstName[0]);
+  if (lastName) initials.push(lastName[0]);
+
+  const tokens = new Set<string>();
+  parts.forEach((p) => tokens.add(p));
+  tokens.add(parts.join(' ')); // full name
+  initials.forEach((i) => tokens.add(i));
+  if (initials.length === 2) {
+    tokens.add(initials.join('')); // combined initials
+    tokens.add(`${initials[0]} ${initials[1]}`);
+  }
+
+  return Array.from(tokens).filter(Boolean);
+};
+
 const normaliseSummaryRows = (data: unknown): { summaries: SummaryRow[]; lines: LineRow[] } => {
   if (!data || typeof data !== 'object') return { summaries: [], lines: [] };
   const root = data as Record<string, unknown>;
@@ -333,10 +361,7 @@ export default function FinanceDetail() {
             .map((member) => {
               const name = member?.memberName?.trim();
               if (!name) return null;
-              const tokens = name
-                .split(/\s+/)
-                .map((part) => part.trim().toLowerCase())
-                .filter(Boolean);
+              const tokens = buildMemberTokens(name);
               if (tokens.length === 0) return null;
               return { key: name, tokens } as PersonOption;
             })
