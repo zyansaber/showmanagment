@@ -267,7 +267,6 @@ export default function FinanceDetail() {
   const [members, setMembers] = useState<PersonOption[]>([]);
   const [memberFilter, setMemberFilter] = useState<string>(ALL_MEMBERS);
   const [memberTokensLookup, setMemberTokensLookup] = useState<Record<string, string[]>>({});
-  const [members, setMembers] = useState<PersonOption[]>([]);
 
   const loadData = async () => {
     try {
