@@ -100,17 +100,13 @@ const numberOrZero = (value: unknown) => {
   return 0;
 };
 
-function extractPersonKey(text: string | undefined): PersonOption | null {
-  if (!text) return null;
-  const words = text
+const sanitizeText = (text: string | undefined) => (text ?? '').toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ');
+
+const tokenizeText = (text: string | undefined) =>
+  sanitizeText(text)
     .split(/\s+/)
-    .map((w) => w.trim())
+    .map((t) => t.trim())
     .filter(Boolean);
-  if (words.length === 0) return null;
-  const tokens = words.slice(-2).map((w) => w.toLowerCase());
-  if (tokens.length === 0) return null;
-  return { key: tokens.join(' '), tokens };
-}
 
 const buildMemberTokens = (name: string): string[] => {
   const lower = name.toLowerCase().trim();
@@ -222,7 +218,7 @@ const normaliseSummaryRows = (data: unknown): { summaries: SummaryRow[]; lines: 
             costCenter: typeof line.cost_center === 'string' ? line.cost_center : undefined,
             profitCenter: typeof line.profit_center === 'string' ? line.profit_center : undefined,
             reference: typeof line.reference === 'string' ? line.reference : undefined,
-            personTokens: extractPersonKey(line.sgtxt)?.tokens,
+            personTokens: tokenizeText(typeof line.sgtxt === 'string' ? line.sgtxt : undefined),
           });
         });
       }
@@ -406,14 +402,10 @@ export default function FinanceDetail() {
       lines.filter((row) => {
         const matches = (value: string | undefined, needle: string) =>
           (value ?? '').toLowerCase().includes(needle.toLowerCase());
-        const personTokens = row.personTokens ?? extractPersonKey(row.sgtxt)?.tokens ?? [];
+        const personTokens = row.personTokens ?? tokenizeText(row.sgtxt);
         const memberTokens = memberTokensLookup[memberFilter] ?? [];
-        const normalizedSgtxt = (row.sgtxt ?? '').toLowerCase();
-        const sanitizedSgtxt = normalizedSgtxt.replace(/[^\p{L}\p{N}\s]/gu, ' ');
-        const sgtxtTokens = sanitizedSgtxt
-          .split(/\s+/)
-          .map((t) => t.trim())
-          .filter(Boolean);
+        const sanitizedSgtxt = sanitizeText(row.sgtxt);
+        const sgtxtTokens = tokenizeText(row.sgtxt);
         const memberMatches =
           filters.glCode === '688304'
             ? memberFilter === ALL_MEMBERS
