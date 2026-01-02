@@ -431,7 +431,7 @@ export default function FinanceDetail() {
             : true)
         );
       }),
-    [filters, lines, ALL_SHOWS, ALL_YEARS, memberTokensLookup]
+    [filters, lines, memberFilter, memberTokensLookup]
   );
 
   const summaryTotals = useMemo(() => {
