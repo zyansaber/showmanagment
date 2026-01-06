@@ -153,48 +153,13 @@ const parseSpreadsheetRows = async (file: File): Promise<Record<string, unknown>
 };
 
 const findMatchingShowDealer = (show: ShowRecord | undefined) => show?.handoverDealer || show?.dealership || '';
-const TARGET_YEAR = 2026;
-const SPECIAL_SHOW_NAME = 'Geelong Caravaning & Adventure Leisurefest - 2025';
-
-const getYearFromDate = (value: string | undefined) => {
+const parseDate = (value?: string) => {
   if (!value) return null;
-  const match = value.match(/^(\d{4})/);
-  if (match?.[1]) {
-    const parsed = Number(match[1]);
-    if (Number.isFinite(parsed)) return parsed;
-  }
   const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? null : parsed.getFullYear();
-};
-
-const getShowYear = (show: ShowRecord) => {
-  const startYear = getYearFromDate(show.startDate);
-  if (startYear) return startYear;
-  const finishYear = getYearFromDate(show.finishDate);
-  if (finishYear) return finishYear;
-  return null;
-};
-
-const isRelevantShow = (show: ShowRecord) => {
-  if (show.name === SPECIAL_SHOW_NAME) return true;
-  return getShowYear(show) === TARGET_YEAR;
-};
-
-const classifyTiming = (show: ShowRecord) => {
-  const today = new Date();
-  const start = show.startDate ? new Date(show.startDate) : null;
-  const end = show.finishDate ? new Date(show.finishDate) : null;
-  if (start && !Number.isNaN(start.getTime()) && end && !Number.isNaN(end.getTime())) {
-    if (start <= today && end >= today) return 'current';
-    if (start > today) return 'next';
-  }
-  if (start && !Number.isNaN(start.getTime()) && start > today) return 'next';
-  return null;
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
 };
 
 const compareShows = (a: ShowRecord, b: ShowRecord) => {
-  if (a.name === SPECIAL_SHOW_NAME) return -1;
-  if (b.name === SPECIAL_SHOW_NAME) return 1;
   const aDate = a.startDate ? new Date(a.startDate) : a.finishDate ? new Date(a.finishDate) : null;
   const bDate = b.startDate ? new Date(b.startDate) : b.finishDate ? new Date(b.finishDate) : null;
   const aTime = aDate && !Number.isNaN(aDate.getTime()) ? aDate.getTime() : Number.POSITIVE_INFINITY;
@@ -242,11 +207,10 @@ export default function Finance() {
               .filter(Boolean) ?? []
           : [];
 
-        const filteredShows = (normalisedShows as ShowRecord[]).filter(isRelevantShow).sort(compareShows);
+        const filteredShows = (normalisedShows as ShowRecord[]).sort(compareShows);
         setShows(filteredShows);
-        const relevantShowIds = new Set(filteredShows.map((show) => show.id));
-        const filteredInternalOrders = normaliseInternalOrders(ordersData).filter((order) => relevantShowIds.has(order.showId));
-        setInternalOrders(filteredInternalOrders);
+        const internalOrderList = normaliseInternalOrders(ordersData);
+        setInternalOrders(internalOrderList);
 
         const expenseList = normaliseExpenseItems(expensesData);
         setExpenses(expenseList);
@@ -274,6 +238,44 @@ export default function Finance() {
     [shows]
   );
 
+  const primaryShowDate = (show: ShowRecord) => parseDate(show.startDate) ?? parseDate(show.finishDate);
+
+  const nextShowId = useMemo(() => {
+    const today = new Date().getTime();
+    const upcoming = shows
+      .map((show) => {
+        const date = primaryShowDate(show);
+        if (!date) return null;
+        const timestamp = date.getTime();
+        if (Number.isNaN(timestamp) || timestamp <= today) return null;
+        return { id: show.id, timestamp };
+      })
+      .filter(Boolean) as { id?: string; timestamp: number }[];
+    if (upcoming.length === 0) return null;
+    upcoming.sort((a, b) => a.timestamp - b.timestamp);
+    return upcoming[0]?.id ?? null;
+  }, [shows]);
+
+  useEffect(() => {
+    if (shows.length === 0) return;
+    setInternalOrders((prev) => {
+      const existingShowIds = new Set(prev.map((order) => order.showId));
+      const additions: InternalSalesOrder[] = [];
+      shows.forEach((show) => {
+        if (!show.id || existingShowIds.has(show.id)) return;
+        additions.push({
+          id: newId(),
+          showId: show.id,
+          dealership: show.dealership || '',
+          internalSalesOrderNumber: '',
+          internalSalesOrderNumberDealer: '',
+        });
+      });
+      if (additions.length === 0) return prev;
+      return [...prev, ...additions];
+    });
+  }, [shows]);
+
   const sortedInternalOrders = useMemo(() => {
     return [...internalOrders].sort((a, b) => {
       const showA = showLookup[a.showId];
@@ -288,14 +290,29 @@ export default function Finance() {
 
   const renderTimingBadge = (show?: ShowRecord) => {
     if (!show) return null;
-    const timing = classifyTiming(show);
-    if (!timing) return null;
-    const label = timing === 'current' ? 'Current' : 'Next';
-    return (
-      <Badge variant="outline" className="text-[10px] font-semibold">
-        {label}
-      </Badge>
-    );
+    const today = new Date();
+    const start = parseDate(show.startDate);
+    const end = parseDate(show.finishDate);
+    if (start && end && start <= today && end >= today) {
+      return (
+        <Badge className="bg-emerald-500 text-white shadow-[0_0_12px_rgba(16,185,129,0.7)] animate-pulse">
+          Current
+        </Badge>
+      );
+    }
+    if (end && end < today) {
+      return <Badge className="bg-red-500 text-white">Finished</Badge>;
+    }
+    if (start && start > today && show.id === nextShowId) {
+      const diffMs = start.getTime() - today.getTime();
+      const daysUntil = Math.max(0, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
+      return (
+        <Badge className="bg-yellow-300 text-yellow-900 shadow-[0_0_12px_rgba(234,179,8,0.9)] ring-2 ring-yellow-400 animate-pulse">
+          Next · in {daysUntil} day{daysUntil === 1 ? '' : 's'}
+        </Badge>
+      );
+    }
+    return null;
   };
 
   const persistInternalOrders = async (orders: InternalSalesOrder[]) => {
