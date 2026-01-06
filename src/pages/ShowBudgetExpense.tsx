@@ -38,6 +38,7 @@ type BudgetRow = {
   showId: string;
   showName: string;
   dealership: string;
+  showYear: number | null;
   startDate?: string;
   finishDate?: string;
   status?: string;
@@ -321,6 +322,7 @@ export default function ShowBudgetExpense() {
 
         const mapped: BudgetRow[] = showList.filter(isRelevantShow).sort(compareShows).map((show) => {
           const budget = (budgetMap?.[show.id] ?? {}) as Record<string, unknown>;
+          const year = getShowYear(show);
           const dealerBudget =
             parseNumber(budget.totalDealerCost) || parseNumber(budget.dealerBudget) || computeDealerTotal(budget);
           const factoryBudget =
@@ -335,11 +337,11 @@ export default function ShowBudgetExpense() {
           const chargeBack = parseNumber(budget.chargeBack);
           const diff = Number.isFinite(actual - totalBudget) ? actual - totalBudget : 0;
           const sales = salesCounts[show.id] || { total: 0, showTeam: 0, network: 0, office: 0 };
-          const year = getShowYear(show);
           return {
             showId: show.id,
             showName: show.name,
             dealership: show.dealership || '',
+            showYear: year,
             startDate: show.startDate,
             finishDate: show.finishDate,
             status: show.status,
@@ -384,8 +386,9 @@ export default function ShowBudgetExpense() {
     return rows.filter((row) => `${row.showName} ${row.dealership}`.toLowerCase().includes(term));
   }, [rows, search]);
 
-const aggregates = useMemo(() => {
-    const completedRows = filteredRows.filter(isFinishedRow);
+  const aggregates = useMemo(() => {
+    const rows2026 = filteredRows.filter((row) => row.showYear === TARGET_YEAR);
+    const completedRows = rows2026.filter(isFinishedRow);
     const sum = <K extends keyof BudgetRow>(source: BudgetRow[], key: K) =>
       source.reduce((acc, row) => acc + (row[key] || 0), 0);
 
@@ -416,8 +419,8 @@ const aggregates = useMemo(() => {
         pctFactory: pct(ytdFactoryActual, ytdFactoryBudget),
       },
       overall: {
-        totalSales: sum(filteredRows, 'showSales'),
-        totalContractValue: sum(filteredRows, 'totalContractValue'),
+        totalSales: sum(rows2026, 'showSales'),
+        totalContractValue: sum(rows2026, 'totalContractValue'),
       },
     };
   }, [filteredRows]);
@@ -478,7 +481,7 @@ const aggregates = useMemo(() => {
               <div className="grid gap-4 md:grid-cols-5">
                 <Card className="border-slate-200">
                   <CardContent className="pt-4 space-y-1">
-                    <p className="text-xs uppercase tracking-wide text-slate-500">Total Actual Cost</p>
+                    <p className="text-xs uppercase tracking-wide text-slate-500">Total Actual Cost (2026)</p>
                     <p className="text-xl font-semibold text-slate-900">{formatCurrency(aggregates.ytd.totalActual)}</p>
                     <div className="flex items-center justify-between text-xs text-slate-600">
                       <span>Target {formatCurrency(aggregates.ytd.totalBudget)}</span>
@@ -486,25 +489,25 @@ const aggregates = useMemo(() => {
                     </div>
                     <p className="text-[11px] text-slate-500">
                       {aggregates.completedCount > 0
-                        ? `${aggregates.completedCount} finished show${aggregates.completedCount === 1 ? '' : 's'} counted YTD`
-                        : 'Waiting for finished shows to calculate YTD'}
+                        ? `${aggregates.completedCount} finished 2026 show${aggregates.completedCount === 1 ? '' : 's'} counted YTD`
+                        : 'Waiting for finished 2026 shows to calculate YTD'}
                     </p>
                   </CardContent>
                 </Card>
                 <Card className="border-slate-200">
                   <CardContent className="pt-4 space-y-1">
-                    <p className="text-xs uppercase tracking-wide text-slate-500">Total Dealer Actual</p>
+                    <p className="text-xs uppercase tracking-wide text-slate-500">Total Dealer Actual (2026)</p>
                     <p className="text-xl font-semibold text-blue-700">{formatCurrency(aggregates.ytd.dealerActual)}</p>
                     <div className="flex items-center justify-between text-xs text-slate-600">
                       <span>Target {formatCurrency(aggregates.ytd.dealerBudget)}</span>
                       {varianceBadge(aggregates.ytd.pctDealer)}
                     </div>
-                    <p className="text-[11px] text-slate-500">YTD dealer actuals vs target</p>
+                    <p className="text-[11px] text-slate-500">2026 YTD dealer actuals vs target</p>
                   </CardContent>
                 </Card>
                 <Card className="border-slate-200">
                   <CardContent className="pt-4 space-y-1">
-                    <p className="text-xs uppercase tracking-wide text-slate-500">Total Factory Actual</p>
+                    <p className="text-xs uppercase tracking-wide text-slate-500">Total Factory Actual (2026)</p>
                     <p className="text-xl font-semibold text-emerald-700">
                       {formatCurrency(aggregates.ytd.factoryActual)}
                     </p>
@@ -512,7 +515,7 @@ const aggregates = useMemo(() => {
                       <span>Target {formatCurrency(aggregates.ytd.factoryBudget)}</span>
                       {varianceBadge(aggregates.ytd.pctFactory)}
                     </div>
-                    <p className="text-[11px] text-slate-500">YTD factory actuals vs target</p>
+                    <p className="text-[11px] text-slate-500">2026 YTD factory actuals vs target</p>
                   </CardContent>
                 </Card>
                 <Card className="border-slate-200">
@@ -540,7 +543,7 @@ const aggregates = useMemo(() => {
                       <TableHead rowSpan={2} className="min-w-[120px] align-middle">
                         Dealership
                       </TableHead>
-                      <TableHead colSpan={2} className="text-center border-r-2 border-slate-300">
+                      <TableHead rowSpan={2} className="text-center border-r-2 border-slate-300">
                         Schedule
                       </TableHead>
                       <TableHead colSpan={3} className="text-center border-r-2 border-slate-300">
@@ -554,8 +557,6 @@ const aggregates = useMemo(() => {
                       </TableHead>
                     </TableRow>
                     <TableRow className="bg-slate-50">
-                      <TableHead className="text-center">Finished</TableHead>
-                      <TableHead className="text-center border-r-2 border-slate-300">Next (≤10 days)</TableHead>
                       <TableHead className="text-right">Total Budget</TableHead>
                       <TableHead className="text-right">Dealer Budget</TableHead>
                       <TableHead className="border-r-2 border-slate-300 text-right">Factory Budget</TableHead>
@@ -577,7 +578,7 @@ const aggregates = useMemo(() => {
                   <TableBody>
                     {filteredRows.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={20} className="text-center text-sm text-slate-500">
+                        <TableCell colSpan={19} className="text-center text-sm text-slate-500">
                           No data yet. Connect your data source to populate this table.
                         </TableCell>
                       </TableRow>
@@ -590,21 +591,20 @@ const aggregates = useMemo(() => {
                           <TableRow key={row.showId} className={idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/60'}>
                             <TableCell className="font-medium text-slate-900">{row.showName}</TableCell>
                             <TableCell>{row.dealership || '-'}</TableCell>
-                            <TableCell className="text-center">
-                              {finished ? (
-                                <Badge className="bg-emerald-600 text-white px-2 py-1">Finished</Badge>
-                              ) : (
-                                <Badge variant="outline" className="border-amber-300 bg-amber-50 text-amber-800">
-                                  In progress
-                                </Badge>
-                              )}
-                            </TableCell>
                             <TableCell className="text-center border-r-2 border-slate-300">
-                              {finished
-                                ? '-'
-                                : nextDays !== null
-                                  ? `Starts in ${nextDays} day${nextDays === 1 ? '' : 's'}`
-                                  : formatShortDate(row.startDate)}
+                              {finished ? (
+                                <Badge className="border border-emerald-200 bg-emerald-100 text-emerald-800">
+                                  Finished
+                                </Badge>
+                              ) : nextDays !== null ? (
+                                <Badge className="border-amber-300 bg-amber-100 text-amber-800 animate-pulse">
+                                  Starts in {nextDays} day{nextDays === 1 ? '' : 's'}
+                                </Badge>
+                              ) : (
+                                <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] font-semibold text-slate-700">
+                                  {formatShortDate(row.startDate)}
+                                </span>
+                              )}
                             </TableCell>
                             <TableCell className="text-right font-semibold text-slate-900">{formatCurrency(row.totalBudget)}</TableCell>
                             <TableCell className="text-right">{formatCurrency(row.dealerBudget)}</TableCell>
