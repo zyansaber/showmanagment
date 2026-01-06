@@ -8,7 +8,6 @@ import {
   LayoutDashboard,
   Calendar,
   Users,
-  BarChart3,
   Menu,
   X,
   ChevronLeft,
@@ -61,7 +60,6 @@ function Sidebar({ isOpen, setIsOpen }: { isOpen: boolean; setIsOpen: (open: boo
         { icon: PenTool, label: 'Show Layout Studio', path: '/layout-studio' },
         { icon: FileSpreadsheet, label: 'Orders & Sales', path: '/orders' },
         { icon: FileText, label: 'Show Report', path: '/show-report' },
-        { icon: BarChart3, label: 'Power BI Reports', path: '/powerbi' },
       ],
     },
     {
