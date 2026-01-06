@@ -14,6 +14,9 @@ type ShowRecord = {
   name?: string;
   dealership?: string;
   handoverDealer?: string;
+  startDate?: string;
+  finishDate?: string;
+  status?: string;
 };
 
 type InternalSalesOrder = {
@@ -41,8 +44,11 @@ const normaliseShow = (value: unknown): ShowRecord | null => {
   const name = typeof candidate.name === 'string' ? candidate.name.trim() : undefined;
   const dealership = typeof candidate.dealership === 'string' ? candidate.dealership.trim() : undefined;
   const handoverDealer = typeof candidate.handoverDealer === 'string' ? candidate.handoverDealer.trim() : undefined;
+  const startDate = typeof candidate.startDate === 'string' ? candidate.startDate.trim() : undefined;
+  const finishDate = typeof candidate.finishDate === 'string' ? candidate.finishDate.trim() : undefined;
+  const status = typeof candidate.status === 'string' ? candidate.status.trim() : undefined;
   if (!id) return null;
-  return { id, name, dealership, handoverDealer };
+  return { id, name, dealership, handoverDealer, startDate, finishDate, status };
 };
 
 const normaliseInternalOrders = (value: unknown): InternalSalesOrder[] => {
@@ -147,6 +153,55 @@ const parseSpreadsheetRows = async (file: File): Promise<Record<string, unknown>
 };
 
 const findMatchingShowDealer = (show: ShowRecord | undefined) => show?.handoverDealer || show?.dealership || '';
+const TARGET_YEAR = 2026;
+const SPECIAL_SHOW_NAME = 'Geelong Caravaning & Adventure Leisurefest - 2025';
+
+const getYearFromDate = (value: string | undefined) => {
+  if (!value) return null;
+  const match = value.match(/^(\d{4})/);
+  if (match?.[1]) {
+    const parsed = Number(match[1]);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed.getFullYear();
+};
+
+const getShowYear = (show: ShowRecord) => {
+  const startYear = getYearFromDate(show.startDate);
+  if (startYear) return startYear;
+  const finishYear = getYearFromDate(show.finishDate);
+  if (finishYear) return finishYear;
+  return null;
+};
+
+const isRelevantShow = (show: ShowRecord) => {
+  if (show.name === SPECIAL_SHOW_NAME) return true;
+  return getShowYear(show) === TARGET_YEAR;
+};
+
+const classifyTiming = (show: ShowRecord) => {
+  const today = new Date();
+  const start = show.startDate ? new Date(show.startDate) : null;
+  const end = show.finishDate ? new Date(show.finishDate) : null;
+  if (start && !Number.isNaN(start.getTime()) && end && !Number.isNaN(end.getTime())) {
+    if (start <= today && end >= today) return 'current';
+    if (start > today) return 'next';
+  }
+  if (start && !Number.isNaN(start.getTime()) && start > today) return 'next';
+  return null;
+};
+
+const compareShows = (a: ShowRecord, b: ShowRecord) => {
+  if (a.name === SPECIAL_SHOW_NAME) return -1;
+  if (b.name === SPECIAL_SHOW_NAME) return 1;
+  const aDate = a.startDate ? new Date(a.startDate) : a.finishDate ? new Date(a.finishDate) : null;
+  const bDate = b.startDate ? new Date(b.startDate) : b.finishDate ? new Date(b.finishDate) : null;
+  const aTime = aDate && !Number.isNaN(aDate.getTime()) ? aDate.getTime() : Number.POSITIVE_INFINITY;
+  const bTime = bDate && !Number.isNaN(bDate.getTime()) ? bDate.getTime() : Number.POSITIVE_INFINITY;
+  if (aTime !== bTime) return aTime - bTime;
+  return (a.name || '').localeCompare(b.name || '');
+};
 
 export default function Finance() {
   const [loading, setLoading] = useState(true);
@@ -187,8 +242,11 @@ export default function Finance() {
               .filter(Boolean) ?? []
           : [];
 
-        setShows(normalisedShows as ShowRecord[]);
-        setInternalOrders(normaliseInternalOrders(ordersData));
+        const filteredShows = (normalisedShows as ShowRecord[]).filter(isRelevantShow).sort(compareShows);
+        setShows(filteredShows);
+        const relevantShowIds = new Set(filteredShows.map((show) => show.id));
+        const filteredInternalOrders = normaliseInternalOrders(ordersData).filter((order) => relevantShowIds.has(order.showId));
+        setInternalOrders(filteredInternalOrders);
 
         const expenseList = normaliseExpenseItems(expensesData);
         setExpenses(expenseList);
@@ -215,6 +273,30 @@ export default function Finance() {
       }, {} as Record<string, ShowRecord>),
     [shows]
   );
+
+  const sortedInternalOrders = useMemo(() => {
+    return [...internalOrders].sort((a, b) => {
+      const showA = showLookup[a.showId];
+      const showB = showLookup[b.showId];
+      if (showA && showB) {
+        const cmp = compareShows(showA, showB);
+        if (cmp !== 0) return cmp;
+      }
+      return a.showId.localeCompare(b.showId);
+    });
+  }, [internalOrders, showLookup]);
+
+  const renderTimingBadge = (show?: ShowRecord) => {
+    if (!show) return null;
+    const timing = classifyTiming(show);
+    if (!timing) return null;
+    const label = timing === 'current' ? 'Current' : 'Next';
+    return (
+      <Badge variant="outline" className="text-[10px] font-semibold">
+        {label}
+      </Badge>
+    );
+  };
 
   const persistInternalOrders = async (orders: InternalSalesOrder[]) => {
     const payload = orders.reduce((acc, order) => {
@@ -594,7 +676,7 @@ export default function Finance() {
                         </TableCell>
                       </TableRow>
                     ) : (
-                      internalOrders.map((order) => {
+                      sortedInternalOrders.map((order) => {
                         const linkedShow = order.showId ? showLookup[order.showId] : undefined;
                         return (
                           <TableRow key={order.id} className="align-middle">
@@ -602,7 +684,10 @@ export default function Finance() {
                               <p className="font-semibold text-slate-900">{order.showId || '—'}</p>
                             </TableCell>
                             <TableCell>
-                              <p className="font-semibold text-slate-900">{linkedShow?.name || 'Unknown Show'}</p>
+                              <div className="flex items-center gap-2">
+                                <p className="font-semibold text-slate-900">{linkedShow?.name || 'Unknown Show'}</p>
+                                {renderTimingBadge(linkedShow)}
+                              </div>
                             </TableCell>
                             <TableCell>
                               <p className="text-slate-800">{order.dealership || linkedShow?.dealership || '—'}</p>

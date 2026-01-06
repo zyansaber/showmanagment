@@ -110,12 +110,12 @@ export default function TeamManagement() {
 
   const getRoleBadgeColor = (role: UserRole) => {
     switch (role) {
-      case 'Headquarter Management':
-        return 'bg-purple-500';
-      case 'Show Manager':
-        return 'bg-blue-500';
       case 'Show Team':
         return 'bg-green-500';
+      case 'Factory Team':
+        return 'bg-orange-500';
+      case 'Network Team':
+        return 'bg-blue-600';
       default:
         return 'bg-gray-500';
     }
@@ -379,8 +379,8 @@ export default function TeamManagement() {
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="Show Team">Show Team</SelectItem>
-                          <SelectItem value="Show Manager">Show Manager</SelectItem>
-                          <SelectItem value="Headquarter Management">Headquarter Management</SelectItem>
+                          <SelectItem value="Factory Team">Factory Team</SelectItem>
+                          <SelectItem value="Network Team">Network Team</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
