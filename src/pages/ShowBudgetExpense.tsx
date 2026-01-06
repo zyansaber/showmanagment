@@ -26,6 +26,8 @@ type ShowOrder = {
   showId?: string;
   salesperson?: string;
   date?: string;
+  model?: string;
+  contractValue?: number;
 };
 
 type TeamMember = {
@@ -310,6 +312,23 @@ export default function ShowBudgetExpense() {
           return acc;
         }, {});
 
+        const contractTotals = orders.reduce<Record<string, { total: number; count: number }>>((acc, order) => {
+          const showId = order.showId;
+          if (!showId) return acc;
+          const linkedShow = showsById[showId];
+          if (!linkedShow || !isRelevantShow(linkedShow)) return acc;
+          const orderYear = getYearFromDate(order.date);
+          const showYear = getShowYear(linkedShow);
+          const include =
+            (showYear === TARGET_YEAR && orderYear === TARGET_YEAR) ||
+            (linkedShow.name === SPECIAL_SHOW_NAME && orderYear === 2025);
+          if (!include) return acc;
+          if (!acc[showId]) acc[showId] = { total: 0, count: 0 };
+          acc[showId].total += numberOrZero(order.contractValue);
+          acc[showId].count += 1;
+          return acc;
+        }, {});
+
         const actualsByShow = financeLines.reduce<Record<string, { dealer: number; factory: number }>>((acc, line) => {
           if (getYearFromDate(line.postingDate) !== 2025) return acc;
           const mappedShow = aufnrShowMap[line.aufnrNorm];
@@ -337,6 +356,7 @@ export default function ShowBudgetExpense() {
           const chargeBack = parseNumber(budget.chargeBack);
           const diff = Number.isFinite(actual - totalBudget) ? actual - totalBudget : 0;
           const sales = salesCounts[show.id] || { total: 0, showTeam: 0, network: 0, office: 0 };
+          const contractSummary = contractTotals[show.id] || { total: Number(budget.totalContractValue ?? 0), count: 0 };
           return {
             showId: show.id,
             showName: show.name,
@@ -361,8 +381,9 @@ export default function ShowBudgetExpense() {
             salesByShowTeam: sales.showTeam,
             salesByNetwork: sales.network,
             salesOffice: sales.office,
-            contractNumber: String(budget.contractNumber ?? ''),
-            totalContractValue: Number(budget.totalContractValue ?? 0),
+            contractNumber: contractSummary.count > 0 ? String(contractSummary.count) : String(budget.contractNumber ?? ''),
+            totalContractValue:
+              contractSummary.total > 0 ? contractSummary.total : Number(budget.totalContractValue ?? 0),
             clawBack: Number(budget.clawBack ?? 0),
           };
         });

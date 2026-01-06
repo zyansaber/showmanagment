@@ -20,7 +20,9 @@ const CONFIRMATION_DURATION_MS = 5 * 60 * 1000; // 5 minutes
 
 type DealerStatus = 'Pending' | 'Approved';
 
-interface DecoratedOrder extends ShowOrder {
+type ShowOrderWithContract = ShowOrder & { contractValue?: number };
+
+interface DecoratedOrder extends ShowOrderWithContract {
   showName: string;
   handoverDealer: string;
   dealerStatus: DealerStatus;
@@ -29,6 +31,23 @@ interface DecoratedOrder extends ShowOrder {
 const statusStyles: Record<DealerStatus, string> = {
   Pending: 'bg-yellow-100 text-yellow-800',
   Approved: 'bg-green-100 text-green-800',
+};
+
+const parseContractValue = (value: unknown) => {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return 0;
+    const parsed = Number(trimmed.replace(/,/g, ''));
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+  return 0;
+};
+
+const formatCurrency = (value?: number) => {
+  const numeric = typeof value === 'number' && Number.isFinite(value) ? value : 0;
+  if (!numeric) return '-';
+  return `$${numeric.toLocaleString('en-AU', { maximumFractionDigits: 0 })}`;
 };
 
 const formatDate = (value: string | undefined) => {
@@ -45,15 +64,16 @@ const formatDate = (value: string | undefined) => {
 };
 
 export default function OrdersAndSales() {
-  const [orders, setOrders] = useState<ShowOrder[]>([]);
+  const [orders, setOrders] = useState<ShowOrderWithContract[]>([]);
   const [shows, setShows] = useState<Show[]>([]);
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
   const [dealerOptions, setDealerOptions] = useState<string[]>([]);
   const [modelOptions, setModelOptions] = useState<string[]>([]);
+  const [contractPriceMap, setContractPriceMap] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
-  const [pendingOrder, setPendingOrder] = useState<ShowOrder | null>(null);
+  const [pendingOrder, setPendingOrder] = useState<ShowOrderWithContract | null>(null);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [passwordInput, setPasswordInput] = useState('');
   const [authExpiry, setAuthExpiry] = useState<number | null>(null);
@@ -61,7 +81,7 @@ export default function OrdersAndSales() {
   const [isSalespersonPickerOpen, setIsSalespersonPickerOpen] = useState(false);
   const [isModelPickerOpen, setIsModelPickerOpen] = useState(false);
   const [selectedHandoverDealer, setSelectedHandoverDealer] = useState('');
-  const [newOrder, setNewOrder] = useState<Partial<ShowOrder>>({
+  const [newOrder, setNewOrder] = useState<Partial<ShowOrderWithContract>>({
     chassisNumber: '',
     model: '',
     customerName: '',
@@ -70,6 +90,7 @@ export default function OrdersAndSales() {
     status: 'Pending',
     showId: '',
     date: new Date().toISOString().split('T')[0],
+    contractValue: 0,
   });
   const [statusFilter, setStatusFilter] = useState<'All' | DealerStatus>('All');
 
@@ -90,17 +111,38 @@ export default function OrdersAndSales() {
   useEffect(() => {
     const loadData = async () => {
       try {
-        const [ordersData, showsData, teamData, scheduleData] = await Promise.all([
+        const [ordersData, showsData, teamData, scheduleData, contractData] = await Promise.all([
           dbGet('showOrders'),
           dbGet('shows'),
           dbGet('teamMembers'),
           schedulingDbGet('schedule'),
+          dbGet('finance/caravanContractPrices'),
         ]);
 
-        setOrders(ordersData ? Object.values(ordersData) : []);
+        const ordersList: ShowOrderWithContract[] = ordersData
+          ? Object.values(ordersData).map((order) => ({
+              ...order,
+              contractValue: parseContractValue((order as Record<string, unknown>).contractValue),
+            }))
+          : [];
+
+        setOrders(ordersList);
         const showList = showsData ? Object.values(showsData) : [];
         setShows(showList);
         setTeamMembers(teamData ? Object.values(teamData) : []);
+
+        const contractPrices = contractData
+          ? Object.values(contractData as Record<string, Record<string, unknown>>).reduce<Record<string, number>>(
+              (acc, item) => {
+                if (typeof item.model === 'string') {
+                  acc[item.model.toLowerCase()] = parseContractValue(item.contractValue);
+                }
+                return acc;
+              },
+              {}
+            )
+          : {};
+        setContractPriceMap(contractPrices);
 
         if (scheduleData) {
           const values = Object.values(scheduleData as Record<string, ScheduleOrder>);
@@ -143,7 +185,7 @@ export default function OrdersAndSales() {
   );
 
   const deriveDealerStatus = useCallback(
-    (order: ShowOrder): DealerStatus => (order.dealerConfirm ? 'Approved' : 'Pending'),
+    (order: ShowOrderWithContract): DealerStatus => (order.dealerConfirm ? 'Approved' : 'Pending'),
     []
   );
 
@@ -232,7 +274,7 @@ export default function OrdersAndSales() {
     }
   };
 
-  const confirmOrder = async (order: ShowOrder) => {
+  const confirmOrder = async (order: ShowOrderWithContract) => {
     if (!order.id) {
       toast.error('Order is missing an ID.');
       setPendingOrder(null);
@@ -262,7 +304,7 @@ export default function OrdersAndSales() {
     }
   };
 
-  const handleConfirmationClick = (order: ShowOrder) => {
+  const handleConfirmationClick = (order: ShowOrderWithContract) => {
     if (deriveDealerStatus(order) === 'Approved') {
       toast.info('Order already confirmed.');
       return;
@@ -317,7 +359,7 @@ export default function OrdersAndSales() {
     }
 
     try {
-      const order: ShowOrder = {
+      const order: ShowOrderWithContract = {
         id: `ORD-${Date.now()}`,
         showId: newOrder.showId,
         chassisNumber: newOrder.chassisNumber || '',
@@ -326,6 +368,7 @@ export default function OrdersAndSales() {
         orderType: (newOrder.orderType as ShowOrder['orderType']) || 'New Order',
         salesperson: newOrder.salesperson,
         date: newOrder.date,
+        contractValue: parseContractValue(newOrder.contractValue),
         status: 'Pending',
       };
 
@@ -349,6 +392,7 @@ export default function OrdersAndSales() {
         showId: '',
         date: new Date().toISOString().split('T')[0],
         model: '',
+        contractValue: 0,
       });
       setSelectedHandoverDealer('');
       toast.success('Order added successfully');
@@ -519,7 +563,8 @@ export default function OrdersAndSales() {
                                       key={model}
                                       value={model}
                                       onSelect={(value) => {
-                                        setNewOrder({ ...newOrder, model: value });
+                                        const defaultValue = contractPriceMap[value.toLowerCase()] ?? 0;
+                                        setNewOrder({ ...newOrder, model: value, contractValue: defaultValue });
                                         setIsModelPickerOpen(false);
                                       }}
                                     >
@@ -539,7 +584,7 @@ export default function OrdersAndSales() {
                             variant="ghost"
                             size="sm"
                             className="mt-2"
-                            onClick={() => setNewOrder({ ...newOrder, model: '' })}
+                            onClick={() => setNewOrder({ ...newOrder, model: '', contractValue: 0 })}
                           >
                             Clear selection
                           </Button>
@@ -547,6 +592,19 @@ export default function OrdersAndSales() {
                         {modelOptions.length === 0 && (
                           <p className="text-xs text-muted-foreground">Model list unavailable. Please try again after schedule sync.</p>
                         )}
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label>Contract Value</Label>
+                        <Input
+                          type="number"
+                          placeholder="Standard contract value"
+                          value={newOrder.contractValue ?? ''}
+                          onChange={(event) => setNewOrder({ ...newOrder, contractValue: parseContractValue(event.target.value) })}
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          Prefilled from the Caravan Contract Price dataset; adjust if needed for this order.
+                        </p>
                       </div>
 
                       <div className="space-y-2">
@@ -670,6 +728,7 @@ export default function OrdersAndSales() {
                   <TableRow>
                     <TableHead>Order ID</TableHead>
                     <TableHead>Model</TableHead>
+                    <TableHead className="text-right">Contract Value</TableHead>
                     <TableHead>Customer</TableHead>
                     <TableHead>Show</TableHead>
                     <TableHead>Type</TableHead>
@@ -687,6 +746,7 @@ export default function OrdersAndSales() {
                       <TableRow key={rowKey}>
                         <TableCell className="font-medium">{order.id || 'N/A'}</TableCell>
                         <TableCell>{order.model || 'Not set'}</TableCell>
+                        <TableCell className="text-right">{formatCurrency(order.contractValue)}</TableCell>
                         <TableCell>{order.customerName || 'Not set'}</TableCell>
                         <TableCell>{order.showName}</TableCell>
                         <TableCell>{order.orderType}</TableCell>
