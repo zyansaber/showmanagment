@@ -1,114 +1,30 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Badge } from '@/components/ui/badge';
+import { useState, useEffect, useMemo } from 'react';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  ResponsiveContainer,
+  PieChart,
+  Pie,
+  Cell,
+  LineChart,
+  Line,
+} from 'recharts';
+import { TrendingUp, Calendar } from 'lucide-react';
 import { dbGet } from '@/lib/firebase';
-import { Loader2, RefreshCw } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { toast } from 'sonner';
+import type { Show, ShowOrder, ShowTask, TeamMember } from '@/types';
+import { format as formatDate } from 'date-fns';
 
-type Show = {
-  id: string;
-  name: string;
-  dealership?: string;
-  target2025?: number;
-  sales2025?: number;
-  target2026?: number;
-  sales2026?: number;
-  startDate?: string;
-  finishDate?: string;
-  status?: string;
-};
-
-type ShowOrder = {
-  id?: string;
-  showId?: string;
-  salesperson?: string;
-  date?: string;
-};
-
-type TeamMember = {
-  memberId?: string;
-  memberName?: string;
-  role?: string;
-};
-
-type BudgetRow = {
+type InternalSalesOrderRecord = {
   showId: string;
-  showName: string;
-  dealership: string;
-  totalBudget: number;
-  dealerBudget: number;
-  factoryBudget: number;
-  actual: number;
-  dealerActual: number;
-  factoryActual: number;
-  chargeBack: number;
-  diff: number;
-  showTarget: number;
-  showSales: number;
-  salesByShowTeam: number;
-  salesByNetwork: number;
-  salesOffice: number;
-  contractNumber: string;
-  totalContractValue: number;
-  clawBack: number;
-  showYear: number | null;
-  timing: 'current' | 'next' | 'past';
-};
-
-const formatNumber = (value: number) =>
-  Number.isFinite(value) ? value.toLocaleString('en-AU', { maximumFractionDigits: 0 }) : '0';
-
-const formatCurrency = (value: number) => {
-  const numeric = Number.isFinite(value) ? value : 0;
-  return `$${numeric.toLocaleString('en-AU', { minimumFractionDigits: 0 })}`;
-};
-
-const formatSignedPercent = (num: number) => {
-  if (!Number.isFinite(num)) return '0%';
-  const sign = num > 0 ? '+' : '';
-  return `${sign}${num.toFixed(1)}%`;
-};
-
-const parseNumber = (value: unknown): number => {
-  if (typeof value === 'number' && Number.isFinite(value)) return value;
-  if (typeof value === 'string') {
-    const trimmed = value.trim();
-    if (!trimmed) return 0;
-    const parsed = Number(trimmed.replace(/,/g, ''));
-    return Number.isFinite(parsed) ? parsed : 0;
-  }
-  return 0;
-};
-
-const computeDealerTotal = (draft: Record<string, unknown>) =>
-  parseNumber(draft.standCosts) / 2 +
-  parseNumber(draft.dealerDayRates) +
-  parseNumber(draft.dealerCommission) +
-  parseNumber(draft.dealerCostsTransport);
-
-const computeFactoryTotal = (draft: Record<string, unknown>) =>
-  parseNumber(draft.factoryCommission) + parseNumber(draft.factoryTravelCosts) + parseNumber(draft.standCosts) / 2;
-
-const TARGET_YEAR = 2026;
-const SPECIAL_SHOW_NAME = 'Geelong Caravaning & Adventure Leisurefest - 2025';
-
-const leadingZeroSafe = (value: unknown) => {
-  if (typeof value !== 'string' && typeof value !== 'number') return '';
-  const asString = String(value);
-  const stripped = asString.replace(/^0+/, '');
-  return stripped.length > 0 ? stripped : asString;
-};
-
-const numberOrZero = (value: unknown) => {
-  if (typeof value === 'number') return value;
-  if (typeof value === 'string') {
-    const parsed = parseFloat(value);
-    return Number.isFinite(parsed) ? parsed : 0;
-  }
-  return 0;
+  internalSalesOrderNumber?: string;
+  internalSalesOrderNumberDealer?: string;
 };
 
 type FinanceLine = {
@@ -118,489 +34,1053 @@ type FinanceLine = {
   amount: number;
 };
 
-const parseFinanceLines = (data: unknown): FinanceLine[] => {
-  if (!data || typeof data !== 'object') return [];
-  const lines: FinanceLine[] = [];
-  const root = data as Record<string, unknown>;
-
-  Object.entries(root).forEach(([aufnrKey, glBuckets]) => {
-    if (!glBuckets || typeof glBuckets !== 'object') return;
-    const aufnrNorm = leadingZeroSafe(aufnrKey);
-
-    Object.values(glBuckets as Record<string, unknown>).forEach((glValue) => {
-      if (!glValue || typeof glValue !== 'object') return;
-      const glBucket = glValue as Record<string, unknown>;
-      if (!glBucket.lines || typeof glBucket.lines !== 'object') return;
-
-      Object.values(glBucket.lines as Record<string, unknown>).forEach((rawLine) => {
-        if (!rawLine || typeof rawLine !== 'object') return;
-        const line = rawLine as Record<string, unknown>;
-        lines.push({
-          aufnrNorm,
-          companyCode: typeof line.company_code === 'string' ? line.company_code : 'NA',
-          postingDate: typeof line.posting_date === 'string' ? line.posting_date : undefined,
-          amount: numberOrZero(line.amount),
-        });
-      });
-    });
-  });
-
-  return lines;
-};
-
-const getYearFromDate = (value: string | undefined | null): number | null => {
-  if (!value) return null;
-  const match = String(value).match(/^(\d{4})/);
-  if (match?.[1]) {
-    const year = Number(match[1]);
-    return Number.isFinite(year) ? year : null;
-  }
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? null : parsed.getFullYear();
-};
-
-const getShowYear = (show: Show): number | null => {
-  const startYear = getYearFromDate(show.startDate);
-  if (startYear) return startYear;
-  const finishYear = getYearFromDate(show.finishDate);
-  if (finishYear) return finishYear;
-  if (show.target2026 && show.target2026 > 0) return 2026;
-  if (show.target2025 && show.target2025 > 0) return 2025;
-  return null;
-};
-
-const isRelevantShow = (show: Show) => {
-  const year = getShowYear(show);
-  if (show.name === SPECIAL_SHOW_NAME) return true;
-  return year === TARGET_YEAR;
-};
-
-const buildAufnrShowMap = (
-  internalOrders: unknown,
-  showsById: Record<string, Show>
-): Record<string, { showId: string; showName?: string }> => {
-  const map: Record<string, { showId: string; showName?: string }> = {};
-  if (!internalOrders || typeof internalOrders !== 'object') return map;
-
-  Object.values(internalOrders as Record<string, Record<string, unknown>>).forEach((order) => {
-    if (!order || typeof order !== 'object') return;
-    const dealerNumber =
-      typeof order.internalSalesOrderNumberDealer === 'string' ? order.internalSalesOrderNumberDealer.trim() : '';
-    const internalNumber = typeof order.internalSalesOrderNumber === 'string' ? order.internalSalesOrderNumber.trim() : '';
-    const showId = typeof order.showId === 'string' ? order.showId.trim() : '';
-    if (!showId) return;
-    const candidates = [dealerNumber, internalNumber].filter(Boolean);
-    candidates.forEach((num) => {
-      const norm = leadingZeroSafe(num);
-      if (!norm) return;
-      map[norm] = { showId, showName: showsById[showId]?.name };
-    });
-  });
-
-  return map;
-};
-
-const classifyTiming = (show: Show) => {
-  const normalizedStatus = show.status?.toLowerCase() ?? '';
-  if (normalizedStatus === 'completed' || normalizedStatus === 'finished') return 'past';
-  if (normalizedStatus === 'in progress' || normalizedStatus === 'current') return 'current';
-  const today = new Date();
-  const start = show.startDate ? new Date(show.startDate) : null;
-  const end = show.finishDate ? new Date(show.finishDate) : null;
-  if (start && !Number.isNaN(start.getTime()) && end && !Number.isNaN(end.getTime())) {
-    if (start <= today && end >= today) return 'current';
-    if (start > today) return 'next';
-  }
-  if (start && !Number.isNaN(start.getTime()) && start > today) return 'next';
-  return 'past';
-};
-
-const compareShows = (a: Show, b: Show) => {
-  if (a.name === SPECIAL_SHOW_NAME) return -1;
-  if (b.name === SPECIAL_SHOW_NAME) return 1;
-  const aDate = a.startDate ? new Date(a.startDate) : a.finishDate ? new Date(a.finishDate) : null;
-  const bDate = b.startDate ? new Date(b.startDate) : b.finishDate ? new Date(b.finishDate) : null;
-  const aTime = aDate && !Number.isNaN(aDate.getTime()) ? aDate.getTime() : Number.POSITIVE_INFINITY;
-  const bTime = bDate && !Number.isNaN(bDate.getTime()) ? bDate.getTime() : Number.POSITIVE_INFINITY;
-  if (aTime !== bTime) return aTime - bTime;
-  return a.name.localeCompare(b.name);
-};
-
-export default function ShowBudgetExpense() {
-  const [rows, setRows] = useState<BudgetRow[]>([]);
+export default function Dashboard() {
+  const [shows, setShows] = useState<Show[]>([]);
+  const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
+  const [orders, setOrders] = useState<ShowOrder[]>([]);
+  const [internalOrders, setInternalOrders] = useState<InternalSalesOrderRecord[]>([]);
+  const [tasks, setTasks] = useState<ShowTask[]>([]);
+  const [budgets, setBudgets] = useState<Record<string, Record<string, unknown>>>({});
+  const [financeActuals, setFinanceActuals] = useState<Record<string, { dealer: number; factory: number }>>({});
   const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState('');
 
   useEffect(() => {
-    const loadData = async () => {
-      try {
-        setLoading(true);
-        const [showsData, budgetsData, ordersData, financeData, internalOrdersData, teamData] = await Promise.all([
-          dbGet('shows'),
-          dbGet('showBudgets'),
-          dbGet('showOrders'),
-          dbGet('finance/glByAufnrGl'),
-          dbGet('finance/internalSalesOrders'),
-          dbGet('teamMembers'),
-        ]);
-        const showList: Show[] = showsData ? Object.values(showsData) : [];
-        const budgetMap = budgetsData ?? {};
-        const orders: ShowOrder[] = ordersData ? Object.values(ordersData) : [];
-        const teamMembers: TeamMember[] = teamData ? Object.values(teamData) : [];
-        const financeLines = parseFinanceLines(financeData);
-        const showsById = showList.reduce<Record<string, Show>>((acc, show) => {
-          if (show.id) acc[show.id] = show;
-          return acc;
-        }, {});
-        const aufnrShowMap = buildAufnrShowMap(internalOrdersData, showsById);
-
-        const roleLookup = teamMembers.reduce<Record<string, string>>((acc, member) => {
-          const name = member.memberName?.trim();
-          const id = member.memberId?.trim();
-          if (name) acc[name] = member.role || '';
-          if (id) acc[id] = member.role || '';
-          return acc;
-        }, {});
-
-        const salesCounts = orders.reduce<
-          Record<string, { total: number; showTeam: number; network: number; office: number }>
-        >((acc, order) => {
-          const showId = order.showId;
-          if (!showId) return acc;
-          const linkedShow = showsById[showId];
-          if (!linkedShow || !isRelevantShow(linkedShow)) return acc;
-          const orderYear = getYearFromDate(order.date);
-          const showYear = getShowYear(linkedShow);
-          const include =
-            (showYear === TARGET_YEAR && orderYear === TARGET_YEAR) ||
-            (linkedShow.name === SPECIAL_SHOW_NAME && orderYear === 2025);
-          if (!include) return acc;
-          if (!acc[showId]) {
-            acc[showId] = { total: 0, showTeam: 0, network: 0, office: 0 };
-          }
-          acc[showId].total += 1;
-          const role = order.salesperson ? roleLookup[order.salesperson] : undefined;
-          if (role === 'Show Team') acc[showId].showTeam += 1;
-          else if (role === 'Network Team') acc[showId].network += 1;
-          else if (role === 'Factory Team') acc[showId].office += 1;
-          return acc;
-        }, {});
-
-        const actualsByShow = financeLines.reduce<Record<string, { dealer: number; factory: number }>>((acc, line) => {
-          if (getYearFromDate(line.postingDate) !== 2025) return acc;
-          const mappedShow = aufnrShowMap[line.aufnrNorm];
-          if (!mappedShow?.showId) return acc;
-          if (!acc[mappedShow.showId]) acc[mappedShow.showId] = { dealer: 0, factory: 0 };
-          if (line.companyCode === '3120') acc[mappedShow.showId].dealer += line.amount;
-          else if (line.companyCode === '3110') acc[mappedShow.showId].factory += line.amount;
-          return acc;
-        }, {});
-
-        const mapped: BudgetRow[] = showList.filter(isRelevantShow).sort(compareShows).map((show) => {
-          const budget = (budgetMap?.[show.id] ?? {}) as Record<string, unknown>;
-          const dealerBudget =
-            parseNumber(budget.totalDealerCost) || parseNumber(budget.dealerBudget) || computeDealerTotal(budget);
-          const factoryBudget =
-            parseNumber(budget.totalFactoryCosts ?? budget.totalFactoryCost) ||
-            parseNumber(budget.factoryBudget) ||
-            computeFactoryTotal(budget);
-          const totalBudget = dealerBudget + factoryBudget;
-          const financeActual = actualsByShow[show.id] || { dealer: 0, factory: 0 };
-          const dealerActual = financeActual.dealer;
-          const factoryActual = financeActual.factory;
-          const actual = dealerActual + factoryActual;
-          const chargeBack = parseNumber(budget.chargeBack);
-          const diff = Number.isFinite(actual - totalBudget) ? actual - totalBudget : 0;
-          const sales = salesCounts[show.id] || { total: 0, showTeam: 0, network: 0, office: 0 };
-          const year = getShowYear(show);
-          const timing = classifyTiming(show);
-          return {
-            showId: show.id,
-            showName: show.name,
-            dealership: show.dealership || '',
-            totalBudget,
-            dealerBudget,
-            factoryBudget,
-            actual,
-            dealerActual,
-            factoryActual,
-            chargeBack,
-            diff,
-            showTarget:
-              year === TARGET_YEAR
-                ? Number(show.target2026 ?? budget.salesTarget2026 ?? budget.salesTarget ?? 0)
-                : Number(show.target2025 ?? show.target2026 ?? 0),
-            showSales: sales.total,
-            salesByShowTeam: sales.showTeam,
-            salesByNetwork: sales.network,
-            salesOffice: sales.office,
-            contractNumber: String(budget.contractNumber ?? ''),
-            totalContractValue: Number(budget.totalContractValue ?? 0),
-            clawBack: Number(budget.clawBack ?? 0),
-            showYear: year,
-            timing,
-          };
-        });
-
-        setRows(mapped);
-        toast.success('Budget dataset refreshed');
-      } catch (err) {
-        console.error('Unable to load budget data', err);
-        toast.error('Failed to load budget data.');
-      } finally {
-        setLoading(false);
-      }
-    };
-
     loadData();
   }, []);
 
-  const filteredRows = useMemo(() => {
-    const term = search.trim().toLowerCase();
-    if (!term) return rows;
-    return rows.filter((row) => `${row.showName} ${row.dealership}`.toLowerCase().includes(term));
-  }, [rows, search]);
+  const loadData = async () => {
+    try {
+      const [showsData, membersData, ordersData, budgetsData, internalOrdersData, tasksData, financeData] = await Promise.all([
+        dbGet('shows'),
+        dbGet('teamMembers'),
+        dbGet('showOrders'),
+        dbGet('showBudgets'),
+        dbGet('finance/internalSalesOrders'),
+        dbGet('showTasks'),
+        dbGet('finance/glByAufnrGl'),
+      ]);
 
-  const filteredRows2026 = useMemo(
-    () => filteredRows.filter((row) => row.showYear === TARGET_YEAR),
-    [filteredRows]
+      const showList = showsData ? Object.values(showsData) : [];
+      setShows(showList);
+      setTeamMembers(membersData ? Object.values(membersData) : []);
+      setOrders(ordersData ? Object.values(ordersData) : []);
+      setBudgets(budgetsData ?? {});
+      setInternalOrders(
+        internalOrdersData
+          ? Object.values(internalOrdersData as Record<string, InternalSalesOrderRecord>)
+          : []
+      );
+      setTasks(tasksData ? Object.values(tasksData as Record<string, ShowTask>) : []);
+
+      const showsById = showList.reduce((acc, show) => {
+        if (show.id) acc[show.id] = show;
+        return acc;
+      }, {} as Record<string, Show>);
+      const aufnrShowMap = buildAufnrShowMap(internalOrdersData, showsById);
+      const financeLines = parseFinanceLines(financeData);
+      const actuals = financeLines.reduce((acc, line) => {
+        const mappedShow = aufnrShowMap[line.aufnrNorm];
+        if (!mappedShow?.showId) return acc;
+        const year = getYearFromDate(line.postingDate);
+        if (year !== 2025) return acc;
+        if (!acc[mappedShow.showId]) acc[mappedShow.showId] = { dealer: 0, factory: 0 };
+        if (line.companyCode === '3120') acc[mappedShow.showId].dealer += line.amount;
+        else if (line.companyCode === '3110') acc[mappedShow.showId].factory += line.amount;
+        return acc;
+      }, {} as Record<string, { dealer: number; factory: number }>);
+      setFinanceActuals(actuals);
+    } catch (error) {
+      console.error('Error loading data:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const parseNumber = (value: unknown): number => {
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      if (!trimmed) return 0;
+      const parsed = Number(trimmed.replace(/,/g, ''));
+      return Number.isFinite(parsed) ? parsed : 0;
+    }
+    return 0;
+  };
+
+  const computeDealerBudget = (entry: Record<string, unknown>) => {
+    const total = parseNumber(entry.totalDealerCost);
+    if (total > 0) return total;
+    return (
+      parseNumber(entry.standCosts) / 2 +
+      parseNumber(entry.dealerDayRates) +
+      parseNumber(entry.dealerCommission) +
+      parseNumber(entry.dealerCostsTransport)
+    );
+  };
+
+  const computeFactoryBudget = (entry: Record<string, unknown>) => {
+    const total = parseNumber(entry.totalFactoryCosts ?? entry.totalFactoryCost);
+    if (total > 0) return total;
+    return parseNumber(entry.factoryCommission) + parseNumber(entry.factoryTravelCosts) + parseNumber(entry.standCosts) / 2;
+  };
+
+  const leadingZeroSafe = (value: unknown) => {
+    if (typeof value !== 'string' && typeof value !== 'number') return '';
+    const asString = String(value);
+    const stripped = asString.replace(/^0+/, '');
+    return stripped.length > 0 ? stripped : asString;
+  };
+
+  const numberOrZero = (value: unknown) => {
+    if (typeof value === 'number') return value;
+    if (typeof value === 'string') {
+      const parsed = parseFloat(value);
+      return Number.isFinite(parsed) ? parsed : 0;
+    }
+    return 0;
+  };
+
+  const parseFinanceLines = (data: unknown): FinanceLine[] => {
+    if (!data || typeof data !== 'object') return [];
+    const lines: FinanceLine[] = [];
+    const root = data as Record<string, unknown>;
+
+    Object.entries(root).forEach(([aufnrKey, glBuckets]) => {
+      if (!glBuckets || typeof glBuckets !== 'object') return;
+      const aufnrNorm = leadingZeroSafe(aufnrKey);
+
+      Object.values(glBuckets as Record<string, unknown>).forEach((glValue) => {
+        if (!glValue || typeof glValue !== 'object') return;
+        const glBucket = glValue as Record<string, unknown>;
+        if (!glBucket.lines || typeof glBucket.lines !== 'object') return;
+
+        Object.values(glBucket.lines as Record<string, unknown>).forEach((rawLine) => {
+          if (!rawLine || typeof rawLine !== 'object') return;
+          const line = rawLine as Record<string, unknown>;
+          lines.push({
+            aufnrNorm,
+            companyCode: typeof line.company_code === 'string' ? line.company_code : 'NA',
+            postingDate: typeof line.posting_date === 'string' ? line.posting_date : undefined,
+            amount: numberOrZero(line.amount),
+          });
+        });
+      });
+    });
+
+    return lines;
+  };
+
+  const getYearFromDate = (value: string | undefined | null): number | null => {
+    if (!value) return null;
+    const match = String(value).match(/^(\d{4})/);
+    if (match?.[1]) {
+      const year = Number(match[1]);
+      return Number.isFinite(year) ? year : null;
+    }
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? null : parsed.getFullYear();
+  };
+
+  const buildAufnrShowMap = (
+    internalOrders: unknown,
+    showsById: Record<string, Show>
+  ): Record<string, { showId: string; showName?: string }> => {
+    const map: Record<string, { showId: string; showName?: string }> = {};
+    if (!internalOrders || typeof internalOrders !== 'object') return map;
+
+    Object.values(internalOrders as Record<string, Record<string, unknown>>).forEach((order) => {
+      if (!order || typeof order !== 'object') return;
+      const dealerNumber =
+        typeof order.internalSalesOrderNumberDealer === 'string' ? order.internalSalesOrderNumberDealer.trim() : '';
+      const internalNumber = typeof order.internalSalesOrderNumber === 'string' ? order.internalSalesOrderNumber.trim() : '';
+      const showId = typeof order.showId === 'string' ? order.showId.trim() : '';
+      if (!showId) return;
+      const candidates = [dealerNumber, internalNumber].filter(Boolean);
+      candidates.forEach((num) => {
+        const norm = leadingZeroSafe(num);
+        if (!norm) return;
+        map[norm] = { showId, showName: showsById[showId]?.name };
+      });
+    });
+
+    return map;
+  };
+
+  // Calculate employee statistics
+  const buildMemberShowDaysList = (member: TeamMember) => {
+    const rawDays = member.showDays;
+    if (Array.isArray(rawDays)) {
+      return rawDays
+        .map((entry) => ({
+          showId: typeof entry?.showId === 'string' ? entry.showId : '',
+          days: typeof entry?.days === 'number' ? entry.days : Number(entry?.days),
+        }))
+        .filter((entry) => entry.showId && Number.isFinite(entry.days) && entry.days > 0);
+    }
+    if (rawDays && typeof rawDays === 'object') {
+      return Object.entries(rawDays).reduce(
+        (acc, [showId, days]) => {
+          const numeric = typeof days === 'number' ? days : Number(days);
+          if (Number.isFinite(numeric) && numeric > 0) {
+            acc.push({ showId, days: numeric });
+          }
+          return acc;
+        },
+        [] as { showId: string; days: number }[]
+      );
+    }
+    return [] as { showId: string; days: number }[];
+  };
+
+  const teamMemberDaysMap = useMemo(() => {
+    return teamMembers.reduce((acc, member) => {
+      const showDays = buildMemberShowDaysList(member);
+      const totalDays = showDays.reduce((sum, entry) => sum + entry.days, 0);
+      acc[member.memberName] = totalDays;
+      return acc;
+    }, {} as Record<string, number>);
+  }, [teamMembers]);
+
+  const salespersonStats = useMemo(() => {
+    const orderStats = orders.reduce((acc, order) => {
+      const name = typeof order.salesperson === 'string' ? order.salesperson.trim() : '';
+      if (!name || name.toLowerCase() === 'n/a') return acc;
+      if (!acc[name]) {
+        acc[name] = { sales: 0 };
+      }
+      acc[name].sales += 1;
+      return acc;
+    }, {} as Record<string, { sales: number }>);
+
+    const teamNames = teamMembers
+      .filter((member) => member.activeFlag === 1)
+      .map((member) => member.memberName)
+      .filter((name): name is string => !!name && name.trim().length > 0);
+
+    const withSales = Object.entries(orderStats)
+      .map(([name, data]) => ({
+        name,
+        sales: data.sales,
+        avgDaily:
+          teamMemberDaysMap[name] > 0
+            ? Number((data.sales / teamMemberDaysMap[name]).toFixed(2))
+            : 0,
+      }))
+      .sort((a, b) => b.sales - a.sales);
+
+    if (withSales.length >= 10) {
+      return withSales.slice(0, 10);
+    }
+
+    const needed = 10 - withSales.length;
+    const withSalesNames = new Set(withSales.map((entry) => entry.name));
+    const fillNames = teamNames
+      .filter((name) => !withSalesNames.has(name))
+      .sort((a, b) => a.localeCompare(b))
+      .slice(0, needed);
+
+    return [
+      ...withSales,
+      ...fillNames.map((name) => ({ name, sales: 0, avgDaily: 0 })),
+    ];
+  }, [orders, teamMembers, teamMemberDaysMap]);
+
+  // Calculate vehicle type distribution
+  const vehicleTypes = orders.reduce((acc, order) => {
+    const modelPrefix = order.model?.substring(0, 3).toUpperCase() || 'N/A';
+    acc[modelPrefix] = (acc[modelPrefix] || 0) + 1;
+    return acc;
+  }, {} as Record<string, number>);
+
+  const vehicleTypeData = Object.entries(vehicleTypes).map(([name, value], index) => ({
+    name,
+    value,
+    color: ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'][index % 5]
+  }));
+
+  const vehicleTrendMap = orders.reduce((acc, order) => {
+    if (!order.date) return acc;
+    const parsed = new Date(order.date);
+    if (Number.isNaN(parsed.getTime())) return acc;
+    const key = formatDate(parsed, 'yyyy-MM');
+    acc[key] = (acc[key] || 0) + 1;
+    return acc;
+  }, {} as Record<string, number>);
+
+  const vehicleTrendData = Object.entries(vehicleTrendMap)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([key, value]) => ({
+      month: formatDate(new Date(`${key}-01`), 'MMM yyyy'),
+      value,
+    }));
+
+  // Calculate show statistics by state (skip N/A values)
+  const stateStats = shows.reduce((acc, show) => {
+    const state = show.siteLocation?.state?.trim();
+    if (!state) {
+      return acc;
+    }
+    if (!acc[state]) {
+      acc[state] = { shows: 0, totalSales: 0, totalDays: 0 };
+    }
+    acc[state].shows += 1;
+    // Only add sales if not N/A (not 0)
+    if (show.sales2025 > 0) {
+      acc[state].totalSales += show.sales2025;
+    }
+    // Only add days if not N/A (not 0)
+    if (show.showDuration && show.showDuration > 0) {
+      acc[state].totalDays += show.showDuration;
+    }
+    return acc;
+  }, {} as Record<string, { shows: number; totalSales: number; totalDays: number }>);
+
+  const stateData = Object.entries(stateStats).map(([state, data]) => ({
+    state,
+    shows: data.shows,
+    dailySales: data.totalDays > 0 ? (data.totalSales / data.totalDays).toFixed(2) : 0
+  }));
+
+  // Calculate overall statistics (skip N/A values)
+  const getYear = (date?: string) => {
+    if (!date) return null;
+    const parsed = new Date(date);
+    return Number.isNaN(parsed.getTime()) ? null : parsed.getFullYear();
+  };
+
+  const getShowYear = (show: Show) => {
+    const startYear = getYear(show.startDate);
+    if (startYear) return startYear;
+
+    const finishYear = getYear(show.finishDate);
+    if (finishYear) return finishYear;
+
+    if (show.target2026 > 0) return 2026;
+    if (show.target2025 > 0) return 2025;
+    if (show.target2024 > 0) return 2024;
+    return null;
+  };
+
+  const showsByYear = shows.reduce((acc, show) => {
+    const year = getShowYear(show);
+    if (!year) return acc;
+    if (!acc[year]) {
+      acc[year] = [];
+    }
+    acc[year].push(show);
+    return acc;
+  }, {} as Record<number, Show[]>);
+
+  const shows2026 = showsByYear[2026] || [];
+  const shows2025 = showsByYear[2025] || [];
+
+  const totalShows2026 = shows2026.length;
+  const totalShows = shows.length;
+  const completedShows = shows2026.filter(s => s.status === 'Completed').length;
+
+  const showYearById = shows.reduce((acc, show) => {
+    const year = getShowYear(show);
+    if (year) {
+      acc[show.id] = year;
+    }
+    return acc;
+  }, {} as Record<string, number>);
+
+  const totalSales2026 = orders.reduce((sum, order) => {
+    const year = showYearById[order.showId];
+    return year === 2026 ? sum + 1 : sum;
+  }, 0);
+
+  // Only sum non-zero (non-N/A) values
+  const target2026 = shows2026.reduce((sum, s) => sum + (s.target2026 > 0 ? s.target2026 : 0), 0);
+  const totalSales2025 = shows.reduce((sum, s) => sum + (s.sales2025 > 0 ? s.sales2025 : 0), 0);
+  const target2025 = shows2025.reduce((sum, s) => sum + (s.target2025 > 0 ? s.target2025 : 0), 0);
+  const totalSales2024 = shows.reduce((sum, s) => sum + (s.sales2024 > 0 ? s.sales2024 : 0), 0);
+  const target2024 = shows.reduce((sum, s) => sum + (s.target2024 > 0 ? s.target2024 : 0), 0);
+
+  const completedShowIds = new Set(shows2026.filter(show => show.status === 'Completed').map(show => show.id));
+  const completedShowOrders = orders.filter(order => completedShowIds.has(order.showId));
+  const completedShowTarget2026 = shows2026.reduce(
+    (sum, show) => sum + (show.status === 'Completed' && show.target2026 > 0 ? show.target2026 : 0),
+    0
   );
-  const orderedRows = useMemo(
-    () => [...filteredRows2026],
-    [filteredRows2026]
-  );
+  const completedAchievement = completedShowTarget2026 > 0
+    ? Math.round((completedShowOrders.length / completedShowTarget2026) * 100)
+    : 0;
+  const overallAchievement = target2026 > 0 ? Math.round((totalSales2026 / target2026) * 100) : 0;
 
-  const rows2026 = useMemo(() => rows.filter((row) => row.showYear === TARGET_YEAR), [rows]);
-  const ytdRows2026 = useMemo(
-    () => rows2026.filter((row) => row.timing === 'past'),
-    [rows2026]
-  );
+  const stats = [
+    {
+      title: 'Total Shows 2026',
+      value: totalShows2026.toString(),
+      description: `${completedShows} completed`,
+      icon: Calendar,
+      color: 'text-blue-600',
+    },
+    {
+      title: 'Total Sales 2025',
+      value: totalSales2025.toString(),
+      description: `Target: ${target2025}`,
+      icon: TrendingUp,
+      color: 'text-purple-600',
+    },
+  ];
 
-  const computeAggregates = (source: BudgetRow[]) => {
-    const sum = <K extends keyof BudgetRow>(key: K) =>
-      source.reduce((acc, row) => acc + (Number(row[key]) || 0), 0);
-    const totalActual = sum('actual');
-    const totalBudget = sum('totalBudget');
-    const dealerActual = sum('dealerActual');
-    const dealerBudget = sum('dealerBudget');
-    const factoryActual = sum('factoryActual');
-    const factoryBudget = sum('factoryBudget');
-    const totalSales = sum('showSales');
-    const totalContractValue = sum('totalContractValue');
+  const gaugePercent = target2026 > 0 ? Math.round((totalSales2026 / target2026) * 100) : 0;
+  const ytdPercent = target2026 > 0 ? Math.round((completedShowTarget2026 / target2026) * 100) : 0;
 
-    const pct = (actual: number, budget: number) => {
-      if (budget <= 0) return 0;
-      return ((actual - budget) / budget) * 100;
+  const formatNumber = (value: number) => value.toLocaleString();
+  const formatCurrency = (value: number) => `$${value.toLocaleString('en-AU')}`;
+
+  const getRingStyle = (percent: number, color: string) => {
+    const safePercent = Math.min(Math.max(percent, 0), 100);
+    return {
+      background: `conic-gradient(${color} ${safePercent}%, #e5e7eb ${safePercent}% 100%)`,
     };
+  };
+
+  const metricHighlights = [
+    {
+      label: 'Total Target 2026',
+      value: target2026,
+      helper: 'Overall annual target',
+      accent: 'bg-slate-100 text-slate-700',
+    },
+    {
+      label: 'Completed Show Targets (YTD)',
+      value: completedShowTarget2026,
+      helper: `${completedShows} completed shows`,
+      accent: 'bg-blue-50 text-blue-700',
+      pill: `${ytdPercent}% of annual target`,
+    },
+    {
+      label: 'Sales to Date',
+      value: totalSales2026,
+      helper: `${totalSales2026.toLocaleString()} orders placed`,
+      accent: 'bg-emerald-50 text-emerald-700',
+      pill: `${gaugePercent}% of annual target`,
+    },
+  ];
+
+  const timelineShows = useMemo(() => {
+    const safeDate = (value?: string) => {
+      if (!value) return null;
+      const parsed = new Date(value);
+      return Number.isNaN(parsed.getTime()) ? null : parsed;
+    };
+
+    const now = new Date();
+    const enriched = shows
+      .map((show) => ({
+        ...show,
+        start: safeDate(show.startDate),
+        finish: safeDate(show.finishDate),
+      }))
+      .filter((entry) => entry.start || entry.finish);
+
+    const ongoing = enriched
+      .filter((entry) => {
+        const start = entry.start?.getTime() ?? -Infinity;
+        const finish = entry.finish?.getTime() ?? Infinity;
+        return start <= now.getTime() && now.getTime() <= finish;
+      })
+      .sort((a, b) => (a.start?.getTime() ?? 0) - (b.start?.getTime() ?? 0));
+
+    const upcoming = enriched
+      .filter((entry) => (entry.start?.getTime() ?? Infinity) >= now.getTime())
+      .sort((a, b) => (a.start?.getTime() ?? 0) - (b.start?.getTime() ?? 0));
+
+    const completed = enriched
+      .filter((entry) => (entry.finish?.getTime() ?? entry.start?.getTime() ?? 0) < now.getTime())
+      .sort(
+        (a, b) =>
+          (b.finish?.getTime() ?? b.start?.getTime() ?? 0) - (a.finish?.getTime() ?? a.start?.getTime() ?? 0)
+      );
 
     return {
-      totalActual,
-      totalBudget,
+      currentShow: ongoing[0] || upcoming[0] || null,
+      lastShow: completed[0] || null,
+    };
+  }, [shows]);
+
+  const buildShowSnapshot = (showEntry: (Show & { start?: Date | null; finish?: Date | null }) | null) => {
+    if (!showEntry) return null;
+    const showBudget = (budgets?.[showEntry.id] as Record<string, unknown>) || {};
+    const targetSales =
+      showEntry.target2026 ||
+      showEntry.target2025 ||
+      showEntry.target2024 ||
+      parseNumber((showBudget as Record<string, unknown>).salesTarget) ||
+      0;
+    const salesActual = orders.filter((order) => order.showId === showEntry.id).length;
+
+    const dealerTarget = computeDealerBudget(showBudget);
+    const factoryTarget = computeFactoryBudget(showBudget);
+    const financeActual = financeActuals[showEntry.id];
+    const dealerActual = numberOrZero(financeActual?.dealer ?? showBudget.dealerActual);
+    const factoryActual = numberOrZero(financeActual?.factory ?? showBudget.factoryActual);
+    const internalOrder = internalOrders.find((order) => order.showId === showEntry.id);
+    const taskSummary = taskCompletionByShow[showEntry.id];
+    const teamMemberCount = Array.isArray(showEntry.teamMembers)
+      ? showEntry.teamMembers.filter(Boolean).length
+      : 0;
+
+    const startLabel = showEntry.start
+      ? formatDate(showEntry.start, 'dd MMM yyyy')
+      : showEntry.startDate
+        ? showEntry.startDate
+        : 'TBC';
+    const endLabel = showEntry.finish ? formatDate(showEntry.finish, 'dd MMM yyyy') : showEntry.finishDate || 'TBC';
+
+    return {
+      id: showEntry.id,
+      name: showEntry.name || 'Unnamed show',
+      dealership: showEntry.dealership || '',
+      startLabel,
+      endLabel,
+      salesActual,
+      targetSales,
       dealerActual,
-      dealerBudget,
+      dealerTarget,
       factoryActual,
-      factoryBudget,
-      totalSales,
-      totalContractValue,
-      pctTotal: pct(totalActual, totalBudget),
-      pctDealer: pct(dealerActual, dealerBudget),
-      pctFactory: pct(factoryActual, factoryBudget),
+      factoryTarget,
+      internalSalesOrderNumber: internalOrder?.internalSalesOrderNumber || '',
+      internalSalesOrderNumberDealer: internalOrder?.internalSalesOrderNumberDealer || '',
+      taskCompletion: taskSummary && taskSummary.total > 0
+        ? {
+            completed: taskSummary.completed,
+            total: taskSummary.total,
+            percent: Math.round((taskSummary.completed / taskSummary.total) * 100),
+          }
+        : null,
+      teamMemberCount,
     };
   };
 
-  const aggregates = useMemo(() => computeAggregates(rows2026), [rows2026]);
-  const ytdAggregates = useMemo(() => computeAggregates(ytdRows2026), [ytdRows2026]);
+  const taskCompletionByShow = useMemo(() => {
+    return tasks.reduce((acc, task) => {
+      const eventId = typeof task.eventId === 'string' ? task.eventId.trim() : '';
+      if (!eventId) return acc;
+      if (!acc[eventId]) acc[eventId] = { completed: 0, total: 0 };
+      acc[eventId].total += 1;
+      if (task.status === 'Done') acc[eventId].completed += 1;
+      return acc;
+    }, {} as Record<string, { completed: number; total: number }>);
+  }, [tasks]);
 
-  const renderTimingBadge = (timing: BudgetRow['timing']) => {
-    const base = 'h-5 px-2 text-[10px] font-semibold rounded-full border';
-    if (timing === 'current') {
-      return <Badge className={`${base} bg-emerald-100 text-emerald-700 border-emerald-200`}>Current</Badge>;
-    }
-    if (timing === 'next') {
-      return <Badge className={`${base} bg-amber-100 text-amber-800 border-amber-200`}>Next</Badge>;
-    }
-    return <Badge className={`${base} bg-slate-100 text-slate-700 border-slate-200`}>Finished</Badge>;
-  };
+  const currentShowSnapshot = useMemo(
+    () => buildShowSnapshot(timelineShows.currentShow),
+    [timelineShows, budgets, orders, internalOrders, taskCompletionByShow, teamMembers, financeActuals]
+  );
+  const lastShowSnapshot = useMemo(
+    () => buildShowSnapshot(timelineShows.lastShow),
+    [timelineShows, budgets, orders, internalOrders, taskCompletionByShow, teamMembers, financeActuals]
+  );
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-96">
+        <div className="text-lg text-gray-600">Loading dashboard data...</div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
-      <Card>
-        <CardHeader className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-          <div>
-            <CardTitle>Show Budget & Expense</CardTitle>
-            <p className="text-sm text-slate-600">Compact finance-style summary across budget, actuals, and sales.</p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <Input
-              placeholder="Search show or dealership..."
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              className="h-9 w-64"
-            />
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                setLoading(true);
-                setSearch('');
-                window.location.reload();
-              }}
-            >
-              <RefreshCw className="mr-2 h-4 w-4" />
-              Refresh
-            </Button>
-          </div>
+      <Card className="hover:shadow-lg transition-shadow border-blue-100">
+        <CardHeader>
+          <CardTitle>Current and Last Show</CardTitle>
+          <CardDescription>Quick pulse on the most recent shows with performance versus targets.</CardDescription>
         </CardHeader>
         <CardContent>
-          {loading ? (
-            <div className="flex items-center gap-2 text-slate-600">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              Loading budget data...
-            </div>
-          ) : (
-            <div className="space-y-4">
-              <div className="grid gap-4 md:grid-cols-5">
-                <Card className="border-slate-200">
-                  <CardContent className="pt-4 space-y-1">
-                    <p className="text-xs uppercase tracking-wide text-slate-500">Total Actual Cost</p>
-                    <p className="text-xl font-semibold text-slate-900">{formatCurrency(ytdAggregates.totalActual)}</p>
-                    <p className="text-xs text-slate-600">
-                      YTD target {formatCurrency(ytdAggregates.totalBudget)} · {formatSignedPercent(ytdAggregates.pctTotal)} vs target
-                    </p>
-                  </CardContent>
-                </Card>
-                <Card className="border-slate-200">
-                  <CardContent className="pt-4 space-y-1">
-                    <p className="text-xs uppercase tracking-wide text-slate-500">Total Dealer Actual</p>
-                    <p className="text-xl font-semibold text-blue-700">{formatCurrency(ytdAggregates.dealerActual)}</p>
-                    <p className="text-xs text-slate-600">
-                      YTD target {formatCurrency(ytdAggregates.dealerBudget)} · {formatSignedPercent(ytdAggregates.pctDealer)} vs target
-                    </p>
-                  </CardContent>
-                </Card>
-                <Card className="border-slate-200">
-                  <CardContent className="pt-4 space-y-1">
-                    <p className="text-xs uppercase tracking-wide text-slate-500">Total Factory Actual</p>
-                    <p className="text-xl font-semibold text-emerald-700">
-                      {formatCurrency(ytdAggregates.factoryActual)}
-                    </p>
-                    <p className="text-xs text-slate-600">
-                      YTD target {formatCurrency(ytdAggregates.factoryBudget)} · {formatSignedPercent(ytdAggregates.pctFactory)} vs target
-                    </p>
-                  </CardContent>
-                </Card>
-                <Card className="border-slate-200">
-                  <CardContent className="pt-4">
-                    <p className="text-xs uppercase tracking-wide text-slate-500">Total Sales 2026</p>
-                    <p className="text-xl font-semibold text-slate-900">{formatNumber(aggregates.totalSales)}</p>
-                  </CardContent>
-                </Card>
-                <Card className="border-slate-200">
-                  <CardContent className="pt-4">
-                    <p className="text-xs uppercase tracking-wide text-slate-500">Total Contract Value</p>
-                    <p className="text-xl font-semibold text-slate-900">
-                      {formatCurrency(aggregates.totalContractValue)}
-                    </p>
-                  </CardContent>
-                </Card>
-              </div>
-              <div className="overflow-x-auto rounded-xl border border-slate-300 shadow-sm">
-                <Table className="text-xs">
-                  <TableHeader>
-                    <TableRow className="bg-slate-50">
-                      <TableHead rowSpan={2} className="min-w-[160px] align-middle">
-                        Show Name
-                      </TableHead>
-                      <TableHead rowSpan={2} className="min-w-[120px] align-middle">
-                        Dealership
-                      </TableHead>
-                      <TableHead colSpan={3} className="text-center border-r-2 border-slate-300">
-                        Budget
-                      </TableHead>
-                      <TableHead colSpan={5} className="text-center bg-slate-100/60 border-r border-slate-200">
-                        Actual
-                      </TableHead>
-                      <TableHead colSpan={8} className="text-center bg-slate-50">
-                        Sales Details
-                      </TableHead>
-                    </TableRow>
-                    <TableRow className="bg-slate-50">
-                      <TableHead className="text-right">Total Budget</TableHead>
-                      <TableHead className="text-right">Dealer Budget</TableHead>
-                      <TableHead className="border-r-2 border-slate-300 text-right">Factory Budget</TableHead>
-                      <TableHead className="bg-slate-100/60 text-blue-800 text-right">Actual</TableHead>
-                      <TableHead className="bg-slate-100/60 text-right">Dealer Actual</TableHead>
-                      <TableHead className="bg-slate-100/60 text-right">Factory Actual</TableHead>
-                      <TableHead className="bg-slate-100/60 text-right">Charge Back</TableHead>
-                      <TableHead className="bg-slate-100/60 border-r border-slate-200 text-right">Diff</TableHead>
-                      <TableHead>Show Target</TableHead>
-                      <TableHead>Show Sales</TableHead>
-                      <TableHead>Sales by show team</TableHead>
-                      <TableHead>Sales by network</TableHead>
-                      <TableHead>Sales Office</TableHead>
-                      <TableHead>Contract Number</TableHead>
-                      <TableHead className="text-right">Total contract value</TableHead>
-                      <TableHead className="text-right">Claw Back</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {orderedRows.length === 0 ? (
-                      <TableRow>
-                        <TableCell colSpan={18} className="text-center text-sm text-slate-500">
-                          No data yet. Connect your data source to populate this table.
-                        </TableCell>
-                      </TableRow>
-                    ) : (
-                      orderedRows.map((row, idx) => (
-                        <TableRow key={row.showId} className={idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/60'}>
-                          <TableCell className="font-medium text-slate-900">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <span>{row.showName}</span>
-                              {row.showYear ? (
-                                <Badge variant="outline" className="h-5 px-2 text-[10px]">
-                                  {row.showYear}
-                                </Badge>
-                              ) : null}
-                              {renderTimingBadge(row.timing)}
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+            {[
+              { title: 'Current / Upcoming Show', data: currentShowSnapshot, tone: 'blue', isCurrent: true },
+              { title: 'Last Completed Show', data: lastShowSnapshot, tone: 'emerald', isCurrent: false },
+            ].map((entry) => (
+              <Card key={entry.title} className="border-slate-200 shadow-sm">
+                <CardHeader className="pb-3">
+                  <CardTitle className="flex items-center justify-between text-base">
+                    <span>{entry.title}</span>
+                    {entry.data ? (
+                      <span
+                        className={`rounded-full px-3 py-1 text-[11px] font-semibold ${entry.tone === 'blue' ? 'bg-blue-50 text-blue-700' : 'bg-emerald-50 text-emerald-700'}`}
+                      >
+                        {entry.data.dealership || 'Show on deck'}
+                      </span>
+                    ) : null}
+                  </CardTitle>
+                  <CardDescription>
+                    {entry.data ? `${entry.data.startLabel} → ${entry.data.endLabel}` : 'No show available'}
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {entry.data ? (
+                    <div className="space-y-4">
+                      <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 shadow-sm">
+                        <p className="text-[11px] uppercase tracking-wide text-slate-500">{entry.title}</p>
+                        <p className="text-lg font-bold text-slate-900">{entry.data.name}</p>
+                        <p className="text-xs text-slate-600">
+                          {entry.data.startLabel} → {entry.data.endLabel}
+                        </p>
+                        {entry.isCurrent && entry.data.taskCompletion ? (
+                          <div className="mt-2 inline-flex items-center gap-2 rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
+                            <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                            Tasks: {entry.data.taskCompletion.completed}/{entry.data.taskCompletion.total} (
+                            {entry.data.taskCompletion.percent}%)
+                          </div>
+                        ) : null}
+                        {(entry.data.internalSalesOrderNumber || entry.data.internalSalesOrderNumberDealer) && (
+                          <div className="mt-2 flex flex-wrap gap-2 text-xs">
+                            {entry.data.internalSalesOrderNumber ? (
+                              <span className="rounded-full bg-blue-50 px-3 py-1 font-semibold text-blue-700">
+                                Internal Sales Order: {entry.data.internalSalesOrderNumber}
+                              </span>
+                            ) : null}
+                            {entry.data.internalSalesOrderNumberDealer ? (
+                              <span className="rounded-full bg-emerald-50 px-3 py-1 font-semibold text-emerald-700">
+                                Dealer Internal: {entry.data.internalSalesOrderNumberDealer}
+                              </span>
+                            ) : null}
+                          </div>
+                        )}
+                      </div>
+                      {entry.isCurrent ? (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <div className="flex items-center justify-between rounded-lg border bg-slate-50 px-3 py-2">
+                            <div>
+                              <p className="text-xs uppercase tracking-wide text-slate-500">Sales</p>
+                              <p className="text-lg font-semibold text-slate-900">{formatNumber(entry.data.salesActual)}</p>
                             </div>
-                          </TableCell>
-                          <TableCell>{row.dealership || '-'}</TableCell>
-                          <TableCell className="text-right font-semibold text-slate-900">{formatCurrency(row.totalBudget)}</TableCell>
-                          <TableCell className="text-right">{formatCurrency(row.dealerBudget)}</TableCell>
-                          <TableCell className="border-r-2 border-slate-300 text-right">{formatCurrency(row.factoryBudget)}</TableCell>
-                          <TableCell className="text-right text-blue-700 bg-slate-100/30">{formatCurrency(row.actual)}</TableCell>
-                          <TableCell className="text-right bg-slate-100/30">{formatCurrency(row.dealerActual)}</TableCell>
-                          <TableCell className="text-right bg-slate-100/30">{formatCurrency(row.factoryActual)}</TableCell>
-                          <TableCell className="text-right bg-slate-100/30">{formatCurrency(row.chargeBack)}</TableCell>
-                          <TableCell
-                            className={`text-right bg-slate-100/30 border-r border-slate-200 ${
-                              row.diff < 0 ? 'text-red-600' : 'text-emerald-700'
-                            }`}
-                          >
-                            {formatCurrency(row.diff)}
-                          </TableCell>
-                          <TableCell>
-                            <Badge variant="outline" className="font-normal">
-                              {formatNumber(row.showTarget)}
-                            </Badge>
-                          </TableCell>
-                          <TableCell>{formatNumber(row.showSales)}</TableCell>
-                          <TableCell>{formatNumber(row.salesByShowTeam)}</TableCell>
-                          <TableCell>{formatNumber(row.salesByNetwork)}</TableCell>
-                          <TableCell>{formatNumber(row.salesOffice)}</TableCell>
-                          <TableCell>{row.contractNumber || '-'}</TableCell>
-                          <TableCell className="text-right">{formatCurrency(row.totalContractValue)}</TableCell>
-                          <TableCell className="text-right">{formatCurrency(row.clawBack)}</TableCell>
-                        </TableRow>
-                      ))
-                    )}
-                  </TableBody>
-                </Table>
-              </div>
-            </div>
-          )}
+                            <div className="text-right">
+                              <p className="text-xs text-slate-500">Target</p>
+                              <p className="text-sm font-semibold text-blue-700">{formatNumber(entry.data.targetSales)}</p>
+                            </div>
+                          </div>
+                          <div className="flex items-center justify-between rounded-lg border bg-slate-50 px-3 py-2">
+                            <div>
+                              <p className="text-xs uppercase tracking-wide text-slate-500">Team Members</p>
+                              <p className="text-lg font-semibold text-slate-900">{entry.data.teamMemberCount}</p>
+                            </div>
+                            <div className="text-right text-xs text-slate-500">Assigned to this show</div>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex items-center justify-between rounded-lg border bg-slate-50 px-3 py-2">
+                          <div>
+                            <p className="text-xs uppercase tracking-wide text-slate-500">Sales</p>
+                            <p className="text-lg font-semibold text-slate-900">{formatNumber(entry.data.salesActual)}</p>
+                          </div>
+                        </div>
+                      )}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        {[
+                          {
+                            label: 'Dealer Cost',
+                            actual: entry.data.dealerActual,
+                            textClass: 'text-amber-700',
+                          },
+                          {
+                            label: 'Factory Cost',
+                            actual: entry.data.factoryActual,
+                            textClass: 'text-indigo-700',
+                          },
+                        ].map((metric) => (
+                          <div key={metric.label} className="rounded-lg border p-3 shadow-[0_1px_6px_rgba(0,0,0,0.04)]">
+                            <p className="text-xs uppercase tracking-wide text-slate-500">{metric.label}</p>
+                            <p className={`text-lg font-bold ${metric.textClass}`}>
+                              {formatCurrency(Number.isFinite(metric.actual) ? metric.actual : 0)}
+                            </p>
+                            <p className="text-[11px] text-slate-500">Actual cost (0 if not recorded)</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-center text-sm text-slate-500">
+                      No show data found. Add show dates to see live insights.
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            ))}
+          </div>
         </CardContent>
       </Card>
+
+      {/* Target Completion Gauge & Stats */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <Card className="lg:col-span-2 hover:shadow-lg transition-shadow">
+          <CardHeader>
+            <CardTitle>2026 Target Completion</CardTitle>
+            <CardDescription>
+              Visual comparison between the overall 2026 target, completed-show targets (YTD), and sales achieved.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 gap-8 md:grid-cols-2 md:items-center">
+              <div className="relative mx-auto h-64 w-64">
+                <div className="absolute inset-0 rounded-full bg-gradient-to-br from-slate-50 via-white to-slate-100 shadow-inner" />
+                <div className="absolute inset-2 rounded-full border border-slate-200" />
+                <div
+                  className="absolute inset-3 rounded-full"
+                  style={getRingStyle(ytdPercent, 'rgba(59, 130, 246, 0.45)')}
+                />
+                <div
+                  className="absolute inset-6 rounded-full"
+                  style={getRingStyle(gaugePercent, 'rgba(16, 185, 129, 0.65)')}
+                />
+                <div className="absolute inset-10 flex flex-col items-center justify-center rounded-full bg-white text-center shadow">
+                  <p className="text-xs uppercase tracking-wide text-gray-500">Sales Completion</p>
+                  <p className="text-4xl font-bold text-gray-900">{gaugePercent}%</p>
+                  <p className="text-xs text-gray-500">of {formatNumber(target2026)} target</p>
+                </div>
+                <div className="absolute -bottom-6 left-1/2 flex -translate-x-1/2 gap-3 text-xs font-medium">
+                  <span className="flex items-center gap-1 text-blue-700">
+                    <span className="h-2 w-2 rounded-full bg-blue-500" /> Completed targets
+                  </span>
+                  <span className="flex items-center gap-1 text-emerald-700">
+                    <span className="h-2 w-2 rounded-full bg-emerald-500" /> Sales
+                  </span>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                {metricHighlights.map((metric) => (
+                  <div key={metric.label} className="rounded-lg border p-4 shadow-sm">
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <p className="text-sm text-gray-600">{metric.label}</p>
+                        <p className="text-2xl font-bold text-gray-900">{formatNumber(metric.value)}</p>
+                        <p className="text-xs text-gray-500">{metric.helper}</p>
+                      </div>
+                      <span className={`rounded-full px-3 py-1 text-xs font-semibold ${metric.accent}`}>
+                        {metric.pill || 'Target detail'}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-1 gap-6">
+          {stats.map((stat, index) => (
+            <Card key={index} className="hover:shadow-lg transition-shadow">
+              <CardHeader className="flex flex-row items-center justify-between pb-2">
+                <CardTitle className="text-sm font-medium text-gray-600">
+                  {stat.title}
+                </CardTitle>
+                <stat.icon className={`h-5 w-5 ${stat.color}`} />
+              </CardHeader>
+              <CardContent>
+                <div className="text-3xl font-bold text-gray-900">{stat.value}</div>
+                <p className="text-xs text-gray-500 mt-1">{stat.description}</p>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      </div>
+
+      {/* Main Content Tabs */}
+      <Tabs defaultValue="employees" className="space-y-6">
+        <TabsList className="bg-white">
+          <TabsTrigger value="employees">Employee Performance</TabsTrigger>
+          <TabsTrigger value="shows">Show Analytics</TabsTrigger>
+          <TabsTrigger value="caravans">Caravan Distribution</TabsTrigger>
+        </TabsList>
+
+        {/* Employee Performance Tab */}
+        <TabsContent value="employees" className="space-y-6">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <Card>
+              <CardHeader>
+                <CardTitle>Average Day Performance</CardTitle>
+                <CardDescription>Average sales per active day (Top 10)</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {salespersonStats.length > 0 ? (
+                  <ResponsiveContainer width="100%" height={350}>
+                    <BarChart data={salespersonStats}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="name" interval={0} angle={-30} textAnchor="end" height={70} />
+                      <YAxis />
+                      <Tooltip />
+                      <Bar dataKey="avgDaily" fill="#10b981" name="Avg Daily Sales" />
+                    </BarChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="text-center py-8 text-gray-500">No sales data available</div>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Total Sales Performance</CardTitle>
+                <CardDescription>Total sales counts by salesperson (Top 10)</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {salespersonStats.length > 0 ? (
+                  <ResponsiveContainer width="100%" height={350}>
+                    <BarChart data={salespersonStats}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="name" interval={0} angle={-30} textAnchor="end" height={70} />
+                      <YAxis />
+                      <Tooltip />
+                      <Bar dataKey="sales" fill="#f59e0b" name="Total Sales" />
+                    </BarChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="text-center py-8 text-gray-500">No sales data available</div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
+
+        {/* Show Analytics Tab */}
+        <TabsContent value="shows" className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>Shows by State</CardTitle>
+              <CardDescription>Show count and daily sales performance by Australian state</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {stateData.length > 0 ? (
+                <ResponsiveContainer width="100%" height={400}>
+                  <BarChart data={stateData}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="state" />
+                    <YAxis yAxisId="left" />
+                    <YAxis yAxisId="right" orientation="right" />
+                    <Tooltip />
+                    <Legend />
+                    <Bar yAxisId="left" dataKey="shows" fill="#3b82f6" name="Number of Shows" />
+                    <Bar yAxisId="right" dataKey="dailySales" fill="#10b981" name="Avg Daily Sales" />
+                  </BarChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="text-center py-8 text-gray-500">No show data available</div>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Target Achievement (YTD)</CardTitle>
+              <CardDescription>
+                Progress based on completed shows in 2026 compared to their targets and the overall annual target
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="p-4 border rounded-lg">
+                  <p className="text-sm text-gray-600">Completed Shows</p>
+                  <p className="text-2xl font-bold text-gray-900">{completedShows}</p>
+                  <p className="text-xs text-gray-500">Orders received: {completedShowOrders.length}</p>
+                </div>
+                <div className="p-4 border rounded-lg">
+                  <p className="text-sm text-gray-600">Completed Show Target</p>
+                  <p className="text-2xl font-bold text-blue-600">{completedShowTarget2026}</p>
+                  <p className="text-xs text-gray-500">Achievement: {completedAchievement}%</p>
+                </div>
+                <div className="p-4 border rounded-lg">
+                  <p className="text-sm text-gray-600">Overall 2026 Target</p>
+                  <p className="text-2xl font-bold text-green-600">{target2026}</p>
+                  <p className="text-xs text-gray-500">Current achievement: {overallAchievement}%</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <Card>
+              <CardHeader>
+                <CardTitle>2024 vs 2025 Target Comparison</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-4">
+                  <div className="flex justify-between items-center p-4 bg-blue-50 rounded-lg">
+                    <div>
+                      <p className="text-sm text-gray-600">2024 Target</p>
+                      <p className="text-2xl font-bold text-gray-900">{target2024} units</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-sm text-gray-600">Achieved</p>
+                      <p className="text-2xl font-bold text-green-600">{totalSales2024} units</p>
+                      <p className="text-xs text-gray-500">
+                        {target2024 > 0 ? `${Math.round((totalSales2024 / target2024) * 100)}%` : '0%'}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex justify-between items-center p-4 bg-green-50 rounded-lg">
+                    <div>
+                      <p className="text-sm text-gray-600">2025 Target</p>
+                      <p className="text-2xl font-bold text-gray-900">{target2025} units</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-sm text-gray-600">Current</p>
+                      <p className="text-2xl font-bold text-blue-600">{totalSales2025} units</p>
+                      <p className="text-xs text-gray-500">
+                        {target2025 > 0 ? `${Math.round((totalSales2025 / target2025) * 100)}%` : '0%'}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Show Status Overview</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-3">
+                  <div className="flex justify-between items-center p-3 border rounded-lg">
+                    <span className="text-sm font-medium">Completed Shows</span>
+                    <span className="text-lg font-bold text-green-600">{completedShows}</span>
+                  </div>
+                  <div className="flex justify-between items-center p-3 border rounded-lg">
+                    <span className="text-sm font-medium">In Progress</span>
+                    <span className="text-lg font-bold text-blue-600">
+                      {shows.filter(s => s.status === 'In Progress').length}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center p-3 border rounded-lg">
+                    <span className="text-sm font-medium">Not Started</span>
+                    <span className="text-lg font-bold text-orange-600">
+                      {shows.filter(s => s.status === 'Not Started').length}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center p-3 border rounded-lg">
+                    <span className="text-sm font-medium">Total Registered</span>
+                      <span className="text-lg font-bold text-gray-900">{totalShows}</span>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
+
+        {/* Vehicle Distribution Tab */}
+        <TabsContent value="caravans" className="space-y-6">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <Card>
+              <CardHeader>
+                <CardTitle>Sales by Caravan Type</CardTitle>
+                <CardDescription>Distribution based on chassis number prefix</CardDescription>
+              </CardHeader>
+              <CardContent className="flex justify-center">
+                {vehicleTypeData.length > 0 ? (
+                  <ResponsiveContainer width="100%" height={350}>
+                    <PieChart>
+                      <Pie
+                        data={vehicleTypeData}
+                        cx="50%"
+                        cy="50%"
+                        labelLine={false}
+                        label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
+                        outerRadius={120}
+                        fill="#8884d8"
+                        dataKey="value"
+                      >
+                        {vehicleTypeData.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={entry.color} />
+                        ))}
+                      </Pie>
+                      <Tooltip />
+                    </PieChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="text-center py-8 text-gray-500">No vehicle data available</div>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Caravan Range Comparison</CardTitle>
+                <CardDescription>Units sold per model range</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {vehicleTypeData.length > 0 ? (
+                  <ResponsiveContainer width="100%" height={350}>
+                    <BarChart data={vehicleTypeData}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="name" />
+                      <YAxis />
+                      <Tooltip />
+                      <Legend />
+                      <Bar dataKey="value" name="Units">
+                        {vehicleTypeData.map((entry, index) => (
+                          <Cell key={`bar-${entry.name}-${index}`} fill={entry.color} />
+                        ))}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="text-center py-8 text-gray-500">No caravan data available</div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">            
+            <Card>
+              <CardHeader>
+                <CardTitle>Caravan Type Details</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {vehicleTypeData.length > 0 ? (
+                  <div className="space-y-4">
+                    {vehicleTypeData.map((vehicle) => (
+                      <div key={vehicle.name} className="flex items-center justify-between p-3 border rounded-lg">
+                        <div className="flex items-center gap-3">
+                          <div
+                            className="w-4 h-4 rounded-full"
+                            style={{ backgroundColor: vehicle.color }}
+                          />
+                          <span className="font-medium">{vehicle.name}</span>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-lg font-bold">{vehicle.value}</p>
+                          <p className="text-xs text-gray-500">units sold</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center py-8 text-gray-500">No caravan data available</div>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Order Trend</CardTitle>
+                <CardDescription>Monthly order intake across all shows</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {vehicleTrendData.length > 0 ? (
+                  <ResponsiveContainer width="100%" height={300}>
+                    <LineChart data={vehicleTrendData}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="month" />
+                      <YAxis />
+                      <Tooltip />
+                      <Line type="monotone" dataKey="value" stroke="#2563eb" strokeWidth={3} name="Orders" />
+                    </LineChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="text-center py-8 text-gray-500">No order trend data available</div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }
