@@ -38,6 +38,9 @@ type BudgetRow = {
   showId: string;
   showName: string;
   dealership: string;
+  startDate?: string;
+  finishDate?: string;
+  status?: string;
   totalBudget: number;
   dealerBudget: number;
   factoryBudget: number;
@@ -62,11 +65,6 @@ const formatNumber = (value: number) =>
 const formatCurrency = (value: number) => {
   const numeric = Number.isFinite(value) ? value : 0;
   return `$${numeric.toLocaleString('en-AU', { minimumFractionDigits: 0 })}`;
-};
-
-const formatPercent = (num: number) => {
-  if (!Number.isFinite(num)) return '0%';
-  return `${num.toFixed(1)}%`;
 };
 
 const parseNumber = (value: unknown): number => {
@@ -106,6 +104,24 @@ const numberOrZero = (value: unknown) => {
     return Number.isFinite(parsed) ? parsed : 0;
   }
   return 0;
+};
+
+const parseDateSafe = (value: string | undefined | null) => {
+  if (!value) return null;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+};
+
+const formatShortDate = (value?: string | null) => {
+  const date = parseDateSafe(value ?? undefined);
+  if (!date) return 'Date TBC';
+  return date.toLocaleDateString('en-AU', { month: 'short', day: 'numeric' });
+};
+
+const formatDateRange = (start?: string, finish?: string) => {
+  if (!start && !finish) return 'Schedule TBC';
+  if (start && finish) return `${formatShortDate(start)} → ${formatShortDate(finish)}`;
+  return start ? `Starts ${formatShortDate(start)}` : `Ends ${formatShortDate(finish)}`;
 };
 
 type FinanceLine = {
@@ -311,6 +327,9 @@ export default function ShowBudgetExpense() {
             showId: show.id,
             showName: show.name,
             dealership: show.dealership || '',
+            startDate: show.startDate,
+            finishDate: show.finishDate,
+            status: show.status,
             totalBudget,
             dealerBudget,
             factoryBudget,
@@ -353,35 +372,106 @@ export default function ShowBudgetExpense() {
   }, [rows, search]);
 
   const aggregates = useMemo(() => {
-    const sum = <K extends keyof BudgetRow>(key: K) => filteredRows.reduce((acc, row) => acc + (row[key] || 0), 0);
-    const totalActual = sum('actual');
-    const totalBudget = sum('totalBudget');
-    const dealerActual = sum('dealerActual');
-    const dealerBudget = sum('dealerBudget');
-    const factoryActual = sum('factoryActual');
-    const factoryBudget = sum('factoryBudget');
-    const totalSales = sum('showSales');
-    const totalContractValue = sum('totalContractValue');
+    const today = new Date();
+    const isFinished = (row: BudgetRow) => {
+      const finish = parseDateSafe(row.finishDate);
+      const status = row.status?.toLowerCase();
+      if (status === 'finished' || status === 'completed') return true;
+      if (finish && finish.getTime() <= today.getTime()) return true;
+      return false;
+    };
+
+    const completedRows = filteredRows.filter(isFinished);
+    const sum = <K extends keyof BudgetRow>(source: BudgetRow[], key: K) =>
+      source.reduce((acc, row) => acc + (row[key] || 0), 0);
 
     const pct = (actual: number, budget: number) => {
       if (budget <= 0) return 0;
       return ((actual - budget) / budget) * 100;
     };
 
+    const ytdTotalActual = sum(completedRows, 'actual');
+    const ytdTotalBudget = sum(completedRows, 'totalBudget');
+    const ytdDealerActual = sum(completedRows, 'dealerActual');
+    const ytdDealerBudget = sum(completedRows, 'dealerBudget');
+    const ytdFactoryActual = sum(completedRows, 'factoryActual');
+    const ytdFactoryBudget = sum(completedRows, 'factoryBudget');
+
     return {
-      totalActual,
-      totalBudget,
-      dealerActual,
-      dealerBudget,
-      factoryActual,
-      factoryBudget,
-      totalSales,
-      totalContractValue,
-      pctTotal: pct(totalActual, totalBudget),
-      pctDealer: pct(dealerActual, dealerBudget),
-      pctFactory: pct(factoryActual, factoryBudget),
+      completedRows,
+      completedCount: completedRows.length,
+      ytd: {
+        totalActual: ytdTotalActual,
+        totalBudget: ytdTotalBudget,
+        dealerActual: ytdDealerActual,
+        dealerBudget: ytdDealerBudget,
+        factoryActual: ytdFactoryActual,
+        factoryBudget: ytdFactoryBudget,
+        pctTotal: pct(ytdTotalActual, ytdTotalBudget),
+        pctDealer: pct(ytdDealerActual, ytdDealerBudget),
+        pctFactory: pct(ytdFactoryActual, ytdFactoryBudget),
+      },
+      overall: {
+        totalSales: sum(filteredRows, 'showSales'),
+        totalContractValue: sum(filteredRows, 'totalContractValue'),
+      },
     };
   }, [filteredRows]);
+
+  const highlights = useMemo(() => {
+    const today = new Date();
+    const msPerDay = 1000 * 60 * 60 * 24;
+    const withParsedDates = rows
+      .map((row) => ({
+        ...row,
+        start: parseDateSafe(row.startDate),
+        finish: parseDateSafe(row.finishDate),
+      }))
+      .filter((row) => row.start || row.finish);
+
+    const finishedShows = withParsedDates
+      .filter(
+        (row) =>
+          (row.finish && row.finish.getTime() < today.getTime()) ||
+          row.status?.toLowerCase() === 'finished' ||
+          row.status?.toLowerCase() === 'completed'
+      )
+      .sort((a, b) => (b.finish?.getTime() ?? 0) - (a.finish?.getTime() ?? 0));
+
+    const upcomingShows = withParsedDates
+      .filter((row) => row.start && row.start.getTime() > today.getTime())
+      .sort((a, b) => (a.start?.getTime() ?? 0) - (b.start?.getTime() ?? 0));
+
+    const nextShow = upcomingShows.find((row) => {
+      if (!row.start) return false;
+      const daysUntil = Math.ceil((row.start.getTime() - today.getTime()) / msPerDay);
+      return daysUntil <= 10;
+    });
+
+    const daysUntilNext =
+      nextShow?.start != null ? Math.max(0, Math.ceil((nextShow.start.getTime() - today.getTime()) / msPerDay)) : null;
+
+    return {
+      finished: finishedShows[0] || null,
+      next: nextShow && daysUntilNext !== null ? { ...nextShow, daysUntil: daysUntilNext } : null,
+    };
+  }, [rows]);
+
+  const varianceBadge = (pct: number) => {
+    const tone =
+      pct > 5
+        ? 'bg-red-50 text-red-700 border-red-200'
+        : pct < -5
+          ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+          : 'bg-amber-50 text-amber-800 border-amber-200';
+    const sign = pct > 0 ? '+' : '';
+    return (
+      <span className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${tone}`}>
+        {sign}
+        {pct.toFixed(1)}% vs target
+      </span>
+    );
+  };
 
   return (
     <div className="space-y-6">
@@ -420,45 +510,87 @@ export default function ShowBudgetExpense() {
             </div>
           ) : (
             <div className="space-y-4">
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="flex items-center gap-3 rounded-lg border border-slate-200 bg-slate-50/80 p-3 shadow-sm">
+                  <Badge className="bg-red-500 text-white px-2 py-1">Finished</Badge>
+                  <div className="space-y-0.5 text-sm">
+                    <p className="font-semibold text-slate-900">
+                      {highlights.finished ? highlights.finished.showName : 'No finished shows yet'}
+                    </p>
+                    <p className="text-xs text-slate-600">
+                      {highlights.finished
+                        ? `${highlights.finished.dealership || 'Unassigned'} · ${formatDateRange(highlights.finished.startDate, highlights.finished.finishDate)}`
+                        : 'Completed shows will appear here'}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3 rounded-lg border border-yellow-200 bg-yellow-50 p-3 shadow-sm">
+                  <Badge className="bg-yellow-300 text-yellow-900 px-2 py-1 ring-1 ring-yellow-400">
+                    Next
+                  </Badge>
+                  <div className="space-y-0.5 text-sm">
+                    <p className="font-semibold text-slate-900">
+                      {highlights.next ? highlights.next.showName : 'No show in the next 10 days'}
+                    </p>
+                    <p className="text-xs text-slate-600">
+                      {highlights.next
+                        ? `Starts ${formatShortDate(highlights.next.startDate)} · in ${highlights.next.daysUntil} day${highlights.next.daysUntil === 1 ? '' : 's'}`
+                        : 'Upcoming shows inside 10 days will be highlighted'}
+                    </p>
+                  </div>
+                </div>
+              </div>
               <div className="grid gap-4 md:grid-cols-5">
                 <Card className="border-slate-200">
                   <CardContent className="pt-4 space-y-1">
                     <p className="text-xs uppercase tracking-wide text-slate-500">Total Actual Cost</p>
-                    <p className="text-xl font-semibold text-slate-900">{formatCurrency(aggregates.totalActual)}</p>
-                    <p className="text-xs text-slate-600">
-                      Budget {formatCurrency(aggregates.totalBudget)} · {formatPercent(aggregates.pctTotal)} vs budget
+                    <p className="text-xl font-semibold text-slate-900">{formatCurrency(aggregates.ytd.totalActual)}</p>
+                    <div className="flex items-center justify-between text-xs text-slate-600">
+                      <span>Target {formatCurrency(aggregates.ytd.totalBudget)}</span>
+                      {varianceBadge(aggregates.ytd.pctTotal)}
+                    </div>
+                    <p className="text-[11px] text-slate-500">
+                      {aggregates.completedCount > 0
+                        ? `${aggregates.completedCount} finished show${aggregates.completedCount === 1 ? '' : 's'} counted YTD`
+                        : 'Waiting for finished shows to calculate YTD'}
                     </p>
                   </CardContent>
                 </Card>
                 <Card className="border-slate-200">
                   <CardContent className="pt-4 space-y-1">
                     <p className="text-xs uppercase tracking-wide text-slate-500">Total Dealer Actual</p>
-                    <p className="text-xl font-semibold text-blue-700">{formatCurrency(aggregates.dealerActual)}</p>
-                    <p className="text-xs text-slate-600">
-                      Budget {formatCurrency(aggregates.dealerBudget)} · {formatPercent(aggregates.pctDealer)} vs budget
-                    </p>
+                    <p className="text-xl font-semibold text-blue-700">{formatCurrency(aggregates.ytd.dealerActual)}</p>
+                    <div className="flex items-center justify-between text-xs text-slate-600">
+                      <span>Target {formatCurrency(aggregates.ytd.dealerBudget)}</span>
+                      {varianceBadge(aggregates.ytd.pctDealer)}
+                    </div>
+                    <p className="text-[11px] text-slate-500">YTD dealer actuals vs target</p>
                   </CardContent>
                 </Card>
                 <Card className="border-slate-200">
                   <CardContent className="pt-4 space-y-1">
                     <p className="text-xs uppercase tracking-wide text-slate-500">Total Factory Actual</p>
-                    <p className="text-xl font-semibold text-emerald-700">{formatCurrency(aggregates.factoryActual)}</p>
-                    <p className="text-xs text-slate-600">
-                      Budget {formatCurrency(aggregates.factoryBudget)} · {formatPercent(aggregates.pctFactory)} vs budget
+                    <p className="text-xl font-semibold text-emerald-700">
+                      {formatCurrency(aggregates.ytd.factoryActual)}
                     </p>
+                    <div className="flex items-center justify-between text-xs text-slate-600">
+                      <span>Target {formatCurrency(aggregates.ytd.factoryBudget)}</span>
+                      {varianceBadge(aggregates.ytd.pctFactory)}
+                    </div>
+                    <p className="text-[11px] text-slate-500">YTD factory actuals vs target</p>
                   </CardContent>
                 </Card>
                 <Card className="border-slate-200">
                   <CardContent className="pt-4">
                     <p className="text-xs uppercase tracking-wide text-slate-500">Total Sales 2026</p>
-                    <p className="text-xl font-semibold text-slate-900">{formatNumber(aggregates.totalSales)}</p>
+                    <p className="text-xl font-semibold text-slate-900">{formatNumber(aggregates.overall.totalSales)}</p>
                   </CardContent>
                 </Card>
                 <Card className="border-slate-200">
                   <CardContent className="pt-4">
                     <p className="text-xs uppercase tracking-wide text-slate-500">Total Contract Value</p>
                     <p className="text-xl font-semibold text-slate-900">
-                      {formatCurrency(aggregates.totalContractValue)}
+                      {formatCurrency(aggregates.overall.totalContractValue)}
                     </p>
                   </CardContent>
                 </Card>
