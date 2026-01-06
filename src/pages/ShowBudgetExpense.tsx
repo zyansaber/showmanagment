@@ -361,17 +361,13 @@ export default function ShowBudgetExpense() {
     return rows.filter((row) => `${row.showName} ${row.dealership}`.toLowerCase().includes(term));
   }, [rows, search]);
 
-  const filteredLegacyRows = useMemo(
-    () => filteredRows.filter((row) => row.showYear !== TARGET_YEAR),
-    [filteredRows]
-  );
   const filteredRows2026 = useMemo(
     () => filteredRows.filter((row) => row.showYear === TARGET_YEAR),
     [filteredRows]
   );
   const orderedRows = useMemo(
-    () => [...filteredLegacyRows, ...filteredRows2026],
-    [filteredLegacyRows, filteredRows2026]
+    () => [...filteredRows2026],
+    [filteredRows2026]
   );
 
   const rows2026 = useMemo(() => rows.filter((row) => row.showYear === TARGET_YEAR), [rows]);
@@ -463,42 +459,6 @@ export default function ShowBudgetExpense() {
             </div>
           ) : (
             <div className="space-y-4">
-              {filteredLegacyRows.length > 0 && (
-                <div className="rounded-lg border border-amber-200 bg-amber-50/60 p-4 shadow-sm space-y-3">
-                  <div className="flex items-center justify-between gap-2">
-                    <div>
-                      <p className="text-sm font-semibold text-amber-900">2025 Shows</p>
-                      <p className="text-xs text-amber-800">Separated from 2026 metrics for clarity.</p>
-                    </div>
-                    <Badge className="bg-amber-600 text-white">Legacy 2025</Badge>
-                  </div>
-                  <div className="grid gap-3 md:grid-cols-2">
-                    {filteredLegacyRows.map((row) => (
-                      <div key={row.showId} className="rounded-md border border-amber-100 bg-white/80 p-3 shadow-inner">
-                        <div className="flex items-center justify-between gap-2">
-                          <div className="flex items-center gap-2">
-                            <span className="font-semibold text-slate-900">{row.showName}</span>
-                            {renderTimingBadge(row.timing)}
-                          </div>
-                          <Badge variant="outline" className="h-5 px-2 text-[10px]">
-                            {row.showYear ?? '—'}
-                          </Badge>
-                        </div>
-                        <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
-                          <div className="rounded border border-amber-100 bg-amber-50/80 p-2">
-                            <p className="text-[11px] uppercase tracking-wide text-amber-700">Actual</p>
-                            <p className="font-semibold text-amber-900">{formatCurrency(row.actual)}</p>
-                          </div>
-                          <div className="rounded border border-slate-200 bg-slate-50 p-2">
-                            <p className="text-[11px] uppercase tracking-wide text-slate-600">Budget</p>
-                            <p className="font-semibold text-slate-900">{formatCurrency(row.totalBudget)}</p>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
               <div className="grid gap-4 md:grid-cols-5">
                 <Card className="border-slate-200">
                   <CardContent className="pt-4 space-y-1">
