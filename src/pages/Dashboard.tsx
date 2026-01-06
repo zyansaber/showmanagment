@@ -27,6 +27,13 @@ type InternalSalesOrderRecord = {
   internalSalesOrderNumberDealer?: string;
 };
 
+type FinanceLine = {
+  aufnrNorm: string;
+  companyCode: string;
+  postingDate?: string;
+  amount: number;
+};
+
 export default function Dashboard() {
   const [shows, setShows] = useState<Show[]>([]);
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
@@ -34,6 +41,7 @@ export default function Dashboard() {
   const [internalOrders, setInternalOrders] = useState<InternalSalesOrderRecord[]>([]);
   const [tasks, setTasks] = useState<ShowTask[]>([]);
   const [budgets, setBudgets] = useState<Record<string, Record<string, unknown>>>({});
+  const [financeActuals, setFinanceActuals] = useState<Record<string, { dealer: number; factory: number }>>({});
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -42,16 +50,18 @@ export default function Dashboard() {
 
   const loadData = async () => {
     try {
-      const [showsData, membersData, ordersData, budgetsData, internalOrdersData, tasksData] = await Promise.all([
+      const [showsData, membersData, ordersData, budgetsData, internalOrdersData, tasksData, financeData] = await Promise.all([
         dbGet('shows'),
         dbGet('teamMembers'),
         dbGet('showOrders'),
         dbGet('showBudgets'),
         dbGet('finance/internalSalesOrders'),
         dbGet('showTasks'),
+        dbGet('finance/glByAufnrGl'),
       ]);
 
-      setShows(showsData ? Object.values(showsData) : []);
+      const showList = showsData ? Object.values(showsData) : [];
+      setShows(showList);
       setTeamMembers(membersData ? Object.values(membersData) : []);
       setOrders(ordersData ? Object.values(ordersData) : []);
       setBudgets(budgetsData ?? {});
@@ -61,6 +71,24 @@ export default function Dashboard() {
           : []
       );
       setTasks(tasksData ? Object.values(tasksData as Record<string, ShowTask>) : []);
+
+      const showsById = showList.reduce((acc, show) => {
+        if (show.id) acc[show.id] = show;
+        return acc;
+      }, {} as Record<string, Show>);
+      const aufnrShowMap = buildAufnrShowMap(internalOrdersData, showsById);
+      const financeLines = parseFinanceLines(financeData);
+      const actuals = financeLines.reduce((acc, line) => {
+        const mappedShow = aufnrShowMap[line.aufnrNorm];
+        if (!mappedShow?.showId) return acc;
+        const year = getYearFromDate(line.postingDate);
+        if (year !== 2025) return acc;
+        if (!acc[mappedShow.showId]) acc[mappedShow.showId] = { dealer: 0, factory: 0 };
+        if (line.companyCode === '3120') acc[mappedShow.showId].dealer += line.amount;
+        else if (line.companyCode === '3110') acc[mappedShow.showId].factory += line.amount;
+        return acc;
+      }, {} as Record<string, { dealer: number; factory: number }>);
+      setFinanceActuals(actuals);
     } catch (error) {
       console.error('Error loading data:', error);
     } finally {
@@ -94,6 +122,88 @@ export default function Dashboard() {
     const total = parseNumber(entry.totalFactoryCosts ?? entry.totalFactoryCost);
     if (total > 0) return total;
     return parseNumber(entry.factoryCommission) + parseNumber(entry.factoryTravelCosts) + parseNumber(entry.standCosts) / 2;
+  };
+
+  const leadingZeroSafe = (value: unknown) => {
+    if (typeof value !== 'string' && typeof value !== 'number') return '';
+    const asString = String(value);
+    const stripped = asString.replace(/^0+/, '');
+    return stripped.length > 0 ? stripped : asString;
+  };
+
+  const numberOrZero = (value: unknown) => {
+    if (typeof value === 'number') return value;
+    if (typeof value === 'string') {
+      const parsed = parseFloat(value);
+      return Number.isFinite(parsed) ? parsed : 0;
+    }
+    return 0;
+  };
+
+  const parseFinanceLines = (data: unknown): FinanceLine[] => {
+    if (!data || typeof data !== 'object') return [];
+    const lines: FinanceLine[] = [];
+    const root = data as Record<string, unknown>;
+
+    Object.entries(root).forEach(([aufnrKey, glBuckets]) => {
+      if (!glBuckets || typeof glBuckets !== 'object') return;
+      const aufnrNorm = leadingZeroSafe(aufnrKey);
+
+      Object.values(glBuckets as Record<string, unknown>).forEach((glValue) => {
+        if (!glValue || typeof glValue !== 'object') return;
+        const glBucket = glValue as Record<string, unknown>;
+        if (!glBucket.lines || typeof glBucket.lines !== 'object') return;
+
+        Object.values(glBucket.lines as Record<string, unknown>).forEach((rawLine) => {
+          if (!rawLine || typeof rawLine !== 'object') return;
+          const line = rawLine as Record<string, unknown>;
+          lines.push({
+            aufnrNorm,
+            companyCode: typeof line.company_code === 'string' ? line.company_code : 'NA',
+            postingDate: typeof line.posting_date === 'string' ? line.posting_date : undefined,
+            amount: numberOrZero(line.amount),
+          });
+        });
+      });
+    });
+
+    return lines;
+  };
+
+  const getYearFromDate = (value: string | undefined | null): number | null => {
+    if (!value) return null;
+    const match = String(value).match(/^(\d{4})/);
+    if (match?.[1]) {
+      const year = Number(match[1]);
+      return Number.isFinite(year) ? year : null;
+    }
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? null : parsed.getFullYear();
+  };
+
+  const buildAufnrShowMap = (
+    internalOrders: unknown,
+    showsById: Record<string, Show>
+  ): Record<string, { showId: string; showName?: string }> => {
+    const map: Record<string, { showId: string; showName?: string }> = {};
+    if (!internalOrders || typeof internalOrders !== 'object') return map;
+
+    Object.values(internalOrders as Record<string, Record<string, unknown>>).forEach((order) => {
+      if (!order || typeof order !== 'object') return;
+      const dealerNumber =
+        typeof order.internalSalesOrderNumberDealer === 'string' ? order.internalSalesOrderNumberDealer.trim() : '';
+      const internalNumber = typeof order.internalSalesOrderNumber === 'string' ? order.internalSalesOrderNumber.trim() : '';
+      const showId = typeof order.showId === 'string' ? order.showId.trim() : '';
+      if (!showId) return;
+      const candidates = [dealerNumber, internalNumber].filter(Boolean);
+      candidates.forEach((num) => {
+        const norm = leadingZeroSafe(num);
+        if (!norm) return;
+        map[norm] = { showId, showName: showsById[showId]?.name };
+      });
+    });
+
+    return map;
   };
 
   // Calculate employee statistics
@@ -406,8 +516,9 @@ export default function Dashboard() {
 
     const dealerTarget = computeDealerBudget(showBudget);
     const factoryTarget = computeFactoryBudget(showBudget);
-    const dealerActual = parseNumber(showBudget.dealerActual ?? dealerTarget);
-    const factoryActual = parseNumber(showBudget.factoryActual ?? factoryTarget);
+    const financeActual = financeActuals[showEntry.id];
+    const dealerActual = financeActual ? financeActual.dealer : parseNumber(showBudget.dealerActual ?? dealerTarget);
+    const factoryActual = financeActual ? financeActual.factory : parseNumber(showBudget.factoryActual ?? factoryTarget);
     const internalOrder = internalOrders.find((order) => order.showId === showEntry.id);
     const taskSummary = taskCompletionByShow[showEntry.id];
     const teamMemberCount = Array.isArray(showEntry.teamMembers)
@@ -459,11 +570,11 @@ export default function Dashboard() {
 
   const currentShowSnapshot = useMemo(
     () => buildShowSnapshot(timelineShows.currentShow),
-    [timelineShows, budgets, orders, internalOrders, taskCompletionByShow, teamMembers]
+    [timelineShows, budgets, orders, internalOrders, taskCompletionByShow, teamMembers, financeActuals]
   );
   const lastShowSnapshot = useMemo(
     () => buildShowSnapshot(timelineShows.lastShow),
-    [timelineShows, budgets, orders, internalOrders, taskCompletionByShow, teamMembers]
+    [timelineShows, budgets, orders, internalOrders, taskCompletionByShow, teamMembers, financeActuals]
   );
 
   if (loading) {
