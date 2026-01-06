@@ -517,8 +517,8 @@ export default function Dashboard() {
     const dealerTarget = computeDealerBudget(showBudget);
     const factoryTarget = computeFactoryBudget(showBudget);
     const financeActual = financeActuals[showEntry.id];
-    const dealerActual = financeActual ? financeActual.dealer : parseNumber(showBudget.dealerActual ?? dealerTarget);
-    const factoryActual = financeActual ? financeActual.factory : parseNumber(showBudget.factoryActual ?? factoryTarget);
+    const dealerActual = numberOrZero(financeActual?.dealer ?? showBudget.dealerActual);
+    const factoryActual = numberOrZero(financeActual?.factory ?? showBudget.factoryActual);
     const internalOrder = internalOrders.find((order) => order.showId === showEntry.id);
     const taskSummary = taskCompletionByShow[showEntry.id];
     const teamMemberCount = Array.isArray(showEntry.teamMembers)
@@ -671,10 +671,6 @@ export default function Dashboard() {
                             <p className="text-xs uppercase tracking-wide text-slate-500">Sales</p>
                             <p className="text-lg font-semibold text-slate-900">{formatNumber(entry.data.salesActual)}</p>
                           </div>
-                          <div className="text-right">
-                            <p className="text-xs text-slate-500">Target</p>
-                            <p className="text-sm font-semibold text-blue-700">{formatNumber(entry.data.targetSales)}</p>
-                          </div>
                         </div>
                       )}
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -682,27 +678,20 @@ export default function Dashboard() {
                           {
                             label: 'Dealer Cost',
                             actual: entry.data.dealerActual,
-                            target: entry.data.dealerTarget,
                             textClass: 'text-amber-700',
                           },
                           {
                             label: 'Factory Cost',
                             actual: entry.data.factoryActual,
-                            target: entry.data.factoryTarget,
                             textClass: 'text-indigo-700',
                           },
                         ].map((metric) => (
                           <div key={metric.label} className="rounded-lg border p-3 shadow-[0_1px_6px_rgba(0,0,0,0.04)]">
                             <p className="text-xs uppercase tracking-wide text-slate-500">{metric.label}</p>
-                            <div className="flex items-end justify-between">
-                              <p className={`text-lg font-bold ${metric.textClass}`}>
-                                {formatCurrency(metric.actual)}
-                              </p>
-                              <div className="text-right text-xs text-slate-500">
-                                <p>Target</p>
-                                <p className="font-semibold text-slate-700">{formatCurrency(metric.target)}</p>
-                              </div>
-                            </div>
+                            <p className={`text-lg font-bold ${metric.textClass}`}>
+                              {formatCurrency(Number.isFinite(metric.actual) ? metric.actual : 0)}
+                            </p>
+                            <p className="text-[11px] text-slate-500">Actual cost (0 if not recorded)</p>
                           </div>
                         ))}
                       </div>
