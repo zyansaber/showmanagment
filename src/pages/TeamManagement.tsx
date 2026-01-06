@@ -7,7 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import { UserPlus, Edit, Check, UserCheck, BarChart3 } from 'lucide-react';
+import { UserPlus, Edit, Check, UserCheck, BarChart3, X } from 'lucide-react';
 import { dbGet, dbSet, dbUpdate } from '@/lib/firebase';
 import type { TeamMember, UserRole, Show, ShowOrder } from '@/types';
 
@@ -20,6 +20,8 @@ export default function TeamManagement() {
   const [selectedMember, setSelectedMember] = useState<TeamMember | null>(null);
   const [editingEmailMemberId, setEditingEmailMemberId] = useState<string | null>(null);
   const [emailDraft, setEmailDraft] = useState('');
+  const [editingRoleMemberId, setEditingRoleMemberId] = useState<string | null>(null);
+  const [roleDraft, setRoleDraft] = useState<UserRole>('Show Team');
 
   const [newMember, setNewMember] = useState<Partial<TeamMember>>({
     memberName: '',
@@ -31,6 +33,8 @@ export default function TeamManagement() {
   useEffect(() => {
     loadTeamData();
   }, []);
+
+  const roleOptions: UserRole[] = ['Show Team', 'Factory Team', 'Network Team'];
 
   const loadTeamData = async () => {
     try {
@@ -111,13 +115,32 @@ export default function TeamManagement() {
   const getRoleBadgeColor = (role: UserRole) => {
     switch (role) {
       case 'Show Team':
-        return 'bg-green-500';
+        return 'bg-emerald-100 text-emerald-800 border border-emerald-200';
       case 'Factory Team':
-        return 'bg-orange-500';
+        return 'bg-amber-100 text-amber-800 border border-amber-200';
       case 'Network Team':
-        return 'bg-blue-600';
+        return 'bg-blue-100 text-blue-800 border border-blue-200';
       default:
-        return 'bg-gray-500';
+        return 'bg-slate-200 text-slate-800 border border-slate-300';
+    }
+  };
+
+  const handleRoleEdit = (member: TeamMember) => {
+    setEditingRoleMemberId(member.memberId);
+    setRoleDraft(member.role);
+  };
+
+  const handleSaveRole = async (memberId: string) => {
+    try {
+      await dbUpdate(`teamMembers/${memberId}`, { role: roleDraft });
+      setTeamMembers((prev) =>
+        prev.map((member) =>
+          member.memberId === memberId ? { ...member, role: roleDraft } : member
+        )
+      );
+      setEditingRoleMemberId(null);
+    } catch (error) {
+      console.error('Error updating role:', error);
     }
   };
 
@@ -429,7 +452,48 @@ export default function TeamManagement() {
                       )}
                     </TableCell>
                     <TableCell>
-                      <Badge className={getRoleBadgeColor(member.role)}>{member.role}</Badge>
+                      {editingRoleMemberId === member.memberId ? (
+                        <div className="flex items-center gap-2">
+                          <Select
+                            value={roleDraft}
+                            onValueChange={(value) => setRoleDraft(value as UserRole)}
+                          >
+                            <SelectTrigger className={`w-[160px] ${getRoleBadgeColor(roleDraft)}`}>
+                              <SelectValue placeholder="Select role" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {roleOptions.map((role) => (
+                                <SelectItem key={role} value={role}>
+                                  {role}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleSaveRole(member.memberId)}
+                          >
+                            <Check className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setEditingRoleMemberId(null)}
+                          >
+                            <X className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      ) : (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="px-0"
+                          onClick={() => handleRoleEdit(member)}
+                        >
+                          <Badge className={`${getRoleBadgeColor(member.role)} cursor-pointer`}>{member.role}</Badge>
+                        </Button>
+                      )}
                     </TableCell>
                     <TableCell>{orderCountMap[member.memberName] || 0}</TableCell>
                     <TableCell>
