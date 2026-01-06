@@ -1,186 +1,203 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { toast } from 'sonner';
-import { Banknote, Loader2, Pencil, Plus, Save, Upload, XCircle } from 'lucide-react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
+import { useEffect, useMemo, useState } from 'react';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
-import { dbGet, dbSet } from '@/lib/firebase';
+import { dbGet } from '@/lib/firebase';
+import { Loader2, RefreshCw } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { toast } from 'sonner';
 
-type ShowRecord = {
-  id?: string;
-  name?: string;
+type Show = {
+  id: string;
+  name: string;
   dealership?: string;
-  handoverDealer?: string;
+  target2025?: number;
+  sales2025?: number;
+  target2026?: number;
+  sales2026?: number;
   startDate?: string;
   finishDate?: string;
   status?: string;
 };
 
-type InternalSalesOrder = {
-  id: string;
+type ShowOrder = {
+  id?: string;
+  showId?: string;
+  salesperson?: string;
+  date?: string;
+};
+
+type TeamMember = {
+  memberId?: string;
+  memberName?: string;
+  role?: string;
+};
+
+type BudgetRow = {
   showId: string;
-  internalSalesOrderNumber: string;
-  internalSalesOrderNumberDealer: string;
+  showName: string;
   dealership: string;
+  totalBudget: number;
+  dealerBudget: number;
+  factoryBudget: number;
+  actual: number;
+  dealerActual: number;
+  factoryActual: number;
+  chargeBack: number;
+  diff: number;
+  showTarget: number;
+  showSales: number;
+  salesByShowTeam: number;
+  salesByNetwork: number;
+  salesOffice: number;
+  contractNumber: string;
+  totalContractValue: number;
+  clawBack: number;
 };
 
-type ExpenseItem = {
-  id: string;
-  category: string;
-  glCode: string;
-  contains?: string;
+const formatNumber = (value: number) =>
+  Number.isFinite(value) ? value.toLocaleString('en-AU', { maximumFractionDigits: 0 }) : '0';
+
+const formatCurrency = (value: number) => {
+  const numeric = Number.isFinite(value) ? value : 0;
+  return `$${numeric.toLocaleString('en-AU', { minimumFractionDigits: 0 })}`;
 };
 
-const newId = () =>
-  typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `finance-${Date.now()}-${Math.random()}`;
-
-const normaliseShow = (value: unknown): ShowRecord | null => {
-  if (!value || typeof value !== 'object') return null;
-  const candidate = value as Record<string, unknown>;
-  const id = typeof candidate.id === 'string' ? candidate.id.trim() : '';
-  const name = typeof candidate.name === 'string' ? candidate.name.trim() : undefined;
-  const dealership = typeof candidate.dealership === 'string' ? candidate.dealership.trim() : undefined;
-  const handoverDealer = typeof candidate.handoverDealer === 'string' ? candidate.handoverDealer.trim() : undefined;
-  const startDate = typeof candidate.startDate === 'string' ? candidate.startDate.trim() : undefined;
-  const finishDate = typeof candidate.finishDate === 'string' ? candidate.finishDate.trim() : undefined;
-  const status = typeof candidate.status === 'string' ? candidate.status.trim() : undefined;
-  if (!id) return null;
-  return { id, name, dealership, handoverDealer, startDate, finishDate, status };
+const formatPercent = (num: number) => {
+  if (!Number.isFinite(num)) return '0%';
+  return `${num.toFixed(1)}%`;
 };
 
-const normaliseInternalOrders = (value: unknown): InternalSalesOrder[] => {
-  if (!value) return [];
-  const records = Array.isArray(value) ? value : Object.values(value as Record<string, unknown>);
-  return records
-    .map((item) => {
-      if (!item || typeof item !== 'object') return null;
-      const raw = item as Record<string, unknown>;
-      const showId = typeof raw.showId === 'string' ? raw.showId.trim() : '';
-      if (!showId) return null;
-      const id =
-        typeof raw.id === 'string' && raw.id.trim().length > 0
-          ? raw.id.trim()
-          : `order-${showId}-${Math.random().toString(16).slice(2)}`;
-      const internalSalesOrderNumber =
-        typeof raw.internalSalesOrderNumber === 'string' ? raw.internalSalesOrderNumber.trim() : '';
-      const internalSalesOrderNumberDealer =
-        typeof raw.internalSalesOrderNumberDealer === 'string' ? raw.internalSalesOrderNumberDealer.trim() : '';
-      const dealership = typeof raw.dealership === 'string' ? raw.dealership.trim() : '';
-      return { id, showId, internalSalesOrderNumber, internalSalesOrderNumberDealer, dealership };
-    })
-    .filter(Boolean) as InternalSalesOrder[];
-};
-
-const normaliseExpenseItems = (value: unknown): ExpenseItem[] => {
-  if (!value) return [];
-  const records = Array.isArray(value) ? value : Object.values(value as Record<string, unknown>);
-  return records
-    .map((item) => {
-      if (!item || typeof item !== 'object') return null;
-      const raw = item as Record<string, unknown>;
-      const id =
-        typeof raw.id === 'string' && raw.id.trim().length > 0
-          ? raw.id.trim()
-          : `expense-${Math.random().toString(16).slice(2)}`;
-      const categoryCandidate =
-        typeof raw.category === 'string' && raw.category.trim().length > 0
-          ? raw.category.trim()
-          : typeof raw.name === 'string' && raw.name.trim().length > 0
-            ? raw.name.trim()
-            : '';
-      const category = categoryCandidate || 'Uncategorised';
-      const glCode = typeof raw.glCode === 'string' ? raw.glCode.trim() : '';
-      const contains = typeof raw.contains === 'string' ? raw.contains.trim() : '';
-      return { id, category, glCode, contains };
-    })
-    .filter(Boolean) as ExpenseItem[];
-};
-
-const loadXlsxModule = async () => {
-  try {
-    const mod = await import(/* @vite-ignore */ 'https://cdn.sheetjs.com/xlsx-latest/package/xlsx.mjs');
-    return mod;
-  } catch (err) {
-    console.error('Failed to load xlsx parser from CDN', err);
-    return null;
+const parseNumber = (value: unknown): number => {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return 0;
+    const parsed = Number(trimmed.replace(/,/g, ''));
+    return Number.isFinite(parsed) ? parsed : 0;
   }
+  return 0;
 };
 
-const parseSpreadsheetRows = async (file: File): Promise<Record<string, unknown>[]> => {
-  const buffer = await file.arrayBuffer();
-  const xlsx = await loadXlsxModule();
+const computeDealerTotal = (draft: Record<string, unknown>) =>
+  parseNumber(draft.standCosts) / 2 +
+  parseNumber(draft.dealerDayRates) +
+  parseNumber(draft.dealerCommission) +
+  parseNumber(draft.dealerCostsTransport);
 
-  if (xlsx) {
-    const workbook = xlsx.read(buffer, { type: 'array' });
-    const sheetName = workbook.SheetNames[0];
-    if (sheetName) {
-      const sheet = workbook.Sheets[sheetName];
-      return (xlsx.utils.sheet_to_json(sheet, { defval: '' }) as Record<string, unknown>[]) ?? [];
-    }
-  }
+const computeFactoryTotal = (draft: Record<string, unknown>) =>
+  parseNumber(draft.factoryCommission) + parseNumber(draft.factoryTravelCosts) + parseNumber(draft.standCosts) / 2;
 
-  // Fallback for CSV if xlsx module is unavailable
-  const text = new TextDecoder().decode(buffer);
-  const [headerRow, ...dataRows] = text
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
-
-  if (!headerRow) return [];
-
-  const delimiterCandidates = [',', '\t', ';', '|'];
-  const bestDelimiter =
-    delimiterCandidates.reduce(
-      (best, candidate) => {
-        const count = (headerRow.match(new RegExp(candidate, 'g')) || []).length;
-        return count > best.count ? { delimiter: candidate, count } : best;
-      },
-      { delimiter: ',', count: 0 }
-    ).delimiter || ',';
-
-  const headers = headerRow.split(bestDelimiter).map((cell) => cell.trim());
-  return dataRows.map((row) => {
-    const values = row.split(bestDelimiter).map((cell) => cell.trim());
-    const record: Record<string, string> = {};
-    headers.forEach((header, index) => {
-      record[header] = values[index] ?? '';
-    });
-    return record;
-  });
-};
-
-const findMatchingShowDealer = (show: ShowRecord | undefined) => show?.handoverDealer || show?.dealership || '';
 const TARGET_YEAR = 2026;
 const SPECIAL_SHOW_NAME = 'Geelong Caravaning & Adventure Leisurefest - 2025';
 
-const getYearFromDate = (value: string | undefined) => {
+const leadingZeroSafe = (value: unknown) => {
+  if (typeof value !== 'string' && typeof value !== 'number') return '';
+  const asString = String(value);
+  const stripped = asString.replace(/^0+/, '');
+  return stripped.length > 0 ? stripped : asString;
+};
+
+const numberOrZero = (value: unknown) => {
+  if (typeof value === 'number') return value;
+  if (typeof value === 'string') {
+    const parsed = parseFloat(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+  return 0;
+};
+
+type FinanceLine = {
+  aufnrNorm: string;
+  companyCode: string;
+  postingDate?: string;
+  amount: number;
+};
+
+const parseFinanceLines = (data: unknown): FinanceLine[] => {
+  if (!data || typeof data !== 'object') return [];
+  const lines: FinanceLine[] = [];
+  const root = data as Record<string, unknown>;
+
+  Object.entries(root).forEach(([aufnrKey, glBuckets]) => {
+    if (!glBuckets || typeof glBuckets !== 'object') return;
+    const aufnrNorm = leadingZeroSafe(aufnrKey);
+
+    Object.values(glBuckets as Record<string, unknown>).forEach((glValue) => {
+      if (!glValue || typeof glValue !== 'object') return;
+      const glBucket = glValue as Record<string, unknown>;
+      if (!glBucket.lines || typeof glBucket.lines !== 'object') return;
+
+      Object.values(glBucket.lines as Record<string, unknown>).forEach((rawLine) => {
+        if (!rawLine || typeof rawLine !== 'object') return;
+        const line = rawLine as Record<string, unknown>;
+        lines.push({
+          aufnrNorm,
+          companyCode: typeof line.company_code === 'string' ? line.company_code : 'NA',
+          postingDate: typeof line.posting_date === 'string' ? line.posting_date : undefined,
+          amount: numberOrZero(line.amount),
+        });
+      });
+    });
+  });
+
+  return lines;
+};
+
+const getYearFromDate = (value: string | undefined | null): number | null => {
   if (!value) return null;
-  const match = value.match(/^(\d{4})/);
+  const match = String(value).match(/^(\d{4})/);
   if (match?.[1]) {
-    const parsed = Number(match[1]);
-    if (Number.isFinite(parsed)) return parsed;
+    const year = Number(match[1]);
+    return Number.isFinite(year) ? year : null;
   }
   const parsed = new Date(value);
   return Number.isNaN(parsed.getTime()) ? null : parsed.getFullYear();
 };
 
-const getShowYear = (show: ShowRecord) => {
+const getShowYear = (show: Show): number | null => {
   const startYear = getYearFromDate(show.startDate);
   if (startYear) return startYear;
   const finishYear = getYearFromDate(show.finishDate);
   if (finishYear) return finishYear;
+  if (show.target2026 && show.target2026 > 0) return 2026;
+  if (show.target2025 && show.target2025 > 0) return 2025;
   return null;
 };
 
-const isRelevantShow = (show: ShowRecord) => {
+const isRelevantShow = (show: Show) => {
+  const year = getShowYear(show);
   if (show.name === SPECIAL_SHOW_NAME) return true;
-  return getShowYear(show) === TARGET_YEAR;
+  return year === TARGET_YEAR;
 };
 
-const classifyTiming = (show: ShowRecord) => {
+const buildAufnrShowMap = (
+  internalOrders: unknown,
+  showsById: Record<string, Show>
+): Record<string, { showId: string; showName?: string }> => {
+  const map: Record<string, { showId: string; showName?: string }> = {};
+  if (!internalOrders || typeof internalOrders !== 'object') return map;
+
+  Object.values(internalOrders as Record<string, Record<string, unknown>>).forEach((order) => {
+    if (!order || typeof order !== 'object') return;
+    const dealerNumber =
+      typeof order.internalSalesOrderNumberDealer === 'string' ? order.internalSalesOrderNumberDealer.trim() : '';
+    const internalNumber = typeof order.internalSalesOrderNumber === 'string' ? order.internalSalesOrderNumber.trim() : '';
+    const showId = typeof order.showId === 'string' ? order.showId.trim() : '';
+    if (!showId) return;
+    const candidates = [dealerNumber, internalNumber].filter(Boolean);
+    candidates.forEach((num) => {
+      const norm = leadingZeroSafe(num);
+      if (!norm) return;
+      map[norm] = { showId, showName: showsById[showId]?.name };
+    });
+  });
+
+  return map;
+};
+
+const classifyTiming = (show: Show) => {
   const today = new Date();
   const start = show.startDate ? new Date(show.startDate) : null;
   const end = show.finishDate ? new Date(show.finishDate) : null;
@@ -189,10 +206,10 @@ const classifyTiming = (show: ShowRecord) => {
     if (start > today) return 'next';
   }
   if (start && !Number.isNaN(start.getTime()) && start > today) return 'next';
-  return null;
+  return 'past';
 };
 
-const compareShows = (a: ShowRecord, b: ShowRecord) => {
+const compareShows = (a: Show, b: Show) => {
   if (a.name === SPECIAL_SHOW_NAME) return -1;
   if (b.name === SPECIAL_SHOW_NAME) return 1;
   const aDate = a.startDate ? new Date(a.startDate) : a.finishDate ? new Date(a.finishDate) : null;
@@ -200,61 +217,127 @@ const compareShows = (a: ShowRecord, b: ShowRecord) => {
   const aTime = aDate && !Number.isNaN(aDate.getTime()) ? aDate.getTime() : Number.POSITIVE_INFINITY;
   const bTime = bDate && !Number.isNaN(bDate.getTime()) ? bDate.getTime() : Number.POSITIVE_INFINITY;
   if (aTime !== bTime) return aTime - bTime;
-  return (a.name || '').localeCompare(b.name || '');
+  return a.name.localeCompare(b.name);
 };
 
-export default function Finance() {
+export default function ShowBudgetExpense() {
+  const [rows, setRows] = useState<BudgetRow[]>([]);
   const [loading, setLoading] = useState(true);
-  const [shows, setShows] = useState<ShowRecord[]>([]);
-  const [internalOrders, setInternalOrders] = useState<InternalSalesOrder[]>([]);
-  const [expenses, setExpenses] = useState<ExpenseItem[]>([]);
-  const [savingOrders, setSavingOrders] = useState(false);
-  const [savingExpenses, setSavingExpenses] = useState(false);
-  const [importing, setImporting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [activeTable, setActiveTable] = useState<'orders' | 'expenses'>('orders');
-  const [newExpense, setNewExpense] = useState<Pick<ExpenseItem, 'category' | 'glCode' | 'contains'>>({
-    category: '',
-    glCode: '',
-    contains: '',
-  });
-  const [editingExpenseId, setEditingExpenseId] = useState<string | null>(null);
-  const [editingExpenseDraft, setEditingExpenseDraft] = useState<Pick<ExpenseItem, 'contains' | 'glCode'>>({
-    contains: '',
-    glCode: '',
-  });
-
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [search, setSearch] = useState('');
 
   useEffect(() => {
     const loadData = async () => {
       try {
         setLoading(true);
-        const [showsData, ordersData, expensesData] = await Promise.all([
+        const [showsData, budgetsData, ordersData, financeData, internalOrdersData, teamData] = await Promise.all([
           dbGet('shows'),
+          dbGet('showBudgets'),
+          dbGet('showOrders'),
+          dbGet('finance/glByAufnrGl'),
           dbGet('finance/internalSalesOrders'),
-          dbGet('finance/expenses'),
+          dbGet('teamMembers'),
         ]);
+        const showList: Show[] = showsData ? Object.values(showsData) : [];
+        const budgetMap = budgetsData ?? {};
+        const orders: ShowOrder[] = ordersData ? Object.values(ordersData) : [];
+        const teamMembers: TeamMember[] = teamData ? Object.values(teamData) : [];
+        const financeLines = parseFinanceLines(financeData);
+        const showsById = showList.reduce<Record<string, Show>>((acc, show) => {
+          if (show.id) acc[show.id] = show;
+          return acc;
+        }, {});
+        const aufnrShowMap = buildAufnrShowMap(internalOrdersData, showsById);
 
-        const normalisedShows = showsData
-          ? Object.entries(showsData)
-              .map(([key, value]) => normaliseShow({ id: key, ...(value as Record<string, unknown>) }))
-              .filter(Boolean) ?? []
-          : [];
+        const roleLookup = teamMembers.reduce<Record<string, string>>((acc, member) => {
+          const name = member.memberName?.trim();
+          const id = member.memberId?.trim();
+          if (name) acc[name] = member.role || '';
+          if (id) acc[id] = member.role || '';
+          return acc;
+        }, {});
 
-        const filteredShows = (normalisedShows as ShowRecord[]).filter(isRelevantShow).sort(compareShows);
-        setShows(filteredShows);
-        const relevantShowIds = new Set(filteredShows.map((show) => show.id));
-        const filteredInternalOrders = normaliseInternalOrders(ordersData).filter((order) => relevantShowIds.has(order.showId));
-        setInternalOrders(filteredInternalOrders);
+        const salesCounts = orders.reduce<
+          Record<string, { total: number; showTeam: number; network: number; office: number }>
+        >((acc, order) => {
+          const showId = order.showId;
+          if (!showId) return acc;
+          const linkedShow = showsById[showId];
+          if (!linkedShow || !isRelevantShow(linkedShow)) return acc;
+          const orderYear = getYearFromDate(order.date);
+          const showYear = getShowYear(linkedShow);
+          const include =
+            (showYear === TARGET_YEAR && orderYear === TARGET_YEAR) ||
+            (linkedShow.name === SPECIAL_SHOW_NAME && orderYear === 2025);
+          if (!include) return acc;
+          if (!acc[showId]) {
+            acc[showId] = { total: 0, showTeam: 0, network: 0, office: 0 };
+          }
+          acc[showId].total += 1;
+          const role = order.salesperson ? roleLookup[order.salesperson] : undefined;
+          if (role === 'Show Team') acc[showId].showTeam += 1;
+          else if (role === 'Network Team') acc[showId].network += 1;
+          else if (role === 'Factory Team') acc[showId].office += 1;
+          return acc;
+        }, {});
 
-        const expenseList = normaliseExpenseItems(expensesData);
-        setExpenses(expenseList);
+        const actualsByShow = financeLines.reduce<Record<string, { dealer: number; factory: number }>>((acc, line) => {
+          if (getYearFromDate(line.postingDate) !== 2025) return acc;
+          const mappedShow = aufnrShowMap[line.aufnrNorm];
+          if (!mappedShow?.showId) return acc;
+          if (!acc[mappedShow.showId]) acc[mappedShow.showId] = { dealer: 0, factory: 0 };
+          if (line.companyCode === '3120') acc[mappedShow.showId].dealer += line.amount;
+          else if (line.companyCode === '3110') acc[mappedShow.showId].factory += line.amount;
+          return acc;
+        }, {});
 
-        setError(null);
+        const mapped: BudgetRow[] = showList.filter(isRelevantShow).sort(compareShows).map((show) => {
+          const budget = (budgetMap?.[show.id] ?? {}) as Record<string, unknown>;
+          const dealerBudget =
+            parseNumber(budget.totalDealerCost) || parseNumber(budget.dealerBudget) || computeDealerTotal(budget);
+          const factoryBudget =
+            parseNumber(budget.totalFactoryCosts ?? budget.totalFactoryCost) ||
+            parseNumber(budget.factoryBudget) ||
+            computeFactoryTotal(budget);
+          const totalBudget = dealerBudget + factoryBudget;
+          const financeActual = actualsByShow[show.id] || { dealer: 0, factory: 0 };
+          const dealerActual = financeActual.dealer;
+          const factoryActual = financeActual.factory;
+          const actual = dealerActual + factoryActual;
+          const chargeBack = parseNumber(budget.chargeBack);
+          const diff = Number.isFinite(actual - totalBudget) ? actual - totalBudget : 0;
+          const sales = salesCounts[show.id] || { total: 0, showTeam: 0, network: 0, office: 0 };
+          const year = getShowYear(show);
+          return {
+            showId: show.id,
+            showName: show.name,
+            dealership: show.dealership || '',
+            totalBudget,
+            dealerBudget,
+            factoryBudget,
+            actual,
+            dealerActual,
+            factoryActual,
+            chargeBack,
+            diff,
+            showTarget:
+              year === TARGET_YEAR
+                ? Number(show.target2026 ?? budget.salesTarget2026 ?? budget.salesTarget ?? 0)
+                : Number(show.target2025 ?? show.target2026 ?? 0),
+            showSales: sales.total,
+            salesByShowTeam: sales.showTeam,
+            salesByNetwork: sales.network,
+            salesOffice: sales.office,
+            contractNumber: String(budget.contractNumber ?? ''),
+            totalContractValue: Number(budget.totalContractValue ?? 0),
+            clawBack: Number(budget.clawBack ?? 0),
+          };
+        });
+
+        setRows(mapped);
+        toast.success('Budget dataset refreshed');
       } catch (err) {
-        console.error('Failed to load finance data', err);
-        setError('Unable to load finance data. Please try again.');
+        console.error('Unable to load budget data', err);
+        toast.error('Failed to load budget data.');
       } finally {
         setLoading(false);
       }
@@ -263,612 +346,207 @@ export default function Finance() {
     loadData();
   }, []);
 
-  const showLookup = useMemo(
-    () =>
-      shows.reduce((acc, show) => {
-        if (show.id) {
-          acc[show.id] = show;
-        }
-        return acc;
-      }, {} as Record<string, ShowRecord>),
-    [shows]
-  );
+  const filteredRows = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    if (!term) return rows;
+    return rows.filter((row) => `${row.showName} ${row.dealership}`.toLowerCase().includes(term));
+  }, [rows, search]);
 
-  const sortedInternalOrders = useMemo(() => {
-    return [...internalOrders].sort((a, b) => {
-      const showA = showLookup[a.showId];
-      const showB = showLookup[b.showId];
-      if (showA && showB) {
-        const cmp = compareShows(showA, showB);
-        if (cmp !== 0) return cmp;
-      }
-      return a.showId.localeCompare(b.showId);
-    });
-  }, [internalOrders, showLookup]);
+  const aggregates = useMemo(() => {
+    const sum = <K extends keyof BudgetRow>(key: K) => filteredRows.reduce((acc, row) => acc + (row[key] || 0), 0);
+    const totalActual = sum('actual');
+    const totalBudget = sum('totalBudget');
+    const dealerActual = sum('dealerActual');
+    const dealerBudget = sum('dealerBudget');
+    const factoryActual = sum('factoryActual');
+    const factoryBudget = sum('factoryBudget');
+    const totalSales = sum('showSales');
+    const totalContractValue = sum('totalContractValue');
 
-  const renderTimingBadge = (show?: ShowRecord) => {
-    if (!show) return null;
-    const timing = classifyTiming(show);
-    if (!timing) return null;
-    const label = timing === 'current' ? 'Current' : 'Next';
-    return (
-      <Badge variant="outline" className="text-[10px] font-semibold">
-        {label}
-      </Badge>
-    );
-  };
+    const pct = (actual: number, budget: number) => {
+      if (budget <= 0) return 0;
+      return ((actual - budget) / budget) * 100;
+    };
 
-  const persistInternalOrders = async (orders: InternalSalesOrder[]) => {
-    const payload = orders.reduce((acc, order) => {
-      acc[order.id] = order;
-      return acc;
-    }, {} as Record<string, InternalSalesOrder>);
-    await dbSet('finance/internalSalesOrders', payload as unknown as Record<string, unknown>);
-  };
-
-  const persistExpenses = async (items: ExpenseItem[]) => {
-    const payload = items.reduce((acc, item) => {
-      acc[item.id] = item;
-      return acc;
-    }, {} as Record<string, ExpenseItem>);
-    await dbSet('finance/expenses', payload as unknown as Record<string, unknown>);
-  };
-
-  const handleOrderChange = (id: string, updates: Partial<InternalSalesOrder>) => {
-    setInternalOrders((prev) =>
-      prev.map((order) => {
-        if (order.id !== id) return order;
-        return { ...order, ...updates };
-      })
-    );
-  };
-
-  const handleSaveOrders = async () => {
-    try {
-      setSavingOrders(true);
-      const filtered = internalOrders.filter((order) => order.showId);
-      await persistInternalOrders(filtered);
-      toast.success('Internal sales orders saved to finance dataset.');
-    } catch (err) {
-      console.error('Failed to save internal sales orders', err);
-      toast.error('Failed to save internal sales orders.');
-    } finally {
-      setSavingOrders(false);
-    }
-  };
-
-  const handleImportOrders = async (file: File) => {
-    setImporting(true);
-    try {
-      const rows = await parseSpreadsheetRows(file);
-      const uploaded = rows
-        .map((row) => {
-          const normalisedRow = Object.entries(row).reduce((acc, [key, value]) => {
-            const lower = key.toLowerCase();
-            const collapsed = lower.replace(/[\s_-]+/g, '');
-            const stripped = collapsed.replace(/[()]/g, '');
-            acc[key] = value;
-            acc[lower] = value;
-            acc[collapsed] = value;
-            acc[stripped] = value;
-            return acc;
-          }, {} as Record<string, unknown>);
-
-          const readString = (keys: string[]) => {
-            for (const key of keys) {
-              const candidate = normalisedRow[key];
-              if (typeof candidate === 'string' && candidate.trim()) return candidate.trim();
-              if (typeof candidate === 'number' && !Number.isNaN(candidate)) return String(candidate);
-            }
-            return '';
-          };
-
-          const showId = readString(['showid', 'show', 'show_id', 'id']);
-          if (!showId) return null;
-          const dealership = readString(['dealership']);
-          const internalSalesOrderNumber = readString([
-            'internalsalesordernumber',
-            'internal',
-            'internalorder',
-          ]);
-          const internalSalesOrderNumberDealer = readString([
-            'internalsalesordernumberdealer',
-            'internaldealer',
-            'internalorderdealer',
-            'dealer',
-            'dealerinternal',
-          ]);
-          return {
-            id: newId(),
-            showId,
-            dealership,
-            internalSalesOrderNumber,
-            internalSalesOrderNumberDealer,
-          } as InternalSalesOrder;
-        })
-        .filter(Boolean) as InternalSalesOrder[];
-
-      if (uploaded.length === 0) {
-        toast.error('No valid rows found in the uploaded file.');
-        return;
-      }
-
-      const existingByShowId = internalOrders.reduce((acc, order) => {
-        acc[order.showId] = order;
-        return acc;
-      }, {} as Record<string, InternalSalesOrder>);
-
-      const merged: InternalSalesOrder[] = [...internalOrders];
-      uploaded.forEach((row) => {
-        const existing = existingByShowId[row.showId];
-        if (existing) {
-          merged.splice(merged.indexOf(existing), 1, {
-            ...existing,
-            ...row,
-            id: existing.id,
-          });
-        } else {
-          merged.push(row);
-        }
-      });
-
-      setInternalOrders(merged);
-      await persistInternalOrders(merged);
-      toast.success('Excel data imported into finance/internalSalesOrder.');
-    } catch (err) {
-      console.error('Failed to import internal sales orders', err);
-      toast.error('Failed to import internal sales orders. Please check the file format.');
-    } finally {
-      setImporting(false);
-      if (fileInputRef.current) fileInputRef.current.value = '';
-    }
-  };
-
-  const handleDeleteOrder = (id: string) => {
-    setInternalOrders((prev) => prev.filter((order) => order.id !== id));
-  };
-
-  const handleAddExpenseItem = () => {
-    if (!newExpense.category.trim()) {
-      toast.error('Please enter a category.');
-      return;
-    }
-    setExpenses((prev) => [...prev, { ...newExpense, id: newId() }]);
-    setNewExpense({ category: '', glCode: '', contains: '' });
-  };
-
-  const handleExpenseChange = (id: string, updates: Partial<ExpenseItem>) => {
-    setExpenses((prev) => prev.map((item) => (item.id === id ? { ...item, ...updates } : item)));
-  };
-
-  const handleDeleteExpense = (id: string) => {
-    setExpenses((prev) => prev.filter((item) => item.id !== id));
-  };
-
-  const beginEditingExpense = (item: ExpenseItem) => {
-    setEditingExpenseId(item.id);
-    setEditingExpenseDraft({
-      contains: item.contains ?? '',
-      glCode: item.glCode,
-    });
-  };
-
-  const handleSaveExpenseDraft = (id: string) => {
-    handleExpenseChange(id, {
-      contains: editingExpenseDraft.contains,
-      glCode: editingExpenseDraft.glCode,
-    });
-    setEditingExpenseId(null);
-  };
-
-  const renderContainsTags = (value?: string) => {
-    const tags = (value ?? '')
-      .split(/[,\n]/)
-      .map((entry) => entry.trim())
-      .filter(Boolean);
-
-    if (tags.length === 0) {
-      return <span className="text-slate-500">—</span>;
-    }
-
-    return (
-      <div className="flex flex-wrap gap-1">
-        {tags.map((tag, index) => (
-          <Badge key={`${tag}-${index}`} variant="secondary" className="bg-slate-100 text-slate-800">
-            {tag}
-          </Badge>
-        ))}
-      </div>
-    );
-  };
-
-  const handleSaveExpenses = async () => {
-    try {
-      setSavingExpenses(true);
-      await persistExpenses(expenses);
-      toast.success('Expense GL codes saved to finance dataset.');
-    } catch (err) {
-      console.error('Failed to save expenses', err);
-      toast.error('Failed to save expense items.');
-    } finally {
-      setSavingExpenses(false);
-    }
-  };
-
-  const exportSpreadsheet = async (rows: Record<string, unknown>[], fileName: string) => {
-    try {
-      const xlsx = await loadXlsxModule();
-      if (xlsx) {
-        const worksheet = xlsx.utils.json_to_sheet(rows);
-        const workbook = xlsx.utils.book_new();
-        xlsx.utils.book_append_sheet(workbook, worksheet, 'Sheet1');
-        const arrayBuffer = xlsx.write(workbook, { bookType: 'xlsx', type: 'array' });
-        const blob = new Blob([arrayBuffer], {
-          type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = fileName;
-        link.click();
-        URL.revokeObjectURL(url);
-        return;
-      }
-
-      const headers = Object.keys(rows[0] ?? {});
-      const csvLines = [headers.join(',')];
-      rows.forEach((row) => {
-        csvLines.push(headers.map((header) => (row[header] ?? '').toString().replace(/,/g, '')).join(','));
-      });
-      const blob = new Blob([csvLines.join('\n')], { type: 'text/csv;charset=utf-8;' });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = fileName.replace(/\.xlsx$/, '.csv');
-      link.click();
-      URL.revokeObjectURL(url);
-    } catch (err) {
-      console.error('Failed to export spreadsheet', err);
-      toast.error('Failed to export spreadsheet.');
-    }
-  };
-
-  const handleDownloadTemplate = async () => {
-    const templateRows = [
-      {
-        'Show ID': 'ABC123',
-        'Internal Sales Order Number': 'ISO-12345',
-        'Internal Sales Order Number (Dealer)': 'ISO-Dealer-12345',
-      },
-    ];
-    await exportSpreadsheet(templateRows, 'internal-sales-order-template.xlsx');
-  };
-
-  const handleDownloadOrders = async () => {
-    if (internalOrders.length === 0) {
-      toast.error('No data available to download.');
-      return;
-    }
-
-    const rows = internalOrders.map((order) => ({
-      'Show ID': order.showId,
-      Dealership: order.dealership,
-      'Internal Sales Order Number': order.internalSalesOrderNumber,
-      'Internal Sales Order Number (Dealer)': order.internalSalesOrderNumberDealer,
-    }));
-
-    await exportSpreadsheet(rows, 'internal-sales-orders.xlsx');
-  };
+    return {
+      totalActual,
+      totalBudget,
+      dealerActual,
+      dealerBudget,
+      factoryActual,
+      factoryBudget,
+      totalSales,
+      totalContractValue,
+      pctTotal: pct(totalActual, totalBudget),
+      pctDealer: pct(dealerActual, dealerBudget),
+      pctFactory: pct(factoryActual, factoryBudget),
+    };
+  }, [filteredRows]);
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2 text-slate-700">
-            <Banknote className="h-5 w-5" />
-            <p className="text-sm font-medium uppercase tracking-wide">Data Sets</p>
-          </div>
-          <h1 className="text-2xl font-bold text-slate-900">Finance Dataset</h1>
-          <p className="text-sm text-slate-600">
-            Manage finance/internalsalesorder and finance/expense entries stored in Firebase.
-          </p>
-        </div>
-        <Badge variant="secondary" className="text-slate-700">
-          Auto-linked to shows for names and default dealership
-        </Badge>
-      </div>
-
-      {error && (
-        <Card className="border-red-200 bg-red-50">
-          <CardContent className="flex items-center gap-2 py-3 text-sm text-red-800">
-            <XCircle className="h-4 w-4" /> {error}
-          </CardContent>
-        </Card>
-      )}
-
       <Card>
-        <CardHeader className="flex flex-wrap items-start justify-between gap-4">
-          <div className="flex flex-wrap items-center gap-3">
+        <CardHeader className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+          <div>
+            <CardTitle>Show Budget & Expense</CardTitle>
+            <p className="text-sm text-slate-600">Compact finance-style summary across budget, actuals, and sales.</p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Input
+              placeholder="Search show or dealership..."
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              className="h-9 w-64"
+            />
             <Button
-              variant={activeTable === 'orders' ? 'default' : 'outline'}
-              onClick={() => setActiveTable('orders')}
-              className="text-sm"
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setLoading(true);
+                setSearch('');
+                window.location.reload();
+              }}
             >
-              Internal Sales Order
-            </Button>
-            <Button
-              variant={activeTable === 'expenses' ? 'default' : 'outline'}
-              onClick={() => setActiveTable('expenses')}
-              className="text-sm"
-            >
-              GL Account
+              <RefreshCw className="mr-2 h-4 w-4" />
+              Refresh
             </Button>
           </div>
-          {activeTable === 'orders' ? (
-            <div className="flex flex-wrap items-center gap-2">
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".xlsx,.xls,.csv"
-                className="hidden"
-                onChange={(event) => {
-                  const file = event.target.files?.[0];
-                  if (file) handleImportOrders(file);
-                }}
-              />
-              <Button variant="outline" size="sm" onClick={handleDownloadTemplate}>
-                Download Template
-              </Button>
-              <Button variant="outline" size="sm" onClick={handleDownloadOrders} disabled={importing}>
-                Download Data
-              </Button>
-              <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()} disabled={importing}>
-                {importing ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <Upload className="mr-2 h-4 w-4" />
-                )}
-                {importing ? 'Uploading...' : 'Upload Excel'}
-              </Button>
-              <Button onClick={handleSaveOrders} disabled={savingOrders}>
-                {savingOrders ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
-                {savingOrders ? 'Saving...' : 'Save Changes'}
-              </Button>
+        </CardHeader>
+        <CardContent>
+          {loading ? (
+            <div className="flex items-center gap-2 text-slate-600">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Loading budget data...
             </div>
           ) : (
-            <div className="flex flex-wrap items-center gap-2">
-              <Button onClick={handleSaveExpenses} disabled={savingExpenses}>
-                {savingExpenses ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <Save className="mr-2 h-4 w-4" />
-                )}
-                {savingExpenses ? 'Saving...' : 'Save GL Accounts'}
-              </Button>
-            </div>
-          )}
-        </CardHeader>
-        <CardContent className="space-y-6">
-          {activeTable === 'orders' ? (
-            loading ? (
-              <div className="flex items-center gap-2 text-slate-600">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Loading finance data...
+            <div className="space-y-4">
+              <div className="grid gap-4 md:grid-cols-5">
+                <Card className="border-slate-200">
+                  <CardContent className="pt-4 space-y-1">
+                    <p className="text-xs uppercase tracking-wide text-slate-500">Total Actual Cost</p>
+                    <p className="text-xl font-semibold text-slate-900">{formatCurrency(aggregates.totalActual)}</p>
+                    <p className="text-xs text-slate-600">
+                      Budget {formatCurrency(aggregates.totalBudget)} · {formatPercent(aggregates.pctTotal)} vs budget
+                    </p>
+                  </CardContent>
+                </Card>
+                <Card className="border-slate-200">
+                  <CardContent className="pt-4 space-y-1">
+                    <p className="text-xs uppercase tracking-wide text-slate-500">Total Dealer Actual</p>
+                    <p className="text-xl font-semibold text-blue-700">{formatCurrency(aggregates.dealerActual)}</p>
+                    <p className="text-xs text-slate-600">
+                      Budget {formatCurrency(aggregates.dealerBudget)} · {formatPercent(aggregates.pctDealer)} vs budget
+                    </p>
+                  </CardContent>
+                </Card>
+                <Card className="border-slate-200">
+                  <CardContent className="pt-4 space-y-1">
+                    <p className="text-xs uppercase tracking-wide text-slate-500">Total Factory Actual</p>
+                    <p className="text-xl font-semibold text-emerald-700">{formatCurrency(aggregates.factoryActual)}</p>
+                    <p className="text-xs text-slate-600">
+                      Budget {formatCurrency(aggregates.factoryBudget)} · {formatPercent(aggregates.pctFactory)} vs budget
+                    </p>
+                  </CardContent>
+                </Card>
+                <Card className="border-slate-200">
+                  <CardContent className="pt-4">
+                    <p className="text-xs uppercase tracking-wide text-slate-500">Total Sales 2026</p>
+                    <p className="text-xl font-semibold text-slate-900">{formatNumber(aggregates.totalSales)}</p>
+                  </CardContent>
+                </Card>
+                <Card className="border-slate-200">
+                  <CardContent className="pt-4">
+                    <p className="text-xs uppercase tracking-wide text-slate-500">Total Contract Value</p>
+                    <p className="text-xl font-semibold text-slate-900">
+                      {formatCurrency(aggregates.totalContractValue)}
+                    </p>
+                  </CardContent>
+                </Card>
               </div>
-            ) : (
-            <div className="overflow-x-auto rounded-lg border border-slate-300 shadow">
-              <Table className="text-xs">
+              <div className="overflow-x-auto rounded-xl border border-slate-300 shadow-sm">
+                <Table className="text-xs">
                   <TableHeader>
-                    <TableRow>
-                      <TableHead className="min-w-[170px]">Show ID</TableHead>
-                      <TableHead>Show Name</TableHead>
-                      <TableHead>Dealership</TableHead>
-                      <TableHead>Internal Sales Order Number</TableHead>
-                      <TableHead>Internal Sales Order Number (Dealer)</TableHead>
-                      <TableHead className="w-16 text-right">Actions</TableHead>
+                    <TableRow className="bg-slate-50">
+                      <TableHead rowSpan={2} className="min-w-[160px] align-middle">
+                        Show Name
+                      </TableHead>
+                      <TableHead rowSpan={2} className="min-w-[120px] align-middle">
+                        Dealership
+                      </TableHead>
+                      <TableHead colSpan={3} className="text-center border-r-2 border-slate-300">
+                        Budget
+                      </TableHead>
+                      <TableHead colSpan={5} className="text-center bg-slate-100/60 border-r border-slate-200">
+                        Actual
+                      </TableHead>
+                      <TableHead colSpan={8} className="text-center bg-slate-50">
+                        Sales Details
+                      </TableHead>
+                    </TableRow>
+                    <TableRow className="bg-slate-50">
+                      <TableHead className="text-right">Total Budget</TableHead>
+                      <TableHead className="text-right">Dealer Budget</TableHead>
+                      <TableHead className="border-r-2 border-slate-300 text-right">Factory Budget</TableHead>
+                      <TableHead className="bg-slate-100/60 text-blue-800 text-right">Actual</TableHead>
+                      <TableHead className="bg-slate-100/60 text-right">Dealer Actual</TableHead>
+                      <TableHead className="bg-slate-100/60 text-right">Factory Actual</TableHead>
+                      <TableHead className="bg-slate-100/60 text-right">Charge Back</TableHead>
+                      <TableHead className="bg-slate-100/60 border-r border-slate-200 text-right">Diff</TableHead>
+                      <TableHead>Show Target</TableHead>
+                      <TableHead>Show Sales</TableHead>
+                      <TableHead>Sales by show team</TableHead>
+                      <TableHead>Sales by network</TableHead>
+                      <TableHead>Sales Office</TableHead>
+                      <TableHead>Contract Number</TableHead>
+                      <TableHead className="text-right">Total contract value</TableHead>
+                      <TableHead className="text-right">Claw Back</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {internalOrders.length === 0 ? (
+                    {filteredRows.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={6} className="text-center text-sm text-slate-500">
-                          No internal sales orders yet. Upload a spreadsheet or add a row to begin.
+                        <TableCell colSpan={18} className="text-center text-sm text-slate-500">
+                          No data yet. Connect your data source to populate this table.
                         </TableCell>
                       </TableRow>
                     ) : (
-                      sortedInternalOrders.map((order) => {
-                        const linkedShow = order.showId ? showLookup[order.showId] : undefined;
-                        return (
-                          <TableRow key={order.id} className="align-middle">
-                            <TableCell>
-                              <p className="font-semibold text-slate-900">{order.showId || '—'}</p>
-                            </TableCell>
-                            <TableCell>
-                              <div className="flex items-center gap-2">
-                                <p className="font-semibold text-slate-900">{linkedShow?.name || 'Unknown Show'}</p>
-                                {renderTimingBadge(linkedShow)}
-                              </div>
-                            </TableCell>
-                            <TableCell>
-                              <p className="text-slate-800">{order.dealership || linkedShow?.dealership || '—'}</p>
-                            </TableCell>
-                            <TableCell>
-                              <Input
-                                value={order.internalSalesOrderNumber}
-                                onChange={(event) =>
-                                  handleOrderChange(order.id, { internalSalesOrderNumber: event.target.value })
-                                }
-                                placeholder="Internal Sales Order Number"
-                                className="h-9"
-                              />
-                            </TableCell>
-                            <TableCell>
-                              <Input
-                                value={order.internalSalesOrderNumberDealer}
-                                onChange={(event) =>
-                                  handleOrderChange(order.id, { internalSalesOrderNumberDealer: event.target.value })
-                                }
-                                placeholder="Internal Sales Order Number (Dealer)"
-                                className="h-9"
-                              />
-                            </TableCell>
-                            <TableCell className="text-right">
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="text-red-500 hover:text-red-600"
-                                onClick={() => handleDeleteOrder(order.id)}
-                              >
-                                <XCircle className="h-4 w-4" />
-                              </Button>
-                            </TableCell>
-                          </TableRow>
-                        );
-                      })
+                      filteredRows.map((row, idx) => (
+                        <TableRow key={row.showId} className={idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/60'}>
+                          <TableCell className="font-medium text-slate-900">{row.showName}</TableCell>
+                          <TableCell>{row.dealership || '-'}</TableCell>
+                          <TableCell className="text-right font-semibold text-slate-900">{formatCurrency(row.totalBudget)}</TableCell>
+                          <TableCell className="text-right">{formatCurrency(row.dealerBudget)}</TableCell>
+                          <TableCell className="border-r-2 border-slate-300 text-right">{formatCurrency(row.factoryBudget)}</TableCell>
+                          <TableCell className="text-right text-blue-700 bg-slate-100/30">{formatCurrency(row.actual)}</TableCell>
+                          <TableCell className="text-right bg-slate-100/30">{formatCurrency(row.dealerActual)}</TableCell>
+                          <TableCell className="text-right bg-slate-100/30">{formatCurrency(row.factoryActual)}</TableCell>
+                          <TableCell className="text-right bg-slate-100/30">{formatCurrency(row.chargeBack)}</TableCell>
+                          <TableCell
+                            className={`text-right bg-slate-100/30 border-r border-slate-200 ${
+                              row.diff < 0 ? 'text-red-600' : 'text-emerald-700'
+                            }`}
+                          >
+                            {formatCurrency(row.diff)}
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant="outline" className="font-normal">
+                              {formatNumber(row.showTarget)}
+                            </Badge>
+                          </TableCell>
+                          <TableCell>{formatNumber(row.showSales)}</TableCell>
+                          <TableCell>{formatNumber(row.salesByShowTeam)}</TableCell>
+                          <TableCell>{formatNumber(row.salesByNetwork)}</TableCell>
+                          <TableCell>{formatNumber(row.salesOffice)}</TableCell>
+                          <TableCell>{row.contractNumber || '-'}</TableCell>
+                          <TableCell className="text-right">{formatCurrency(row.totalContractValue)}</TableCell>
+                          <TableCell className="text-right">{formatCurrency(row.clawBack)}</TableCell>
+                        </TableRow>
+                      ))
                     )}
                   </TableBody>
                 </Table>
               </div>
-            )
-          ) : (
-            <>
-              <div className="grid gap-4 md:grid-cols-4">
-                <div className="space-y-2">
-                  <Label>Subcategory</Label>
-                  <Input
-                    value={newExpense.category}
-                    onChange={(event) => setNewExpense((prev) => ({ ...prev, category: event.target.value }))}
-                    placeholder="e.g. Freight"
-                    className="h-9"
-                  />
-                </div>
-                <div className="space-y-2 md:col-span-2">
-                  <Label>Contains</Label>
-                  <Input
-                    value={newExpense.contains}
-                    onChange={(event) => setNewExpense((prev) => ({ ...prev, contains: event.target.value }))}
-                    placeholder="Describe what goes into this account"
-                    className="h-9"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>GL Code</Label>
-                  <div className="flex items-center gap-2">
-                    <Input
-                      value={newExpense.glCode}
-                      onChange={(event) => setNewExpense((prev) => ({ ...prev, glCode: event.target.value }))}
-                      placeholder="Enter GL code"
-                      className="h-9"
-                    />
-                    <Button variant="outline" onClick={handleAddExpenseItem}>
-                      <Plus className="mr-2 h-4 w-4" />
-                      Add
-                    </Button>
-                  </div>
-                </div>
-              </div>
-
-              <div className="space-y-4">
-                <Card className="border-slate-200">
-                  <CardHeader className="flex flex-row items-center justify-between space-y-0">
-                    <div>
-                      <CardTitle className="text-base">GL Accounts</CardTitle>
-                      <CardDescription>Update GL codes or extend the list with new subcategories.</CardDescription>
-                    </div>
-                    <Badge variant="outline" className="text-slate-700">
-                      {expenses.length} item{expenses.length === 1 ? '' : 's'}
-                    </Badge>
-                  </CardHeader>
-                  <CardContent className="overflow-x-auto">
-                    <Table className="text-xs">
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead className="w-32">Subcategory</TableHead>
-                          <TableHead className="w-64">Contains</TableHead>
-                          <TableHead className="w-24">GL Code</TableHead>
-                          <TableHead className="w-16 text-right">Actions</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {expenses.length === 0 ? (
-                          <TableRow>
-                            <TableCell colSpan={4} className="text-center text-sm text-slate-500">
-                              No GL accounts yet. Add a subcategory above.
-                            </TableCell>
-                          </TableRow>
-                        ) : (
-                          expenses.map((item) => (
-                            <TableRow key={item.id}>
-                              <TableCell className="align-middle font-medium text-slate-900">{item.category}</TableCell>
-                              <TableCell className="align-middle">
-                                {editingExpenseId === item.id ? (
-                                  <Input
-                                    value={editingExpenseDraft.contains}
-                                    onChange={(event) =>
-                                      setEditingExpenseDraft((prev) => ({ ...prev, contains: event.target.value }))
-                                    }
-                                    placeholder="Describe contents"
-                                    className="h-9"
-                                  />
-                                ) : (
-                                  renderContainsTags(item.contains)
-                                )}
-                              </TableCell>
-                              <TableCell className="align-middle">
-                                {editingExpenseId === item.id ? (
-                                  <Input
-                                    value={editingExpenseDraft.glCode}
-                                    onChange={(event) =>
-                                      setEditingExpenseDraft((prev) => ({ ...prev, glCode: event.target.value }))
-                                    }
-                                    placeholder="GL code"
-                                    className="h-9"
-                                  />
-                                ) : (
-                                  <span className="font-semibold text-slate-900">{item.glCode || '—'}</span>
-                                )}
-                              </TableCell>
-                              <TableCell className="text-right align-middle">
-                                <div className="flex items-center justify-end gap-1">
-                                  <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    className="text-slate-700 hover:text-slate-900"
-                                    onClick={() => beginEditingExpense(item)}
-                                    aria-label="Edit GL account"
-                                  >
-                                    <Pencil className="h-4 w-4" />
-                                  </Button>
-                                  <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    className="text-emerald-600 hover:text-emerald-700"
-                                    onClick={() => handleSaveExpenseDraft(item.id)}
-                                    disabled={editingExpenseId !== item.id}
-                                    aria-label="Save GL account"
-                                  >
-                                    <Save className="h-4 w-4" />
-                                  </Button>
-                                  <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    className="text-red-500 hover:text-red-600"
-                                    onClick={() => handleDeleteExpense(item.id)}
-                                    aria-label="Delete GL account"
-                                  >
-                                    <XCircle className="h-4 w-4" />
-                                  </Button>
-                                </div>
-                              </TableCell>
-                            </TableRow>
-                          ))
-                        )}
-                      </TableBody>
-                    </Table>
-                  </CardContent>
-                </Card>
-              </div>
-            </>
+            </div>
           )}
         </CardContent>
       </Card>
