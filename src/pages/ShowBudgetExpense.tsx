@@ -54,6 +54,8 @@ type BudgetRow = {
   contractNumber: string;
   totalContractValue: number;
   clawBack: number;
+  showYear: number | null;
+  timing: 'current' | 'next' | 'past';
 };
 
 const formatNumber = (value: number) =>
@@ -64,9 +66,10 @@ const formatCurrency = (value: number) => {
   return `$${numeric.toLocaleString('en-AU', { minimumFractionDigits: 0 })}`;
 };
 
-const formatPercent = (num: number) => {
+const formatSignedPercent = (num: number) => {
   if (!Number.isFinite(num)) return '0%';
-  return `${num.toFixed(1)}%`;
+  const sign = num > 0 ? '+' : '';
+  return `${sign}${num.toFixed(1)}%`;
 };
 
 const parseNumber = (value: unknown): number => {
@@ -198,6 +201,9 @@ const buildAufnrShowMap = (
 };
 
 const classifyTiming = (show: Show) => {
+  const normalizedStatus = show.status?.toLowerCase() ?? '';
+  if (normalizedStatus === 'completed' || normalizedStatus === 'finished') return 'past';
+  if (normalizedStatus === 'in progress' || normalizedStatus === 'current') return 'current';
   const today = new Date();
   const start = show.startDate ? new Date(show.startDate) : null;
   const end = show.finishDate ? new Date(show.finishDate) : null;
@@ -307,6 +313,7 @@ export default function ShowBudgetExpense() {
           const diff = Number.isFinite(actual - totalBudget) ? actual - totalBudget : 0;
           const sales = salesCounts[show.id] || { total: 0, showTeam: 0, network: 0, office: 0 };
           const year = getShowYear(show);
+          const timing = classifyTiming(show);
           return {
             showId: show.id,
             showName: show.name,
@@ -330,6 +337,8 @@ export default function ShowBudgetExpense() {
             contractNumber: String(budget.contractNumber ?? ''),
             totalContractValue: Number(budget.totalContractValue ?? 0),
             clawBack: Number(budget.clawBack ?? 0),
+            showYear: year,
+            timing,
           };
         });
 
@@ -352,8 +361,28 @@ export default function ShowBudgetExpense() {
     return rows.filter((row) => `${row.showName} ${row.dealership}`.toLowerCase().includes(term));
   }, [rows, search]);
 
-  const aggregates = useMemo(() => {
-    const sum = <K extends keyof BudgetRow>(key: K) => filteredRows.reduce((acc, row) => acc + (row[key] || 0), 0);
+  const filteredLegacyRows = useMemo(
+    () => filteredRows.filter((row) => row.showYear !== TARGET_YEAR),
+    [filteredRows]
+  );
+  const filteredRows2026 = useMemo(
+    () => filteredRows.filter((row) => row.showYear === TARGET_YEAR),
+    [filteredRows]
+  );
+  const orderedRows = useMemo(
+    () => [...filteredLegacyRows, ...filteredRows2026],
+    [filteredLegacyRows, filteredRows2026]
+  );
+
+  const rows2026 = useMemo(() => rows.filter((row) => row.showYear === TARGET_YEAR), [rows]);
+  const ytdRows2026 = useMemo(
+    () => rows2026.filter((row) => row.timing === 'past'),
+    [rows2026]
+  );
+
+  const computeAggregates = (source: BudgetRow[]) => {
+    const sum = <K extends keyof BudgetRow>(key: K) =>
+      source.reduce((acc, row) => acc + (Number(row[key]) || 0), 0);
     const totalActual = sum('actual');
     const totalBudget = sum('totalBudget');
     const dealerActual = sum('dealerActual');
@@ -381,7 +410,21 @@ export default function ShowBudgetExpense() {
       pctDealer: pct(dealerActual, dealerBudget),
       pctFactory: pct(factoryActual, factoryBudget),
     };
-  }, [filteredRows]);
+  };
+
+  const aggregates = useMemo(() => computeAggregates(rows2026), [rows2026]);
+  const ytdAggregates = useMemo(() => computeAggregates(ytdRows2026), [ytdRows2026]);
+
+  const renderTimingBadge = (timing: BudgetRow['timing']) => {
+    const base = 'h-5 px-2 text-[10px] font-semibold rounded-full border';
+    if (timing === 'current') {
+      return <Badge className={`${base} bg-emerald-100 text-emerald-700 border-emerald-200`}>Current</Badge>;
+    }
+    if (timing === 'next') {
+      return <Badge className={`${base} bg-amber-100 text-amber-800 border-amber-200`}>Next</Badge>;
+    }
+    return <Badge className={`${base} bg-slate-100 text-slate-700 border-slate-200`}>Finished</Badge>;
+  };
 
   return (
     <div className="space-y-6">
@@ -420,31 +463,69 @@ export default function ShowBudgetExpense() {
             </div>
           ) : (
             <div className="space-y-4">
+              {filteredLegacyRows.length > 0 && (
+                <div className="rounded-lg border border-amber-200 bg-amber-50/60 p-4 shadow-sm space-y-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <div>
+                      <p className="text-sm font-semibold text-amber-900">2025 Shows</p>
+                      <p className="text-xs text-amber-800">Separated from 2026 metrics for clarity.</p>
+                    </div>
+                    <Badge className="bg-amber-600 text-white">Legacy 2025</Badge>
+                  </div>
+                  <div className="grid gap-3 md:grid-cols-2">
+                    {filteredLegacyRows.map((row) => (
+                      <div key={row.showId} className="rounded-md border border-amber-100 bg-white/80 p-3 shadow-inner">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-2">
+                            <span className="font-semibold text-slate-900">{row.showName}</span>
+                            {renderTimingBadge(row.timing)}
+                          </div>
+                          <Badge variant="outline" className="h-5 px-2 text-[10px]">
+                            {row.showYear ?? '—'}
+                          </Badge>
+                        </div>
+                        <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
+                          <div className="rounded border border-amber-100 bg-amber-50/80 p-2">
+                            <p className="text-[11px] uppercase tracking-wide text-amber-700">Actual</p>
+                            <p className="font-semibold text-amber-900">{formatCurrency(row.actual)}</p>
+                          </div>
+                          <div className="rounded border border-slate-200 bg-slate-50 p-2">
+                            <p className="text-[11px] uppercase tracking-wide text-slate-600">Budget</p>
+                            <p className="font-semibold text-slate-900">{formatCurrency(row.totalBudget)}</p>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
               <div className="grid gap-4 md:grid-cols-5">
                 <Card className="border-slate-200">
                   <CardContent className="pt-4 space-y-1">
                     <p className="text-xs uppercase tracking-wide text-slate-500">Total Actual Cost</p>
-                    <p className="text-xl font-semibold text-slate-900">{formatCurrency(aggregates.totalActual)}</p>
+                    <p className="text-xl font-semibold text-slate-900">{formatCurrency(ytdAggregates.totalActual)}</p>
                     <p className="text-xs text-slate-600">
-                      Budget {formatCurrency(aggregates.totalBudget)} · {formatPercent(aggregates.pctTotal)} vs budget
+                      YTD target {formatCurrency(ytdAggregates.totalBudget)} · {formatSignedPercent(ytdAggregates.pctTotal)} vs target
                     </p>
                   </CardContent>
                 </Card>
                 <Card className="border-slate-200">
                   <CardContent className="pt-4 space-y-1">
                     <p className="text-xs uppercase tracking-wide text-slate-500">Total Dealer Actual</p>
-                    <p className="text-xl font-semibold text-blue-700">{formatCurrency(aggregates.dealerActual)}</p>
+                    <p className="text-xl font-semibold text-blue-700">{formatCurrency(ytdAggregates.dealerActual)}</p>
                     <p className="text-xs text-slate-600">
-                      Budget {formatCurrency(aggregates.dealerBudget)} · {formatPercent(aggregates.pctDealer)} vs budget
+                      YTD target {formatCurrency(ytdAggregates.dealerBudget)} · {formatSignedPercent(ytdAggregates.pctDealer)} vs target
                     </p>
                   </CardContent>
                 </Card>
                 <Card className="border-slate-200">
                   <CardContent className="pt-4 space-y-1">
                     <p className="text-xs uppercase tracking-wide text-slate-500">Total Factory Actual</p>
-                    <p className="text-xl font-semibold text-emerald-700">{formatCurrency(aggregates.factoryActual)}</p>
+                    <p className="text-xl font-semibold text-emerald-700">
+                      {formatCurrency(ytdAggregates.factoryActual)}
+                    </p>
                     <p className="text-xs text-slate-600">
-                      Budget {formatCurrency(aggregates.factoryBudget)} · {formatPercent(aggregates.pctFactory)} vs budget
+                      YTD target {formatCurrency(ytdAggregates.factoryBudget)} · {formatSignedPercent(ytdAggregates.pctFactory)} vs target
                     </p>
                   </CardContent>
                 </Card>
@@ -503,16 +584,26 @@ export default function ShowBudgetExpense() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {filteredRows.length === 0 ? (
+                    {orderedRows.length === 0 ? (
                       <TableRow>
                         <TableCell colSpan={18} className="text-center text-sm text-slate-500">
                           No data yet. Connect your data source to populate this table.
                         </TableCell>
                       </TableRow>
                     ) : (
-                      filteredRows.map((row, idx) => (
+                      orderedRows.map((row, idx) => (
                         <TableRow key={row.showId} className={idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/60'}>
-                          <TableCell className="font-medium text-slate-900">{row.showName}</TableCell>
+                          <TableCell className="font-medium text-slate-900">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span>{row.showName}</span>
+                              {row.showYear ? (
+                                <Badge variant="outline" className="h-5 px-2 text-[10px]">
+                                  {row.showYear}
+                                </Badge>
+                              ) : null}
+                              {renderTimingBadge(row.timing)}
+                            </div>
+                          </TableCell>
                           <TableCell>{row.dealership || '-'}</TableCell>
                           <TableCell className="text-right font-semibold text-slate-900">{formatCurrency(row.totalBudget)}</TableCell>
                           <TableCell className="text-right">{formatCurrency(row.dealerBudget)}</TableCell>
