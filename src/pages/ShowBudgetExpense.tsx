@@ -16,6 +16,22 @@ type Show = {
   sales2025?: number;
   target2026?: number;
   sales2026?: number;
+  startDate?: string;
+  finishDate?: string;
+  status?: string;
+};
+
+type ShowOrder = {
+  id?: string;
+  showId?: string;
+  salesperson?: string;
+  date?: string;
+};
+
+type TeamMember = {
+  memberId?: string;
+  memberName?: string;
+  role?: string;
 };
 
 type BudgetRow = {
@@ -73,6 +89,137 @@ const computeDealerTotal = (draft: Record<string, unknown>) =>
 const computeFactoryTotal = (draft: Record<string, unknown>) =>
   parseNumber(draft.factoryCommission) + parseNumber(draft.factoryTravelCosts) + parseNumber(draft.standCosts) / 2;
 
+const TARGET_YEAR = 2026;
+const SPECIAL_SHOW_NAME = 'Geelong Caravaning & Adventure Leisurefest - 2025';
+
+const leadingZeroSafe = (value: unknown) => {
+  if (typeof value !== 'string' && typeof value !== 'number') return '';
+  const asString = String(value);
+  const stripped = asString.replace(/^0+/, '');
+  return stripped.length > 0 ? stripped : asString;
+};
+
+const numberOrZero = (value: unknown) => {
+  if (typeof value === 'number') return value;
+  if (typeof value === 'string') {
+    const parsed = parseFloat(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+  return 0;
+};
+
+type FinanceLine = {
+  aufnrNorm: string;
+  companyCode: string;
+  postingDate?: string;
+  amount: number;
+};
+
+const parseFinanceLines = (data: unknown): FinanceLine[] => {
+  if (!data || typeof data !== 'object') return [];
+  const lines: FinanceLine[] = [];
+  const root = data as Record<string, unknown>;
+
+  Object.entries(root).forEach(([aufnrKey, glBuckets]) => {
+    if (!glBuckets || typeof glBuckets !== 'object') return;
+    const aufnrNorm = leadingZeroSafe(aufnrKey);
+
+    Object.values(glBuckets as Record<string, unknown>).forEach((glValue) => {
+      if (!glValue || typeof glValue !== 'object') return;
+      const glBucket = glValue as Record<string, unknown>;
+      if (!glBucket.lines || typeof glBucket.lines !== 'object') return;
+
+      Object.values(glBucket.lines as Record<string, unknown>).forEach((rawLine) => {
+        if (!rawLine || typeof rawLine !== 'object') return;
+        const line = rawLine as Record<string, unknown>;
+        lines.push({
+          aufnrNorm,
+          companyCode: typeof line.company_code === 'string' ? line.company_code : 'NA',
+          postingDate: typeof line.posting_date === 'string' ? line.posting_date : undefined,
+          amount: numberOrZero(line.amount),
+        });
+      });
+    });
+  });
+
+  return lines;
+};
+
+const getYearFromDate = (value: string | undefined | null): number | null => {
+  if (!value) return null;
+  const match = String(value).match(/^(\d{4})/);
+  if (match?.[1]) {
+    const year = Number(match[1]);
+    return Number.isFinite(year) ? year : null;
+  }
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed.getFullYear();
+};
+
+const getShowYear = (show: Show): number | null => {
+  const startYear = getYearFromDate(show.startDate);
+  if (startYear) return startYear;
+  const finishYear = getYearFromDate(show.finishDate);
+  if (finishYear) return finishYear;
+  if (show.target2026 && show.target2026 > 0) return 2026;
+  if (show.target2025 && show.target2025 > 0) return 2025;
+  return null;
+};
+
+const isRelevantShow = (show: Show) => {
+  const year = getShowYear(show);
+  if (show.name === SPECIAL_SHOW_NAME) return true;
+  return year === TARGET_YEAR;
+};
+
+const buildAufnrShowMap = (
+  internalOrders: unknown,
+  showsById: Record<string, Show>
+): Record<string, { showId: string; showName?: string }> => {
+  const map: Record<string, { showId: string; showName?: string }> = {};
+  if (!internalOrders || typeof internalOrders !== 'object') return map;
+
+  Object.values(internalOrders as Record<string, Record<string, unknown>>).forEach((order) => {
+    if (!order || typeof order !== 'object') return;
+    const dealerNumber =
+      typeof order.internalSalesOrderNumberDealer === 'string' ? order.internalSalesOrderNumberDealer.trim() : '';
+    const internalNumber = typeof order.internalSalesOrderNumber === 'string' ? order.internalSalesOrderNumber.trim() : '';
+    const showId = typeof order.showId === 'string' ? order.showId.trim() : '';
+    if (!showId) return;
+    const candidates = [dealerNumber, internalNumber].filter(Boolean);
+    candidates.forEach((num) => {
+      const norm = leadingZeroSafe(num);
+      if (!norm) return;
+      map[norm] = { showId, showName: showsById[showId]?.name };
+    });
+  });
+
+  return map;
+};
+
+const classifyTiming = (show: Show) => {
+  const today = new Date();
+  const start = show.startDate ? new Date(show.startDate) : null;
+  const end = show.finishDate ? new Date(show.finishDate) : null;
+  if (start && !Number.isNaN(start.getTime()) && end && !Number.isNaN(end.getTime())) {
+    if (start <= today && end >= today) return 'current';
+    if (start > today) return 'next';
+  }
+  if (start && !Number.isNaN(start.getTime()) && start > today) return 'next';
+  return 'past';
+};
+
+const compareShows = (a: Show, b: Show) => {
+  if (a.name === SPECIAL_SHOW_NAME) return -1;
+  if (b.name === SPECIAL_SHOW_NAME) return 1;
+  const aDate = a.startDate ? new Date(a.startDate) : a.finishDate ? new Date(a.finishDate) : null;
+  const bDate = b.startDate ? new Date(b.startDate) : b.finishDate ? new Date(b.finishDate) : null;
+  const aTime = aDate && !Number.isNaN(aDate.getTime()) ? aDate.getTime() : Number.POSITIVE_INFINITY;
+  const bTime = bDate && !Number.isNaN(bDate.getTime()) ? bDate.getTime() : Number.POSITIVE_INFINITY;
+  if (aTime !== bTime) return aTime - bTime;
+  return a.name.localeCompare(b.name);
+};
+
 export default function ShowBudgetExpense() {
   const [rows, setRows] = useState<BudgetRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -82,11 +229,68 @@ export default function ShowBudgetExpense() {
     const loadData = async () => {
       try {
         setLoading(true);
-        const [showsData, budgetsData] = await Promise.all([dbGet('shows'), dbGet('showBudgets')]);
+        const [showsData, budgetsData, ordersData, financeData, internalOrdersData, teamData] = await Promise.all([
+          dbGet('shows'),
+          dbGet('showBudgets'),
+          dbGet('showOrders'),
+          dbGet('finance/glByAufnrGl'),
+          dbGet('finance/internalSalesOrders'),
+          dbGet('teamMembers'),
+        ]);
         const showList: Show[] = showsData ? Object.values(showsData) : [];
         const budgetMap = budgetsData ?? {};
+        const orders: ShowOrder[] = ordersData ? Object.values(ordersData) : [];
+        const teamMembers: TeamMember[] = teamData ? Object.values(teamData) : [];
+        const financeLines = parseFinanceLines(financeData);
+        const showsById = showList.reduce<Record<string, Show>>((acc, show) => {
+          if (show.id) acc[show.id] = show;
+          return acc;
+        }, {});
+        const aufnrShowMap = buildAufnrShowMap(internalOrdersData, showsById);
 
-        const mapped: BudgetRow[] = showList.map((show) => {
+        const roleLookup = teamMembers.reduce<Record<string, string>>((acc, member) => {
+          const name = member.memberName?.trim();
+          const id = member.memberId?.trim();
+          if (name) acc[name] = member.role || '';
+          if (id) acc[id] = member.role || '';
+          return acc;
+        }, {});
+
+        const salesCounts = orders.reduce<
+          Record<string, { total: number; showTeam: number; network: number; office: number }>
+        >((acc, order) => {
+          const showId = order.showId;
+          if (!showId) return acc;
+          const linkedShow = showsById[showId];
+          if (!linkedShow || !isRelevantShow(linkedShow)) return acc;
+          const orderYear = getYearFromDate(order.date);
+          const showYear = getShowYear(linkedShow);
+          const include =
+            (showYear === TARGET_YEAR && orderYear === TARGET_YEAR) ||
+            (linkedShow.name === SPECIAL_SHOW_NAME && orderYear === 2025);
+          if (!include) return acc;
+          if (!acc[showId]) {
+            acc[showId] = { total: 0, showTeam: 0, network: 0, office: 0 };
+          }
+          acc[showId].total += 1;
+          const role = order.salesperson ? roleLookup[order.salesperson] : undefined;
+          if (role === 'Show Team') acc[showId].showTeam += 1;
+          else if (role === 'Network Team') acc[showId].network += 1;
+          else if (role === 'Factory Team') acc[showId].office += 1;
+          return acc;
+        }, {});
+
+        const actualsByShow = financeLines.reduce<Record<string, { dealer: number; factory: number }>>((acc, line) => {
+          if (getYearFromDate(line.postingDate) !== 2025) return acc;
+          const mappedShow = aufnrShowMap[line.aufnrNorm];
+          if (!mappedShow?.showId) return acc;
+          if (!acc[mappedShow.showId]) acc[mappedShow.showId] = { dealer: 0, factory: 0 };
+          if (line.companyCode === '3120') acc[mappedShow.showId].dealer += line.amount;
+          else if (line.companyCode === '3110') acc[mappedShow.showId].factory += line.amount;
+          return acc;
+        }, {});
+
+        const mapped: BudgetRow[] = showList.filter(isRelevantShow).sort(compareShows).map((show) => {
           const budget = (budgetMap?.[show.id] ?? {}) as Record<string, unknown>;
           const dealerBudget =
             parseNumber(budget.totalDealerCost) || parseNumber(budget.dealerBudget) || computeDealerTotal(budget);
@@ -95,11 +299,14 @@ export default function ShowBudgetExpense() {
             parseNumber(budget.factoryBudget) ||
             computeFactoryTotal(budget);
           const totalBudget = dealerBudget + factoryBudget;
-          const actual = parseNumber(budget.actual);
-          const dealerActual = parseNumber(budget.dealerActual);
-          const factoryActual = parseNumber(budget.factoryActual);
+          const financeActual = actualsByShow[show.id] || { dealer: 0, factory: 0 };
+          const dealerActual = financeActual.dealer;
+          const factoryActual = financeActual.factory;
+          const actual = dealerActual + factoryActual;
           const chargeBack = parseNumber(budget.chargeBack);
           const diff = Number.isFinite(actual - totalBudget) ? actual - totalBudget : 0;
+          const sales = salesCounts[show.id] || { total: 0, showTeam: 0, network: 0, office: 0 };
+          const year = getShowYear(show);
           return {
             showId: show.id,
             showName: show.name,
@@ -112,11 +319,14 @@ export default function ShowBudgetExpense() {
             factoryActual,
             chargeBack,
             diff,
-            showTarget: Number(budget.salesTarget2026 ?? budget.salesTarget ?? show.target2026 ?? show.target2025 ?? 0),
-            showSales: Number(budget.sales2026 ?? budget.sales ?? show.sales2026 ?? show.sales2025 ?? 0),
-            salesByShowTeam: Number(budget.salesByShowTeam ?? 0),
-            salesByNetwork: Number(budget.salesByNetwork ?? 0),
-            salesOffice: Number(budget.salesOffice ?? 0),
+            showTarget:
+              year === TARGET_YEAR
+                ? Number(show.target2026 ?? budget.salesTarget2026 ?? budget.salesTarget ?? 0)
+                : Number(show.target2025 ?? show.target2026 ?? 0),
+            showSales: sales.total,
+            salesByShowTeam: sales.showTeam,
+            salesByNetwork: sales.network,
+            salesOffice: sales.office,
             contractNumber: String(budget.contractNumber ?? ''),
             totalContractValue: Number(budget.totalContractValue ?? 0),
             clawBack: Number(budget.clawBack ?? 0),
