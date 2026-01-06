@@ -118,10 +118,23 @@ const formatShortDate = (value?: string | null) => {
   return date.toLocaleDateString('en-AU', { month: 'short', day: 'numeric' });
 };
 
-const formatDateRange = (start?: string, finish?: string) => {
-  if (!start && !finish) return 'Schedule TBC';
-  if (start && finish) return `${formatShortDate(start)} → ${formatShortDate(finish)}`;
-  return start ? `Starts ${formatShortDate(start)}` : `Ends ${formatShortDate(finish)}`;
+const isFinishedRow = (row: BudgetRow) => {
+  const today = new Date();
+  const finish = parseDateSafe(row.finishDate);
+  const status = row.status?.toLowerCase();
+  if (status === 'finished' || status === 'completed') return true;
+  if (finish && finish.getTime() <= today.getTime()) return true;
+  return false;
+};
+
+const daysUntilStart = (row: BudgetRow) => {
+  const today = new Date();
+  const start = parseDateSafe(row.startDate);
+  if (!start) return null;
+  const diffMs = start.getTime() - today.getTime();
+  if (diffMs < 0) return null;
+  const days = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+  return days <= 10 ? days : null;
 };
 
 type FinanceLine = {
@@ -371,17 +384,8 @@ export default function ShowBudgetExpense() {
     return rows.filter((row) => `${row.showName} ${row.dealership}`.toLowerCase().includes(term));
   }, [rows, search]);
 
-  const aggregates = useMemo(() => {
-    const today = new Date();
-    const isFinished = (row: BudgetRow) => {
-      const finish = parseDateSafe(row.finishDate);
-      const status = row.status?.toLowerCase();
-      if (status === 'finished' || status === 'completed') return true;
-      if (finish && finish.getTime() <= today.getTime()) return true;
-      return false;
-    };
-
-    const completedRows = filteredRows.filter(isFinished);
+const aggregates = useMemo(() => {
+    const completedRows = filteredRows.filter(isFinishedRow);
     const sum = <K extends keyof BudgetRow>(source: BudgetRow[], key: K) =>
       source.reduce((acc, row) => acc + (row[key] || 0), 0);
 
@@ -417,45 +421,6 @@ export default function ShowBudgetExpense() {
       },
     };
   }, [filteredRows]);
-
-  const highlights = useMemo(() => {
-    const today = new Date();
-    const msPerDay = 1000 * 60 * 60 * 24;
-    const withParsedDates = rows
-      .map((row) => ({
-        ...row,
-        start: parseDateSafe(row.startDate),
-        finish: parseDateSafe(row.finishDate),
-      }))
-      .filter((row) => row.start || row.finish);
-
-    const finishedShows = withParsedDates
-      .filter(
-        (row) =>
-          (row.finish && row.finish.getTime() < today.getTime()) ||
-          row.status?.toLowerCase() === 'finished' ||
-          row.status?.toLowerCase() === 'completed'
-      )
-      .sort((a, b) => (b.finish?.getTime() ?? 0) - (a.finish?.getTime() ?? 0));
-
-    const upcomingShows = withParsedDates
-      .filter((row) => row.start && row.start.getTime() > today.getTime())
-      .sort((a, b) => (a.start?.getTime() ?? 0) - (b.start?.getTime() ?? 0));
-
-    const nextShow = upcomingShows.find((row) => {
-      if (!row.start) return false;
-      const daysUntil = Math.ceil((row.start.getTime() - today.getTime()) / msPerDay);
-      return daysUntil <= 10;
-    });
-
-    const daysUntilNext =
-      nextShow?.start != null ? Math.max(0, Math.ceil((nextShow.start.getTime() - today.getTime()) / msPerDay)) : null;
-
-    return {
-      finished: finishedShows[0] || null,
-      next: nextShow && daysUntilNext !== null ? { ...nextShow, daysUntil: daysUntilNext } : null,
-    };
-  }, [rows]);
 
   const varianceBadge = (pct: number) => {
     const tone =
@@ -510,36 +475,6 @@ export default function ShowBudgetExpense() {
             </div>
           ) : (
             <div className="space-y-4">
-              <div className="grid gap-3 md:grid-cols-2">
-                <div className="flex items-center gap-3 rounded-lg border border-slate-200 bg-slate-50/80 p-3 shadow-sm">
-                  <Badge className="bg-red-500 text-white px-2 py-1">Finished</Badge>
-                  <div className="space-y-0.5 text-sm">
-                    <p className="font-semibold text-slate-900">
-                      {highlights.finished ? highlights.finished.showName : 'No finished shows yet'}
-                    </p>
-                    <p className="text-xs text-slate-600">
-                      {highlights.finished
-                        ? `${highlights.finished.dealership || 'Unassigned'} · ${formatDateRange(highlights.finished.startDate, highlights.finished.finishDate)}`
-                        : 'Completed shows will appear here'}
-                    </p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-3 rounded-lg border border-yellow-200 bg-yellow-50 p-3 shadow-sm">
-                  <Badge className="bg-yellow-300 text-yellow-900 px-2 py-1 ring-1 ring-yellow-400">
-                    Next
-                  </Badge>
-                  <div className="space-y-0.5 text-sm">
-                    <p className="font-semibold text-slate-900">
-                      {highlights.next ? highlights.next.showName : 'No show in the next 10 days'}
-                    </p>
-                    <p className="text-xs text-slate-600">
-                      {highlights.next
-                        ? `Starts ${formatShortDate(highlights.next.startDate)} · in ${highlights.next.daysUntil} day${highlights.next.daysUntil === 1 ? '' : 's'}`
-                        : 'Upcoming shows inside 10 days will be highlighted'}
-                    </p>
-                  </div>
-                </div>
-              </div>
               <div className="grid gap-4 md:grid-cols-5">
                 <Card className="border-slate-200">
                   <CardContent className="pt-4 space-y-1">
@@ -605,6 +540,9 @@ export default function ShowBudgetExpense() {
                       <TableHead rowSpan={2} className="min-w-[120px] align-middle">
                         Dealership
                       </TableHead>
+                      <TableHead colSpan={2} className="text-center border-r-2 border-slate-300">
+                        Schedule
+                      </TableHead>
                       <TableHead colSpan={3} className="text-center border-r-2 border-slate-300">
                         Budget
                       </TableHead>
@@ -616,6 +554,8 @@ export default function ShowBudgetExpense() {
                       </TableHead>
                     </TableRow>
                     <TableRow className="bg-slate-50">
+                      <TableHead className="text-center">Finished</TableHead>
+                      <TableHead className="text-center border-r-2 border-slate-300">Next (≤10 days)</TableHead>
                       <TableHead className="text-right">Total Budget</TableHead>
                       <TableHead className="text-right">Dealer Budget</TableHead>
                       <TableHead className="border-r-2 border-slate-300 text-right">Factory Budget</TableHead>
@@ -637,43 +577,64 @@ export default function ShowBudgetExpense() {
                   <TableBody>
                     {filteredRows.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={18} className="text-center text-sm text-slate-500">
+                        <TableCell colSpan={20} className="text-center text-sm text-slate-500">
                           No data yet. Connect your data source to populate this table.
                         </TableCell>
                       </TableRow>
                     ) : (
-                      filteredRows.map((row, idx) => (
-                        <TableRow key={row.showId} className={idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/60'}>
-                          <TableCell className="font-medium text-slate-900">{row.showName}</TableCell>
-                          <TableCell>{row.dealership || '-'}</TableCell>
-                          <TableCell className="text-right font-semibold text-slate-900">{formatCurrency(row.totalBudget)}</TableCell>
-                          <TableCell className="text-right">{formatCurrency(row.dealerBudget)}</TableCell>
-                          <TableCell className="border-r-2 border-slate-300 text-right">{formatCurrency(row.factoryBudget)}</TableCell>
-                          <TableCell className="text-right text-blue-700 bg-slate-100/30">{formatCurrency(row.actual)}</TableCell>
-                          <TableCell className="text-right bg-slate-100/30">{formatCurrency(row.dealerActual)}</TableCell>
-                          <TableCell className="text-right bg-slate-100/30">{formatCurrency(row.factoryActual)}</TableCell>
-                          <TableCell className="text-right bg-slate-100/30">{formatCurrency(row.chargeBack)}</TableCell>
-                          <TableCell
-                            className={`text-right bg-slate-100/30 border-r border-slate-200 ${
-                              row.diff < 0 ? 'text-red-600' : 'text-emerald-700'
-                            }`}
-                          >
-                            {formatCurrency(row.diff)}
-                          </TableCell>
-                          <TableCell>
-                            <Badge variant="outline" className="font-normal">
-                              {formatNumber(row.showTarget)}
-                            </Badge>
-                          </TableCell>
-                          <TableCell>{formatNumber(row.showSales)}</TableCell>
-                          <TableCell>{formatNumber(row.salesByShowTeam)}</TableCell>
-                          <TableCell>{formatNumber(row.salesByNetwork)}</TableCell>
-                          <TableCell>{formatNumber(row.salesOffice)}</TableCell>
-                          <TableCell>{row.contractNumber || '-'}</TableCell>
-                          <TableCell className="text-right">{formatCurrency(row.totalContractValue)}</TableCell>
-                          <TableCell className="text-right">{formatCurrency(row.clawBack)}</TableCell>
-                        </TableRow>
-                      ))
+                      filteredRows.map((row, idx) => {
+                        const finished = isFinishedRow(row);
+                        const nextDays = finished ? null : daysUntilStart(row);
+
+                        return (
+                          <TableRow key={row.showId} className={idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/60'}>
+                            <TableCell className="font-medium text-slate-900">{row.showName}</TableCell>
+                            <TableCell>{row.dealership || '-'}</TableCell>
+                            <TableCell className="text-center">
+                              {finished ? (
+                                <Badge className="bg-emerald-600 text-white px-2 py-1">Finished</Badge>
+                              ) : (
+                                <Badge variant="outline" className="border-amber-300 bg-amber-50 text-amber-800">
+                                  In progress
+                                </Badge>
+                              )}
+                            </TableCell>
+                            <TableCell className="text-center border-r-2 border-slate-300">
+                              {finished
+                                ? '-'
+                                : nextDays !== null
+                                  ? `Starts in ${nextDays} day${nextDays === 1 ? '' : 's'}`
+                                  : formatShortDate(row.startDate)}
+                            </TableCell>
+                            <TableCell className="text-right font-semibold text-slate-900">{formatCurrency(row.totalBudget)}</TableCell>
+                            <TableCell className="text-right">{formatCurrency(row.dealerBudget)}</TableCell>
+                            <TableCell className="border-r-2 border-slate-300 text-right">{formatCurrency(row.factoryBudget)}</TableCell>
+                            <TableCell className="text-right text-blue-700 bg-slate-100/30">{formatCurrency(row.actual)}</TableCell>
+                            <TableCell className="text-right bg-slate-100/30">{formatCurrency(row.dealerActual)}</TableCell>
+                            <TableCell className="text-right bg-slate-100/30">{formatCurrency(row.factoryActual)}</TableCell>
+                            <TableCell className="text-right bg-slate-100/30">{formatCurrency(row.chargeBack)}</TableCell>
+                            <TableCell
+                              className={`text-right bg-slate-100/30 border-r border-slate-200 ${
+                                row.diff < 0 ? 'text-red-600' : 'text-emerald-700'
+                              }`}
+                            >
+                              {formatCurrency(row.diff)}
+                            </TableCell>
+                            <TableCell>
+                              <Badge variant="outline" className="font-normal">
+                                {formatNumber(row.showTarget)}
+                              </Badge>
+                            </TableCell>
+                            <TableCell>{formatNumber(row.showSales)}</TableCell>
+                            <TableCell>{formatNumber(row.salesByShowTeam)}</TableCell>
+                            <TableCell>{formatNumber(row.salesByNetwork)}</TableCell>
+                            <TableCell>{formatNumber(row.salesOffice)}</TableCell>
+                            <TableCell>{row.contractNumber || '-'}</TableCell>
+                            <TableCell className="text-right">{formatCurrency(row.totalContractValue)}</TableCell>
+                            <TableCell className="text-right">{formatCurrency(row.clawBack)}</TableCell>
+                          </TableRow>
+                        );
+                      })
                     )}
                   </TableBody>
                 </Table>
