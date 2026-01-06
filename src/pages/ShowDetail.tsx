@@ -158,6 +158,7 @@ export default function ShowDetail() {
   const [selectedHandoverDealer, setSelectedHandoverDealer] = useState('');
   const [modelOptions, setModelOptions] = useState<string[]>([]);
   const [isModelPickerOpen, setIsModelPickerOpen] = useState(false);
+  const [contractPriceMap, setContractPriceMap] = useState<Record<string, number>>({});
 
   const [newOrder, setNewOrder] = useState<Partial<ShowOrder>>({
     chassisNumber: '',
@@ -166,6 +167,7 @@ export default function ShowDetail() {
     orderType: 'New Order',
     salesperson: '',
     status: 'Pending',
+    contractValue: 0,
   });
 
   const [newTask, setNewTask] = useState<Partial<ShowTask>>({
@@ -228,6 +230,7 @@ export default function ShowDetail() {
         teamData,
         templatesData,
         caravanPickData,
+        contractData,
       ] = await Promise.all([
         dbGet('shows'),
         dbGet('showOrders'),
@@ -235,6 +238,7 @@ export default function ShowDetail() {
         dbGet('teamMembers'),
         dbGet('processTemplates'),
         dbGet('showCaravanPicks'),
+        dbGet('finance/caravanContractPrices'),
       ]);
 
       const showEntries = showsData ? Object.entries(showsData as Record<string, Show>) : [];
@@ -246,7 +250,12 @@ export default function ShowDetail() {
       setSelectedTeamMembers(currentShow?.teamMembers || []);
       setSelectedHandoverDealer(currentShow?.handoverDealer || '');
 
-      const allOrders: ShowOrder[] = ordersData ? Object.values(ordersData) : [];
+      const allOrders: ShowOrder[] = ordersData
+        ? Object.values(ordersData).map((order) => ({
+            ...order,
+            contractValue: parseValue((order as Record<string, unknown>).contractValue as number | string | undefined),
+          }))
+        : [];
       setOrders(allOrders.filter(o => o.showId === id));
 
       const allTasks = tasksData
@@ -289,6 +298,21 @@ export default function ShowDetail() {
       } else {
         setCaravanPicks([]);
       }
+
+      const contractPrices = contractData
+        ? Object.values(contractData as Record<string, Record<string, unknown>>).reduce<Record<string, number>>(
+            (acc, item) => {
+              if (typeof item.model === 'string') {
+                acc[item.model.toLowerCase()] = parseValue(
+                  (item.contractValue as number | string | undefined) ?? 0
+                );
+              }
+              return acc;
+            },
+            {}
+          )
+        : {};
+      setContractPriceMap(contractPrices);
     } catch (error) {
       console.error('Error loading show data:', error);
       toast.error('Failed to load show data');
@@ -465,6 +489,12 @@ export default function ShowDetail() {
     return value.toString();
   };
 
+  const formatCurrency = (value?: number) => {
+    const numeric = typeof value === 'number' && Number.isFinite(value) ? value : 0;
+    if (!numeric) return 'N/A';
+    return `$${numeric.toLocaleString('en-AU', { maximumFractionDigits: 0 })}`;
+  };
+
   const buildMemberShowDaysList = (member: TeamMember) => {
     const rawDays = member.showDays;
     if (Array.isArray(rawDays)) {
@@ -621,6 +651,7 @@ export default function ShowDetail() {
         orderType: newOrder.orderType as 'New Order' | 'Transfer from Stock',
         salesperson: newOrder.salesperson || '',
         date: new Date().toISOString().split('T')[0],
+        contractValue: parseValue(newOrder.contractValue),
         status: 'Pending',
       };
 
@@ -643,6 +674,7 @@ export default function ShowDetail() {
         orderType: 'New Order',
         salesperson: '',
         status: 'Pending',
+        contractValue: 0,
       });
       if (requiresHandoverDealer) {
         setSelectedHandoverDealer('');
@@ -2178,7 +2210,8 @@ export default function ShowDetail() {
                                     key={model}
                                     value={model}
                                     onSelect={(value) => {
-                                      setNewOrder({ ...newOrder, model: value });
+                                      const defaultValue = contractPriceMap[value.toLowerCase()] ?? 0;
+                                      setNewOrder({ ...newOrder, model: value, contractValue: defaultValue });
                                       setIsModelPickerOpen(false);
                                     }}
                                   >
@@ -2201,7 +2234,7 @@ export default function ShowDetail() {
                           variant="ghost"
                           size="sm"
                           className="mt-2"
-                          onClick={() => setNewOrder({ ...newOrder, model: '' })}
+                          onClick={() => setNewOrder({ ...newOrder, model: '', contractValue: 0 })}
                         >
                           Clear selection
                         </Button>
@@ -2211,6 +2244,20 @@ export default function ShowDetail() {
                           Model list unavailable. Please refresh after schedule sync.
                         </p>
                       )}
+                    </div>
+                    <div>
+                      <Label>Contract Value</Label>
+                      <Input
+                        type="number"
+                        placeholder="Standard contract value"
+                        value={newOrder.contractValue ?? ''}
+                        onChange={(event) =>
+                          setNewOrder({ ...newOrder, contractValue: parseValue(event.target.value) })
+                        }
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Defaulted from the Caravan Contract Price dataset; adjust if this order differs.
+                      </p>
                     </div>
                     <div>
                       <Label>Customer Name *</Label>
@@ -2318,6 +2365,7 @@ export default function ShowDetail() {
                     <TableRow>
                       <TableHead>Order ID</TableHead>
                       <TableHead>Model</TableHead>
+                      <TableHead className="text-right">Contract Value</TableHead>
                       <TableHead>Customer</TableHead>
                       <TableHead>Type</TableHead>
                       <TableHead>Salesperson</TableHead>
@@ -2332,6 +2380,7 @@ export default function ShowDetail() {
                       <TableRow key={order.id}>
                         <TableCell className="font-medium">{order.id}</TableCell>
                         <TableCell>{order.model || 'Not set'}</TableCell>
+                        <TableCell className="text-right">{formatCurrency(order.contractValue)}</TableCell>
                         <TableCell>{order.customerName || 'Not set'}</TableCell>
                         <TableCell>{order.orderType}</TableCell>
                         <TableCell>{order.salesperson}</TableCell>

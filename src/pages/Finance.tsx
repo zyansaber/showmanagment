@@ -7,7 +7,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
-import { dbGet, dbSet } from '@/lib/firebase';
+import { dbGet, dbSet, schedulingDbGet } from '@/lib/firebase';
 
 type ShowRecord = {
   id?: string;
@@ -32,6 +32,12 @@ type ExpenseItem = {
   category: string;
   glCode: string;
   contains?: string;
+};
+
+type CaravanContractPrice = {
+  id: string;
+  model: string;
+  contractValue: number;
 };
 
 const newId = () =>
@@ -97,6 +103,51 @@ const normaliseExpenseItems = (value: unknown): ExpenseItem[] => {
       return { id, category, glCode, contains };
     })
     .filter(Boolean) as ExpenseItem[];
+};
+
+const parseContractValue = (value: unknown) => {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return 0;
+    const parsed = Number(trimmed.replace(/,/g, ''));
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+  return 0;
+};
+
+const normaliseContractPrices = (value: unknown): CaravanContractPrice[] => {
+  if (!value) return [];
+  const records = Array.isArray(value) ? value : Object.values(value as Record<string, unknown>);
+  return records
+    .map((item) => {
+      if (!item || typeof item !== 'object') return null;
+      const raw = item as Record<string, unknown>;
+      const model = typeof raw.model === 'string' ? raw.model.trim() : '';
+      if (!model) return null;
+      const id =
+        typeof raw.id === 'string' && raw.id.trim().length > 0
+          ? raw.id.trim()
+          : `contract-${model}-${Math.random().toString(16).slice(2)}`;
+      const contractValue = parseContractValue(raw.contractValue);
+      return { id, model, contractValue };
+    })
+    .filter(Boolean) as CaravanContractPrice[];
+};
+
+const ensureContractRows = (contracts: CaravanContractPrice[], models: string[]) => {
+  const existingByModel = contracts.reduce<Record<string, CaravanContractPrice>>((acc, contract) => {
+    acc[contract.model.toLowerCase()] = contract;
+    return acc;
+  }, {});
+  const additions: CaravanContractPrice[] = [];
+  models.forEach((model) => {
+    const key = model.toLowerCase();
+    if (!existingByModel[key]) {
+      additions.push({ id: newId(), model, contractValue: 0 });
+    }
+  });
+  return [...contracts, ...additions].sort((a, b) => a.model.localeCompare(b.model));
 };
 
 const loadXlsxModule = async () => {
@@ -173,11 +224,14 @@ export default function Finance() {
   const [shows, setShows] = useState<ShowRecord[]>([]);
   const [internalOrders, setInternalOrders] = useState<InternalSalesOrder[]>([]);
   const [expenses, setExpenses] = useState<ExpenseItem[]>([]);
+  const [contractPrices, setContractPrices] = useState<CaravanContractPrice[]>([]);
   const [savingOrders, setSavingOrders] = useState(false);
   const [savingExpenses, setSavingExpenses] = useState(false);
+  const [savingContracts, setSavingContracts] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [importingContracts, setImportingContracts] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [activeTable, setActiveTable] = useState<'orders' | 'expenses'>('orders');
+  const [activeTable, setActiveTable] = useState<'orders' | 'expenses' | 'contracts'>('orders');
   const [newExpense, setNewExpense] = useState<Pick<ExpenseItem, 'category' | 'glCode' | 'contains'>>({
     category: '',
     glCode: '',
@@ -188,17 +242,22 @@ export default function Finance() {
     contains: '',
     glCode: '',
   });
+  const [newContract, setNewContract] = useState<{ model: string; contractValue: string }>({ model: '', contractValue: '' });
+  const [modelOptions, setModelOptions] = useState<string[]>([]);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const contractFileInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     const loadData = async () => {
       try {
         setLoading(true);
-        const [showsData, ordersData, expensesData] = await Promise.all([
+        const [showsData, ordersData, expensesData, contractData, scheduleData] = await Promise.all([
           dbGet('shows'),
           dbGet('finance/internalSalesOrders'),
           dbGet('finance/expenses'),
+          dbGet('finance/caravanContractPrices'),
+          schedulingDbGet('schedule'),
         ]);
 
         const normalisedShows = showsData
@@ -214,6 +273,20 @@ export default function Finance() {
 
         const expenseList = normaliseExpenseItems(expensesData);
         setExpenses(expenseList);
+
+        const scheduleModels = scheduleData
+          ? Array.from(
+              new Set(
+                Object.values(scheduleData as Record<string, Record<string, unknown>>)
+                  .map((row) => (typeof row.Model === 'string' ? row.Model.trim() : ''))
+                  .filter(Boolean)
+              )
+            ).sort((a, b) => a.localeCompare(b))
+          : [];
+        setModelOptions(scheduleModels);
+
+        const contractList = normaliseContractPrices(contractData);
+        setContractPrices(ensureContractRows(contractList, scheduleModels));
 
         setError(null);
       } catch (err) {
@@ -329,6 +402,14 @@ export default function Finance() {
       return acc;
     }, {} as Record<string, ExpenseItem>);
     await dbSet('finance/expenses', payload as unknown as Record<string, unknown>);
+  };
+
+  const persistContracts = async (items: CaravanContractPrice[]) => {
+    const payload = items.reduce((acc, item) => {
+      acc[item.id] = item;
+      return acc;
+    }, {} as Record<string, CaravanContractPrice>);
+    await dbSet('finance/caravanContractPrices', payload as unknown as Record<string, unknown>);
   };
 
   const handleOrderChange = (id: string, updates: Partial<InternalSalesOrder>) => {
@@ -512,6 +593,51 @@ export default function Finance() {
     }
   };
 
+  const handleAddContractRow = () => {
+    if (!newContract.model.trim()) {
+      toast.error('Please enter a model.');
+      return;
+    }
+    setContractPrices((prev) => {
+      const existing = prev.find(
+        (item) => item.model.toLowerCase() === newContract.model.trim().toLowerCase()
+      );
+      if (existing) {
+        return prev.map((item) =>
+          item.id === existing.id
+            ? { ...item, contractValue: parseContractValue(newContract.contractValue) }
+            : item
+        );
+      }
+      return [
+        ...prev,
+        { id: newId(), model: newContract.model.trim(), contractValue: parseContractValue(newContract.contractValue) },
+      ].sort((a, b) => a.model.localeCompare(b.model));
+    });
+    setNewContract({ model: '', contractValue: '' });
+  };
+
+  const handleContractChange = (id: string, updates: Partial<CaravanContractPrice>) => {
+    setContractPrices((prev) => prev.map((item) => (item.id === id ? { ...item, ...updates } : item)));
+  };
+
+  const handleDeleteContract = (id: string) => {
+    setContractPrices((prev) => prev.filter((item) => item.id !== id));
+  };
+
+  const handleSaveContracts = async () => {
+    try {
+      setSavingContracts(true);
+      await persistContracts(contractPrices);
+      toast.success('Caravan contract prices saved.');
+    } catch (err) {
+      console.error('Failed to save caravan contract prices', err);
+      toast.error('Failed to save caravan contract prices.');
+    } finally {
+      setSavingContracts(false);
+    }
+  };
+
   const exportSpreadsheet = async (rows: Record<string, unknown>[], fileName: string) => {
     try {
       const xlsx = await loadXlsxModule();
@@ -550,7 +676,7 @@ export default function Finance() {
     }
   };
 
-  const handleDownloadTemplate = async () => {
+  const handleDownloadOrderTemplate = async () => {
     const templateRows = [
       {
         'Show ID': 'ABC123',
@@ -575,6 +701,97 @@ export default function Finance() {
     }));
 
     await exportSpreadsheet(rows, 'internal-sales-orders.xlsx');
+  };
+
+  const handleDownloadContractTemplate = async () => {
+    const templateRows =
+      modelOptions.length > 0
+        ? modelOptions.map((model) => ({ Model: model, 'Contract Value': '' }))
+        : [{ Model: 'MODEL NAME', 'Contract Value': 0 }];
+    await exportSpreadsheet(templateRows, 'caravan-contract-price-template.xlsx');
+  };
+
+  const handleDownloadContracts = async () => {
+    if (contractPrices.length === 0) {
+      toast.error('No data available to download.');
+      return;
+    }
+    const rows = contractPrices.map((item) => ({
+      Model: item.model,
+      'Contract Value': item.contractValue,
+    }));
+    await exportSpreadsheet(rows, 'caravan-contract-prices.xlsx');
+  };
+
+  const handleImportContracts = async (file: File) => {
+    setImportingContracts(true);
+    try {
+      const rows = await parseSpreadsheetRows(file);
+      const uploaded = rows
+        .map((row) => {
+          const normalisedRow = Object.entries(row).reduce((acc, [key, value]) => {
+            const lower = key.toLowerCase();
+            const collapsed = lower.replace(/[\s_-]+/g, '');
+            acc[lower] = value;
+            acc[collapsed] = value;
+            return acc;
+          }, {} as Record<string, unknown>);
+
+          const model = typeof normalisedRow.model === 'string' && normalisedRow.model.trim()
+            ? normalisedRow.model.trim()
+            : typeof normalisedRow.modelname === 'string' && normalisedRow.modelname.trim()
+              ? normalisedRow.modelname.trim()
+              : typeof normalisedRow['model'] === 'string'
+                ? (normalisedRow['model'] as string).trim()
+                : '';
+          if (!model) return null;
+          const contractValue =
+            'contractvalue' in normalisedRow ? normalisedRow.contractvalue : normalisedRow['contract value'];
+          return {
+            id: newId(),
+            model,
+            contractValue: parseContractValue(contractValue),
+          } as CaravanContractPrice;
+        })
+        .filter(Boolean) as CaravanContractPrice[];
+
+      if (uploaded.length === 0) {
+        toast.error('No valid rows found in the uploaded file.');
+        return;
+      }
+
+      setContractPrices((prev) => {
+        const mergedMap = prev.reduce<Record<string, CaravanContractPrice>>((acc, item) => {
+          acc[item.model.toLowerCase()] = item;
+          return acc;
+        }, {});
+
+        const merged = [...prev];
+        uploaded.forEach((row) => {
+          const key = row.model.toLowerCase();
+          const existing = mergedMap[key];
+          if (existing) {
+            merged.splice(merged.indexOf(existing), 1, { ...existing, contractValue: row.contractValue });
+          } else {
+            merged.push(row);
+          }
+        });
+
+        const ensured = ensureContractRows(merged, modelOptions);
+        persistContracts(ensured).catch((err) => {
+          console.error('Failed to persist imported contracts', err);
+        });
+        return ensured;
+      });
+
+      toast.success('Contract price data imported.');
+    } catch (err) {
+      console.error('Failed to import contract prices', err);
+      toast.error('Failed to import contract prices. Please check the file format.');
+    } finally {
+      setImportingContracts(false);
+      if (contractFileInputRef.current) contractFileInputRef.current.value = '';
+    }
   };
 
   return (
@@ -620,6 +837,13 @@ export default function Finance() {
             >
               GL Account
             </Button>
+            <Button
+              variant={activeTable === 'contracts' ? 'default' : 'outline'}
+              onClick={() => setActiveTable('contracts')}
+              className="text-sm"
+            >
+              Caravan Contract Price
+            </Button>
           </div>
           {activeTable === 'orders' ? (
             <div className="flex flex-wrap items-center gap-2">
@@ -633,7 +857,7 @@ export default function Finance() {
                   if (file) handleImportOrders(file);
                 }}
               />
-              <Button variant="outline" size="sm" onClick={handleDownloadTemplate}>
+              <Button variant="outline" size="sm" onClick={handleDownloadOrderTemplate}>
                 Download Template
               </Button>
               <Button variant="outline" size="sm" onClick={handleDownloadOrders} disabled={importing}>
@@ -652,7 +876,7 @@ export default function Finance() {
                 {savingOrders ? 'Saving...' : 'Save Changes'}
               </Button>
             </div>
-          ) : (
+          ) : activeTable === 'expenses' ? (
             <div className="flex flex-wrap items-center gap-2">
               <Button onClick={handleSaveExpenses} disabled={savingExpenses}>
                 {savingExpenses ? (
@@ -661,6 +885,42 @@ export default function Finance() {
                   <Save className="mr-2 h-4 w-4" />
                 )}
                 {savingExpenses ? 'Saving...' : 'Save GL Accounts'}
+              </Button>
+            </div>
+          ) : (
+            <div className="flex flex-wrap items-center gap-2">
+              <input
+                ref={contractFileInputRef}
+                type="file"
+                accept=".xlsx,.xls,.csv"
+                className="hidden"
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  if (file) handleImportContracts(file);
+                }}
+              />
+              <Button variant="outline" size="sm" onClick={handleDownloadContractTemplate}>
+                Download Template
+              </Button>
+              <Button variant="outline" size="sm" onClick={handleDownloadContracts} disabled={importingContracts}>
+                Download Data
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => contractFileInputRef.current?.click()}
+                disabled={importingContracts}
+              >
+                {importingContracts ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Upload className="mr-2 h-4 w-4" />
+                )}
+                {importingContracts ? 'Uploading...' : 'Upload Excel'}
+              </Button>
+              <Button onClick={handleSaveContracts} disabled={savingContracts}>
+                {savingContracts ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+                {savingContracts ? 'Saving...' : 'Save Contract Prices'}
               </Button>
             </div>
           )}
@@ -673,8 +933,8 @@ export default function Finance() {
                 Loading finance data...
               </div>
             ) : (
-            <div className="overflow-x-auto rounded-lg border border-slate-300 shadow">
-              <Table className="text-xs">
+              <div className="overflow-x-auto rounded-lg border border-slate-300 shadow">
+                <Table className="text-xs">
                   <TableHeader>
                     <TableRow>
                       <TableHead className="min-w-[170px]">Show ID</TableHead>
@@ -747,7 +1007,7 @@ export default function Finance() {
                 </Table>
               </div>
             )
-          ) : (
+          ) : activeTable === 'expenses' ? (
             <>
               <div className="grid gap-4 md:grid-cols-4">
                 <div className="space-y-2">
@@ -884,6 +1144,84 @@ export default function Finance() {
                     </Table>
                   </CardContent>
                 </Card>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-4">
+                <div className="space-y-2 md:col-span-2 lg:col-span-2">
+                  <Label>Model</Label>
+                  <Input
+                    value={newContract.model}
+                    onChange={(event) => setNewContract((prev) => ({ ...prev, model: event.target.value }))}
+                    placeholder="Enter model name"
+                    className="h-9"
+                  />
+                </div>
+                <div className="space-y-2 md:col-span-1">
+                  <Label>Contract Value</Label>
+                  <Input
+                    type="number"
+                    value={newContract.contractValue}
+                    onChange={(event) => setNewContract((prev) => ({ ...prev, contractValue: event.target.value }))}
+                    placeholder="Standard contract value"
+                    className="h-9"
+                  />
+                </div>
+                <div className="flex items-end">
+                  <Button variant="outline" onClick={handleAddContractRow}>
+                    <Plus className="mr-2 h-4 w-4" />
+                    Add
+                  </Button>
+                </div>
+              </div>
+
+              <div className="overflow-x-auto rounded-lg border border-slate-200 shadow-sm">
+                <Table className="text-xs">
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="min-w-[200px]">Model</TableHead>
+                      <TableHead className="min-w-[140px] text-right">Standard Contract Value</TableHead>
+                      <TableHead className="w-16 text-right">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {contractPrices.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={3} className="text-center text-sm text-slate-500">
+                          No contract prices yet. Download the template or add a model above.
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      contractPrices.map((item) => (
+                        <TableRow key={item.id}>
+                          <TableCell className="font-medium text-slate-900">{item.model}</TableCell>
+                          <TableCell className="text-right">
+                            <Input
+                              type="number"
+                              value={item.contractValue}
+                              onChange={(event) =>
+                                handleContractChange(item.id, { contractValue: parseContractValue(event.target.value) })
+                              }
+                              className="h-9 text-right"
+                              placeholder="Enter value"
+                            />
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="text-red-500 hover:text-red-600"
+                              onClick={() => handleDeleteContract(item.id)}
+                            >
+                              <XCircle className="h-4 w-4" />
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
               </div>
             </>
           )}
