@@ -28,6 +28,8 @@ type ShowOrder = {
   date?: string;
   model?: string;
   contractValue?: number;
+  status?: string;
+  dealerConfirm?: boolean;
 };
 
 type TeamMember = {
@@ -272,6 +274,7 @@ export default function ShowBudgetExpense() {
         const showList: Show[] = showsData ? Object.values(showsData) : [];
         const budgetMap = budgetsData ?? {};
         const orders: ShowOrder[] = ordersData ? Object.values(ordersData) : [];
+        const confirmedOrders = orders.filter((order) => order.dealerConfirm || order.status === 'Approved');
         const teamMembers: TeamMember[] = teamData ? Object.values(teamData) : [];
         const financeLines = parseFinanceLines(financeData);
         const showsById = showList.reduce<Record<string, Show>>((acc, show) => {
@@ -288,7 +291,7 @@ export default function ShowBudgetExpense() {
           return acc;
         }, {});
 
-        const salesCounts = orders.reduce<
+        const salesCounts = confirmedOrders.reduce<
           Record<string, { total: number; showTeam: number; network: number; office: number }>
         >((acc, order) => {
           const showId = order.showId;
@@ -312,7 +315,7 @@ export default function ShowBudgetExpense() {
           return acc;
         }, {});
 
-        const contractTotals = orders.reduce<Record<string, { total: number; count: number }>>((acc, order) => {
+        const contractTotals = confirmedOrders.reduce<Record<string, { total: number; count: number }>>((acc, order) => {
           const showId = order.showId;
           if (!showId) return acc;
           const linkedShow = showsById[showId];
@@ -554,6 +557,9 @@ export default function ShowBudgetExpense() {
                   </CardContent>
                 </Card>
               </div>
+              <p className="text-xs text-slate-500">
+                Sales details below reflect only orders that were confirmed in the Orders &amp; Sales dashboard.
+              </p>
               <div className="overflow-x-auto rounded-xl border border-slate-300 shadow-sm">
                 <Table className="text-xs">
                   <TableHeader>

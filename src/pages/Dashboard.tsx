@@ -20,6 +20,7 @@ import { TrendingUp, Calendar } from 'lucide-react';
 import { dbGet } from '@/lib/firebase';
 import type { Show, ShowOrder, ShowTask, TeamMember } from '@/types';
 import { format as formatDate } from 'date-fns';
+import { Progress } from '@/components/ui/progress';
 
 type InternalSalesOrderRecord = {
   showId: string;
@@ -431,6 +432,10 @@ export default function Dashboard() {
 
   const formatNumber = (value: number) => value.toLocaleString();
   const formatCurrency = (value: number) => `$${value.toLocaleString('en-AU')}`;
+  const calculatePercent = (actual: number, target: number) => {
+    if (!Number.isFinite(actual) || !Number.isFinite(target) || target <= 0) return 0;
+    return Math.round((actual / target) * 100);
+  };
 
   const getRingStyle = (percent: number, color: string) => {
     const safePercent = Math.min(Math.max(percent, 0), 100);
@@ -678,22 +683,45 @@ export default function Dashboard() {
                           {
                             label: 'Dealer Cost',
                             actual: entry.data.dealerActual,
+                            target: entry.data.dealerTarget,
                             textClass: 'text-amber-700',
                           },
                           {
                             label: 'Factory Cost',
                             actual: entry.data.factoryActual,
+                            target: entry.data.factoryTarget,
                             textClass: 'text-indigo-700',
                           },
-                        ].map((metric) => (
-                          <div key={metric.label} className="rounded-lg border p-3 shadow-[0_1px_6px_rgba(0,0,0,0.04)]">
-                            <p className="text-xs uppercase tracking-wide text-slate-500">{metric.label}</p>
-                            <p className={`text-lg font-bold ${metric.textClass}`}>
-                              {formatCurrency(Number.isFinite(metric.actual) ? metric.actual : 0)}
-                            </p>
-                            <p className="text-[11px] text-slate-500">Actual cost (0 if not recorded)</p>
-                          </div>
-                        ))}
+                        ].map((metric) => {
+                          const percent = calculatePercent(metric.actual, metric.target);
+                          const progressValue = Math.min(Math.max(percent, 0), 100);
+                          return (
+                            <div
+                              key={metric.label}
+                              className="rounded-lg border p-3 shadow-[0_1px_6px_rgba(0,0,0,0.04)]"
+                            >
+                              <div className="flex items-start justify-between gap-3">
+                                <div>
+                                  <p className="text-xs uppercase tracking-wide text-slate-500">{metric.label}</p>
+                                  <p className={`text-lg font-bold ${metric.textClass}`}>
+                                    {formatCurrency(Number.isFinite(metric.actual) ? metric.actual : 0)}
+                                  </p>
+                                </div>
+                                <div className="text-right">
+                                  <p className="text-[11px] text-slate-500">Target</p>
+                                  <p className="text-sm font-semibold text-slate-800">
+                                    {formatCurrency(Number.isFinite(metric.target) ? metric.target : 0)}
+                                  </p>
+                                </div>
+                              </div>
+                              <div className="mt-2 flex items-center gap-2">
+                                <Progress value={progressValue} className="h-2 flex-1 bg-slate-100" />
+                                <span className="text-xs font-semibold text-slate-700">{percent}%</span>
+                              </div>
+                              <p className="text-[11px] text-slate-500">Actual vs target</p>
+                            </div>
+                          );
+                        })}
                       </div>
                     </div>
                   ) : (
