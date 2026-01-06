@@ -11,7 +11,7 @@ import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, Command
 import { dbGet, dbSet, dbUpdate, schedulingDbGet } from '@/lib/firebase';
 import type { ScheduleOrder, Show, ShowOrder, TeamMember } from '@/types';
 import { toast } from 'sonner';
-import { Check, CheckCircle2, Loader2, Plus, Search, ShieldCheck } from 'lucide-react';
+import { Check, CheckCircle2, Loader2, Plus, Search, ShieldCheck, Sparkles } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 const CONFIRMATION_PASSWORD = 'admin123';
@@ -19,6 +19,7 @@ const CONFIRMATION_CACHE_KEY = 'orders-dashboard-confirmation';
 const CONFIRMATION_DURATION_MS = 5 * 60 * 1000; // 5 minutes
 
 type DealerStatus = 'Pending' | 'Approved';
+type ShowTimelineStatus = 'Finished' | 'Current' | 'Not Started';
 
 type ShowOrderWithContract = ShowOrder & { contractValue?: number };
 
@@ -31,6 +32,12 @@ interface DecoratedOrder extends ShowOrderWithContract {
 const statusStyles: Record<DealerStatus, string> = {
   Pending: 'bg-yellow-100 text-yellow-800',
   Approved: 'bg-green-100 text-green-800',
+};
+
+const showStatusStyles: Record<ShowTimelineStatus, string> = {
+  Finished: 'bg-red-50 text-red-700 ring-1 ring-red-100',
+  Current: 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-100',
+  'Not Started': 'bg-amber-50 text-amber-700 ring-1 ring-amber-100',
 };
 
 const parseContractValue = (value: unknown) => {
@@ -63,6 +70,58 @@ const formatDate = (value: string | undefined) => {
   });
 };
 
+const parseDateValue = (value: string | undefined | null) => {
+  if (!value) return null;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+};
+
+const deriveShowTimelineStatus = (show: Show): ShowTimelineStatus => {
+  const normalized = (show.status || '').toLowerCase();
+  if (normalized.includes('finish')) return 'Finished';
+  if (normalized.includes('progress') || normalized.includes('current')) return 'Current';
+  if (normalized.includes('not')) return 'Not Started';
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const start = parseDateValue(show.startDate);
+  const finish = parseDateValue(show.finishDate);
+
+  if (start) start.setHours(0, 0, 0, 0);
+  if (finish) finish.setHours(0, 0, 0, 0);
+
+  if (start && today < start) return 'Not Started';
+  if (finish && today > finish) return 'Finished';
+  if (start && finish && today >= start && today <= finish) return 'Current';
+  if (start && !finish) return today >= start ? 'Current' : 'Not Started';
+  if (finish && !start) return today > finish ? 'Finished' : 'Current';
+
+  return 'Not Started';
+};
+
+const formatShowDates = (show: Show) => {
+  const start = parseDateValue(show.startDate);
+  const finish = parseDateValue(show.finishDate);
+  if (start && finish) {
+    return `${start.toLocaleDateString('en-AU', { month: 'short', day: '2-digit' })} - ${finish.toLocaleDateString(
+      'en-AU',
+      { month: 'short', day: '2-digit' }
+    )}`;
+  }
+  if (start) return start.toLocaleDateString('en-AU', { month: 'short', day: '2-digit', year: 'numeric' });
+  if (finish) return finish.toLocaleDateString('en-AU', { month: 'short', day: '2-digit', year: 'numeric' });
+  return 'Dates not set';
+};
+
+const getPrimaryShowDateValue = (show: Show) => {
+  const start = parseDateValue(show.startDate);
+  const finish = parseDateValue(show.finishDate);
+  if (start) return start.getTime();
+  if (finish) return finish.getTime();
+  return Number.MAX_SAFE_INTEGER;
+};
+
 export default function OrdersAndSales() {
   const [orders, setOrders] = useState<ShowOrderWithContract[]>([]);
   const [shows, setShows] = useState<Show[]>([]);
@@ -81,6 +140,7 @@ export default function OrdersAndSales() {
   const [isSalespersonPickerOpen, setIsSalespersonPickerOpen] = useState(false);
   const [isModelPickerOpen, setIsModelPickerOpen] = useState(false);
   const [selectedHandoverDealer, setSelectedHandoverDealer] = useState('');
+  const [addingTeamMemberId, setAddingTeamMemberId] = useState<string | null>(null);
   const [newOrder, setNewOrder] = useState<Partial<ShowOrderWithContract>>({
     chassisNumber: '',
     model: '',
@@ -238,6 +298,37 @@ export default function OrdersAndSales() {
     return teamMembers.filter((member) => memberIds.includes(member.memberId));
   }, [selectedShow, teamMembers]);
 
+  const availableTeamMembers = useMemo(() => {
+    if (!selectedShow) return [] as TeamMember[];
+    const assigned = new Set(selectedShow.teamMembers || []);
+    return teamMembers.filter((member) => !assigned.has(member.memberId));
+  }, [selectedShow, teamMembers]);
+
+  const sortedShowOptions = useMemo(() => {
+    return shows
+      .map((show) => ({
+        ...show,
+        timelineStatus: deriveShowTimelineStatus(show),
+        primaryDate: getPrimaryShowDateValue(show),
+      }))
+      .sort((a, b) => {
+        if (a.timelineStatus === 'Current' && b.timelineStatus !== 'Current') return -1;
+        if (b.timelineStatus === 'Current' && a.timelineStatus !== 'Current') return 1;
+        if (a.primaryDate !== b.primaryDate) return a.primaryDate - b.primaryDate;
+        return (a.name || '').localeCompare(b.name || '');
+      });
+  }, [shows]);
+
+  const currentShowOptions = useMemo(
+    () => sortedShowOptions.filter((show) => show.timelineStatus === 'Current'),
+    [sortedShowOptions]
+  );
+
+  const otherShowOptions = useMemo(
+    () => sortedShowOptions.filter((show) => show.timelineStatus !== 'Current'),
+    [sortedShowOptions]
+  );
+
   const ordersByShow = useMemo(
     () =>
       orders.reduce((acc, order) => {
@@ -386,7 +477,7 @@ export default function OrdersAndSales() {
       setNewOrder({
         chassisNumber: '',
         orderType: 'New Order',
-        customerName: '',        
+        customerName: '',
         salesperson: '',
         status: 'Pending',
         showId: '',
@@ -399,6 +490,31 @@ export default function OrdersAndSales() {
     } catch (err) {
       console.error('Error adding order:', err);
       toast.error('Failed to add order');
+    }
+  };
+
+  const handleAddTeamMemberToShow = async (member: TeamMember) => {
+    if (!selectedShow?.id) {
+      toast.error('Please select a show first');
+      return;
+    }
+
+    setAddingTeamMemberId(member.memberId);
+    const nextTeamMembers = Array.from(new Set([...(selectedShow.teamMembers || []), member.memberId]));
+
+    try {
+      await dbUpdate(`shows/${selectedShow.id}`, { teamMembers: nextTeamMembers });
+      setShows((prev) =>
+        prev.map((show) => (show.id === selectedShow.id ? { ...show, teamMembers: nextTeamMembers } : show))
+      );
+      setNewOrder({ ...newOrder, salesperson: member.memberName });
+      toast.success(`${member.memberName} added to ${selectedShow.name}`);
+      setIsSalespersonPickerOpen(false);
+    } catch (err) {
+      console.error('Error adding team member to show:', err);
+      toast.error('Failed to add team member to this show');
+    } finally {
+      setAddingTeamMemberId(null);
     }
   };
 
@@ -503,9 +619,49 @@ export default function OrdersAndSales() {
                             <SelectValue placeholder="Select show" />
                           </SelectTrigger>
                           <SelectContent>
-                            {shows.map((show) => (
+                            <div className="sticky top-0 z-10 flex items-center gap-2 border-b bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700">
+                              <Sparkles className="h-4 w-4 animate-pulse" />
+                              Current shows are highlighted first
+                            </div>
+                            {currentShowOptions.map((show) => (
                               <SelectItem key={show.id} value={show.id}>
-                                {show.name}
+                                <div className="flex items-start justify-between gap-3">
+                                  <div className="flex flex-col">
+                                    <span className="font-medium">{show.name}</span>
+                                    <span className="text-xs text-muted-foreground">{formatShowDates(show)}</span>
+                                  </div>
+                                  <span
+                                    className={cn(
+                                      'rounded-full px-2 py-1 text-[11px] font-semibold',
+                                      showStatusStyles[show.timelineStatus]
+                                    )}
+                                  >
+                                    Current
+                                  </span>
+                                </div>
+                              </SelectItem>
+                            ))}
+                            {currentShowOptions.length > 0 && (
+                              <div className="px-3 pb-1 pt-3 text-[11px] uppercase tracking-wide text-muted-foreground">
+                                Scheduled & finished
+                              </div>
+                            )}
+                            {otherShowOptions.map((show) => (
+                              <SelectItem key={show.id} value={show.id}>
+                                <div className="flex items-start justify-between gap-3">
+                                  <div className="flex flex-col">
+                                    <span className="font-medium">{show.name}</span>
+                                    <span className="text-xs text-muted-foreground">{formatShowDates(show)}</span>
+                                  </div>
+                                  <span
+                                    className={cn(
+                                      'rounded-full px-2 py-1 text-[11px] font-semibold',
+                                      showStatusStyles[show.timelineStatus]
+                                    )}
+                                  >
+                                    {show.timelineStatus}
+                                  </span>
+                                </div>
                               </SelectItem>
                             ))}
                           </SelectContent>
@@ -676,6 +832,36 @@ export default function OrdersAndSales() {
                                     </CommandItem>
                                   ))}
                                 </CommandGroup>
+                                {selectedShow && (
+                                  <CommandGroup heading="Add team member to this show">
+                                    {availableTeamMembers.length === 0 ? (
+                                      <div className="px-3 py-2 text-xs text-muted-foreground">
+                                        All active team members are already on this show.
+                                      </div>
+                                    ) : (
+                                      availableTeamMembers.map((member) => (
+                                        <CommandItem
+                                          key={member.memberId}
+                                          value={`add-${member.memberId}`}
+                                          onSelect={() => handleAddTeamMemberToShow(member)}
+                                          className="flex items-start justify-between gap-2"
+                                        >
+                                          <div className="flex flex-col">
+                                            <span className="font-medium">{member.memberName}</span>
+                                            <span className="text-xs text-muted-foreground">{member.role}</span>
+                                          </div>
+                                          {addingTeamMemberId === member.memberId ? (
+                                            <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                                          ) : (
+                                            <span className="rounded-full bg-emerald-50 px-2 py-1 text-[11px] font-semibold text-emerald-700">
+                                              Add to show
+                                            </span>
+                                          )}
+                                        </CommandItem>
+                                      ))
+                                    )}
+                                  </CommandGroup>
+                                )}
                               </CommandList>
                             </Command>
                           </PopoverContent>
