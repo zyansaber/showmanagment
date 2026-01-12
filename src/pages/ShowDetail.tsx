@@ -71,6 +71,14 @@ const toSafeNumber = (value: unknown): number => {
   return Number.isFinite(numeric) && numeric >= 0 ? numeric : 0;
 };
 
+const parseHandoverDealers = (value: string | undefined | null) => {
+  if (!value) return [] as string[];
+  return value
+    .split(/[,&/]/)
+    .map((dealer) => dealer.trim())
+    .filter(Boolean);
+};
+
 const normaliseTaskRecord = (
   task: Partial<ShowTask> | undefined,
   fallbackEventId?: string,
@@ -155,7 +163,6 @@ export default function ShowDetail() {
   const [caravanSearch, setCaravanSearch] = useState('');
   const [currentShowKey, setCurrentShowKey] = useState<string | null>(null);
   const [handoverDealerOptions, setHandoverDealerOptions] = useState<string[]>([]);
-  const [selectedHandoverDealer, setSelectedHandoverDealer] = useState('');
   const [modelOptions, setModelOptions] = useState<string[]>([]);
   const [isModelPickerOpen, setIsModelPickerOpen] = useState(false);
   const [contractPriceMap, setContractPriceMap] = useState<Record<string, number>>({});
@@ -168,6 +175,8 @@ export default function ShowDetail() {
     salesperson: '',
     status: 'Pending',
     contractValue: 0,
+    contractNumber: '',
+    handoverDealer: '',
   });
 
   const [newTask, setNewTask] = useState<Partial<ShowTask>>({
@@ -192,9 +201,12 @@ export default function ShowDetail() {
   }, [id]);
 
   useEffect(() => {
-    if (show?.handoverDealer) {
-      setSelectedHandoverDealer(show.handoverDealer);
+    if (!show?.handoverDealer) {
+      setNewOrder((prev) => ({ ...prev, handoverDealer: '' }));
+      return;
     }
+    const defaults = parseHandoverDealers(show.handoverDealer);
+    setNewOrder((prev) => ({ ...prev, handoverDealer: defaults[0] || '' }));
   }, [show?.handoverDealer]);
 
   const normaliseTemplate = (template: ProcessTemplate): ProcessTemplate => {
@@ -248,7 +260,7 @@ export default function ShowDetail() {
       setShow(currentShow || null);
       setEditedShow(currentShow || {});
       setSelectedTeamMembers(currentShow?.teamMembers || []);
-      setSelectedHandoverDealer(currentShow?.handoverDealer || '');
+      setNewOrder((prev) => ({ ...prev, handoverDealer: currentShow?.handoverDealer || '' }));
 
       const allOrders: ShowOrder[] = ordersData
         ? Object.values(ordersData).map((order) => ({
@@ -621,15 +633,16 @@ export default function ShowDetail() {
   };
 
   const handleAddOrder = async () => {
-    const requiresHandoverDealer = orders.length === 0 && !show?.handoverDealer;
     try {
-      if (!newOrder.salesperson || !newOrder.customerName?.trim()) {
+      const contractValue = parseValue(newOrder.contractValue);
+      if (
+        !newOrder.salesperson ||
+        !newOrder.customerName?.trim() ||
+        !newOrder.contractNumber?.trim() ||
+        !contractValue ||
+        !newOrder.handoverDealer?.trim()
+      ) {
         toast.error('Please fill in all required fields');
-        return;
-      }
-
-      if (requiresHandoverDealer && !selectedHandoverDealer) {
-        toast.error('Please choose a handover dealer for this show');
         return;
       }
 
@@ -651,20 +664,13 @@ export default function ShowDetail() {
         orderType: newOrder.orderType as 'New Order' | 'Transfer from Stock',
         salesperson: newOrder.salesperson || '',
         date: new Date().toISOString().split('T')[0],
-        contractValue: parseValue(newOrder.contractValue),
+        contractValue,
+        contractNumber: newOrder.contractNumber?.trim() || '',
+        handoverDealer: newOrder.handoverDealer?.trim() || '',
         status: 'Pending',
       };
 
       await dbSet(`showOrders/${order.id}`, order as unknown as Record<string, unknown>);
-      if (requiresHandoverDealer && selectedHandoverDealer) {
-        const firebaseKey = currentShowKey || id;
-        if (!firebaseKey) {
-          toast.error('Unable to update show with selected dealer.');
-          return;
-        }
-        await dbUpdate(`shows/${firebaseKey}`, { handoverDealer: selectedHandoverDealer });
-        setShow((prev) => (prev ? { ...prev, handoverDealer: selectedHandoverDealer } : prev));
-      }
       setOrders((prev) => [...prev, order]);
       setIsAddingOrder(false);
       setNewOrder({
@@ -675,10 +681,9 @@ export default function ShowDetail() {
         salesperson: '',
         status: 'Pending',
         contractValue: 0,
+        contractNumber: '',
+        handoverDealer: '',
       });
-      if (requiresHandoverDealer) {
-        setSelectedHandoverDealer('');
-      }
       toast.success('Order added successfully');
     } catch (error) {
       console.error('Error adding order:', error);
@@ -970,6 +975,7 @@ export default function ShowDetail() {
         return <CheckCircle className="h-4 w-4 text-green-500" />;
       case 'Rejected':
       case 'Blocked':
+      case 'Cancelled':
         return <XCircle className="h-4 w-4 text-red-500" />;
       case 'Pending':
       case 'In Progress':
@@ -984,6 +990,7 @@ export default function ShowDetail() {
       Approved: 'bg-green-500',
       Pending: 'bg-orange-500',
       Rejected: 'bg-red-500',
+      Cancelled: 'bg-red-500',
       Done: 'bg-green-500',
       'In Progress': 'bg-blue-500',
       Blocked: 'bg-red-500',
@@ -1003,6 +1010,11 @@ export default function ShowDetail() {
     () => teamMembers.filter((member) => selectedTeamMembers.includes(member.memberId)),
     [teamMembers, selectedTeamMembers]
   );
+  const handoverDealerChoices = useMemo(() => {
+    const defaults = parseHandoverDealers(show?.handoverDealer);
+    const all = new Set([...defaults, ...handoverDealerOptions]);
+    return Array.from(all).sort((a, b) => a.localeCompare(b));
+  }, [handoverDealerOptions, show?.handoverDealer]);
 
   useEffect(() => {
     setMemberDayDrafts({});
@@ -2160,31 +2172,30 @@ export default function ShowDetail() {
                     <DialogDescription>Enter order details</DialogDescription>
                   </DialogHeader>
                   <div className="space-y-4 py-4">
-                    {orders.length === 0 && !show?.handoverDealer && (
-                      <div>
-                        <Label>Handover Dealer *</Label>
-                        <Select
-                          value={selectedHandoverDealer}
-                          onValueChange={(value) => setSelectedHandoverDealer(value)}
-                        >
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select handover dealer" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {handoverDealerOptions.map((dealer) => (
-                              <SelectItem key={dealer} value={dealer}>
-                                {dealer}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                        {handoverDealerOptions.length === 0 && (
-                          <p className="text-xs text-muted-foreground mt-1">
-                            Dealer list unavailable. Please refresh after schedule sync.
-                          </p>
-                        )}
-                      </div>
-                    )}
+                    <div>
+                      <Label>Handover Dealer *</Label>
+                      <Select
+                        value={newOrder.handoverDealer || ''}
+                        onValueChange={(value) => setNewOrder({ ...newOrder, handoverDealer: value })}
+                        disabled={handoverDealerChoices.length === 0}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select handover dealer" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {handoverDealerChoices.map((dealer) => (
+                            <SelectItem key={dealer} value={dealer}>
+                              {dealer}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      {handoverDealerChoices.length === 0 && (
+                        <p className="text-xs text-muted-foreground mt-1">
+                          Dealer list unavailable. Please refresh after schedule sync.
+                        </p>
+                      )}
+                    </div>
                     <div>
                       <Label>Model *</Label>
                       <Popover open={isModelPickerOpen} onOpenChange={setIsModelPickerOpen}>
@@ -2246,7 +2257,17 @@ export default function ShowDetail() {
                       )}
                     </div>
                     <div>
-                      <Label>Contract Value</Label>
+                      <Label>Contract Number *</Label>
+                      <Input
+                        placeholder="Enter contract number"
+                        value={newOrder.contractNumber || ''}
+                        onChange={(event) =>
+                          setNewOrder({ ...newOrder, contractNumber: event.target.value })
+                        }
+                      />
+                    </div>
+                    <div>
+                      <Label>Contract Value *</Label>
                       <Input
                         type="number"
                         placeholder="Standard contract value"
@@ -2365,6 +2386,7 @@ export default function ShowDetail() {
                     <TableRow>
                       <TableHead>Order ID</TableHead>
                       <TableHead>Model</TableHead>
+                      <TableHead>Contract Number</TableHead>
                       <TableHead className="text-right">Contract Value</TableHead>
                       <TableHead>Customer</TableHead>
                       <TableHead>Type</TableHead>
@@ -2380,12 +2402,13 @@ export default function ShowDetail() {
                       <TableRow key={order.id}>
                         <TableCell className="font-medium">{order.id}</TableCell>
                         <TableCell>{order.model || 'Not set'}</TableCell>
+                        <TableCell>{order.contractNumber || 'Not set'}</TableCell>
                         <TableCell className="text-right">{formatCurrency(order.contractValue)}</TableCell>
                         <TableCell>{order.customerName || 'Not set'}</TableCell>
                         <TableCell>{order.orderType}</TableCell>
                         <TableCell>{order.salesperson}</TableCell>
                         <TableCell>{order.date}</TableCell>
-                        <TableCell>{show?.handoverDealer || 'Not set'}</TableCell>
+                        <TableCell>{order.handoverDealer || show?.handoverDealer || 'Not set'}</TableCell>
                         <TableCell>
                           <div className="flex items-center gap-2">
                             {getStatusIcon(order.status)}

@@ -18,10 +18,11 @@ const CONFIRMATION_PASSWORD = 'admin123';
 const CONFIRMATION_CACHE_KEY = 'orders-dashboard-confirmation';
 const CONFIRMATION_DURATION_MS = 5 * 60 * 1000; // 5 minutes
 
-type DealerStatus = 'Pending' | 'Approved';
+type DealerStatus = 'Pending' | 'Approved' | 'Cancelled';
 type ShowTimelineStatus = 'Finished' | 'Current' | 'Not Started';
+type ActionType = 'confirm' | 'cancel' | 'recover';
 
-type ShowOrderWithContract = ShowOrder & { contractValue?: number };
+type ShowOrderWithContract = ShowOrder & { contractValue?: number; contractNumber?: string };
 
 interface DecoratedOrder extends ShowOrderWithContract {
   showName: string;
@@ -32,6 +33,7 @@ interface DecoratedOrder extends ShowOrderWithContract {
 const statusStyles: Record<DealerStatus, string> = {
   Pending: 'bg-yellow-100 text-yellow-800',
   Approved: 'bg-green-100 text-green-800',
+  Cancelled: 'bg-red-100 text-red-800',
 };
 
 const showStatusStyles: Record<ShowTimelineStatus, string> = {
@@ -49,6 +51,14 @@ const parseContractValue = (value: unknown) => {
     return Number.isFinite(parsed) ? parsed : 0;
   }
   return 0;
+};
+
+const parseHandoverDealers = (value: string | undefined | null) => {
+  if (!value) return [] as string[];
+  return value
+    .split(/[,&/]/)
+    .map((dealer) => dealer.trim())
+    .filter(Boolean);
 };
 
 const formatCurrency = (value?: number) => {
@@ -132,14 +142,13 @@ export default function OrdersAndSales() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
-  const [pendingOrder, setPendingOrder] = useState<ShowOrderWithContract | null>(null);
+  const [pendingAction, setPendingAction] = useState<{ type: ActionType; order: ShowOrderWithContract } | null>(null);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [passwordInput, setPasswordInput] = useState('');
   const [authExpiry, setAuthExpiry] = useState<number | null>(null);
   const [isAddingOrder, setIsAddingOrder] = useState(false);
   const [isSalespersonPickerOpen, setIsSalespersonPickerOpen] = useState(false);
   const [isModelPickerOpen, setIsModelPickerOpen] = useState(false);
-  const [selectedHandoverDealer, setSelectedHandoverDealer] = useState('');
   const [addingTeamMemberId, setAddingTeamMemberId] = useState<string | null>(null);
   const [newOrder, setNewOrder] = useState<Partial<ShowOrderWithContract>>({
     chassisNumber: '',
@@ -151,6 +160,8 @@ export default function OrdersAndSales() {
     showId: '',
     date: new Date().toISOString().split('T')[0],
     contractValue: 0,
+    contractNumber: '',
+    handoverDealer: '',
   });
   const [statusFilter, setStatusFilter] = useState<'All' | DealerStatus>('All');
 
@@ -244,10 +255,10 @@ export default function OrdersAndSales() {
     [shows]
   );
 
-  const deriveDealerStatus = useCallback(
-    (order: ShowOrderWithContract): DealerStatus => (order.dealerConfirm ? 'Approved' : 'Pending'),
-    []
-  );
+  const deriveDealerStatus = useCallback((order: ShowOrderWithContract): DealerStatus => {
+    if ((order.status || '').toLowerCase() === 'cancelled') return 'Cancelled';
+    return order.dealerConfirm ? 'Approved' : 'Pending';
+  }, []);
 
   const decoratedOrders: DecoratedOrder[] = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
@@ -270,6 +281,7 @@ export default function OrdersAndSales() {
           order.salesperson,
           order.model,
           order.id,
+          order.contractNumber,
           matchedShow?.name,
           matchedShow?.handoverDealer,
         ]
@@ -281,7 +293,7 @@ export default function OrdersAndSales() {
       .map((order) => ({
         ...order,
         showName: showLookup[order.showId]?.name || 'Unknown Show',
-        handoverDealer: showLookup[order.showId]?.handoverDealer || 'Not set',
+        handoverDealer: order.handoverDealer || showLookup[order.showId]?.handoverDealer || 'Not set',
         dealerStatus: deriveDealerStatus(order),
       }));
   }, [deriveDealerStatus, orders, searchTerm, showLookup, statusFilter]);
@@ -329,34 +341,25 @@ export default function OrdersAndSales() {
     [sortedShowOptions]
   );
 
-  const ordersByShow = useMemo(
-    () =>
-      orders.reduce((acc, order) => {
-        if (!order.showId) return acc;
-        acc[order.showId] = (acc[order.showId] || 0) + 1;
-        return acc;
-      }, {} as Record<string, number>),
-    [orders]
-  );
-
-  const requiresHandoverDealer = useMemo(() => {
-    if (!selectedShow) return false;
-    const orderCount = ordersByShow[selectedShow.id] ?? 0;
-    return orderCount === 0 && !selectedShow.handoverDealer;
-  }, [ordersByShow, selectedShow]);
-
   const isValidModelSelection = (value: string | undefined) => {
     if (!value) return false;
     return modelOptions.some((option) => option.toLowerCase() === value.trim().toLowerCase());
   };
 
   useEffect(() => {
-    if (selectedShow?.handoverDealer) {
-      setSelectedHandoverDealer(selectedShow.handoverDealer);
-    } else {
-      setSelectedHandoverDealer('');
+    if (!selectedShow) {
+      setNewOrder((prev) => ({ ...prev, handoverDealer: '' }));
+      return;
     }
+    const defaults = parseHandoverDealers(selectedShow.handoverDealer);
+    setNewOrder((prev) => ({ ...prev, handoverDealer: defaults[0] || '' }));
   }, [selectedShow]);
+
+  const handoverDealerChoices = useMemo(() => {
+    const defaults = parseHandoverDealers(selectedShow?.handoverDealer);
+    const all = new Set([...defaults, ...dealerOptions]);
+    return Array.from(all).sort((a, b) => a.localeCompare(b));
+  }, [dealerOptions, selectedShow]);
 
   const persistAuthExpiry = (expiresAt: number) => {
     setAuthExpiry(expiresAt);
@@ -368,7 +371,7 @@ export default function OrdersAndSales() {
   const confirmOrder = async (order: ShowOrderWithContract) => {
     if (!order.id) {
       toast.error('Order is missing an ID.');
-      setPendingOrder(null);
+      setPendingAction(null);
       return;
     }
 
@@ -391,7 +394,7 @@ export default function OrdersAndSales() {
       console.error('Error confirming order:', err);
       toast.error('Failed to confirm order. Please try again.');
     } finally {
-      setPendingOrder(null);
+      setPendingAction(null);
     }
   };
 
@@ -401,12 +404,101 @@ export default function OrdersAndSales() {
       return;
     }
 
-    setPendingOrder(order);
     if (requiresPassword) {
+      setPendingAction({ type: 'confirm', order });
       setIsDialogOpen(true);
-    } else {
-      confirmOrder(order);
+      return;
     }
+
+    confirmOrder(order);
+  };
+
+  const cancelOrder = async (order: ShowOrderWithContract) => {
+    if (!order.id) {
+      toast.error('Order is missing an ID.');
+      setPendingAction(null);
+      return;
+    }
+
+    try {
+      await dbUpdate(`showOrders/${order.id}`, {
+        status: 'Cancelled',
+        dealerConfirm: false,
+        cancelledBy: 'Orders Dashboard',
+      });
+      setOrders((prev) =>
+        prev.map((existing) =>
+          existing.id === order.id
+            ? { ...existing, status: 'Cancelled', dealerConfirm: false, cancelledBy: 'Orders Dashboard' }
+            : existing
+        )
+      );
+      toast.success(`Order ${order.id} cancelled.`);
+    } catch (err) {
+      console.error('Error cancelling order:', err);
+      toast.error('Failed to cancel order. Please try again.');
+    } finally {
+      setPendingAction(null);
+    }
+  };
+
+  const recoverOrder = async (order: ShowOrderWithContract) => {
+    if (!order.id) {
+      toast.error('Order is missing an ID.');
+      setPendingAction(null);
+      return;
+    }
+
+    try {
+      await dbUpdate(`showOrders/${order.id}`, {
+        status: 'Approved',
+        dealerConfirm: true,
+        approvedBy: 'Orders Dashboard',
+      });
+      setOrders((prev) =>
+        prev.map((existing) =>
+          existing.id === order.id
+            ? { ...existing, status: 'Approved', dealerConfirm: true, approvedBy: 'Orders Dashboard' }
+            : existing
+        )
+      );
+      toast.success(`Order ${order.id} recovered.`);
+    } catch (err) {
+      console.error('Error recovering order:', err);
+      toast.error('Failed to recover order. Please try again.');
+    } finally {
+      setPendingAction(null);
+    }
+  };
+
+  const handleCancelClick = (order: ShowOrderWithContract) => {
+    if (deriveDealerStatus(order) === 'Cancelled') {
+      toast.info('Order already cancelled.');
+      return;
+    }
+
+    if (requiresPassword) {
+      setPendingAction({ type: 'cancel', order });
+      setIsDialogOpen(true);
+      return;
+    }
+
+    cancelOrder(order);
+  };
+
+  const handleRecoverClick = (order: ShowOrderWithContract) => {
+    if (deriveDealerStatus(order) !== 'Cancelled') {
+      toast.info('Order is not cancelled.');
+      return;
+    }
+
+    if (requiresPassword) {
+      setPendingAction({ type: 'recover', order });
+      setIsDialogOpen(true);
+      return;
+    }
+
+    recoverOrder(order);
   };
 
   const handlePasswordSubmit = () => {
@@ -420,8 +512,13 @@ export default function OrdersAndSales() {
     setIsDialogOpen(false);
     setPasswordInput('');
 
-    if (pendingOrder) {
-      confirmOrder(pendingOrder);
+    if (!pendingAction) return;
+    if (pendingAction.type === 'confirm') {
+      confirmOrder(pendingAction.order);
+    } else if (pendingAction.type === 'cancel') {
+      cancelOrder(pendingAction.order);
+    } else {
+      recoverOrder(pendingAction.order);
     }
   };
 
@@ -429,18 +526,22 @@ export default function OrdersAndSales() {
     setIsDialogOpen(open);
     if (!open) {
       setPasswordInput('');
-      setPendingOrder(null);
+      setPendingAction(null);
     }
   };
 
   const handleAddOrder = async () => {
-    if (!newOrder.salesperson || !newOrder.showId || !newOrder.date || !newOrder.customerName?.trim()) {
+    const contractValue = parseContractValue(newOrder.contractValue);
+    if (
+      !newOrder.salesperson ||
+      !newOrder.showId ||
+      !newOrder.date ||
+      !newOrder.customerName?.trim() ||
+      !newOrder.contractNumber?.trim() ||
+      !contractValue ||
+      !newOrder.handoverDealer?.trim()
+    ) {
       toast.error('Please fill in all required fields');
-      return;
-    }
-
-    if (requiresHandoverDealer && !selectedHandoverDealer) {
-      toast.error('Please select a handover dealer for this show');
       return;
     }
 
@@ -459,19 +560,13 @@ export default function OrdersAndSales() {
         orderType: (newOrder.orderType as ShowOrder['orderType']) || 'New Order',
         salesperson: newOrder.salesperson,
         date: newOrder.date,
-        contractValue: parseContractValue(newOrder.contractValue),
+        contractValue,
+        contractNumber: newOrder.contractNumber?.trim() || '',
+        handoverDealer: newOrder.handoverDealer?.trim() || '',
         status: 'Pending',
       };
 
       await dbSet(`showOrders/${order.id}`, order as unknown as Record<string, unknown>);
-      if (requiresHandoverDealer && selectedHandoverDealer) {
-        await dbUpdate(`shows/${order.showId}`, { handoverDealer: selectedHandoverDealer });
-        setShows((prev) =>
-          prev.map((show) =>
-            show.id === order.showId ? { ...show, handoverDealer: selectedHandoverDealer } : show
-          )
-        );
-      }
       setOrders((prev) => [...prev, order]);
       setIsAddingOrder(false);
       setNewOrder({
@@ -484,8 +579,9 @@ export default function OrdersAndSales() {
         date: new Date().toISOString().split('T')[0],
         model: '',
         contractValue: 0,
+        contractNumber: '',
+        handoverDealer: '',
       });
-      setSelectedHandoverDealer('');
       toast.success('Order added successfully');
     } catch (err) {
       console.error('Error adding order:', err);
@@ -668,31 +764,30 @@ export default function OrdersAndSales() {
                         </Select>
                       </div>
 
-                      {requiresHandoverDealer && (
-                        <div className="space-y-2">
-                          <Label>Handover Dealer *</Label>
-                          <Select
-                            value={selectedHandoverDealer}
-                            onValueChange={(value) => setSelectedHandoverDealer(value)}
-                          >
-                            <SelectTrigger>
-                              <SelectValue placeholder="Select handover dealer" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {dealerOptions.map((dealer) => (
-                                <SelectItem key={dealer} value={dealer}>
-                                  {dealer}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                          {dealerOptions.length === 0 && (
-                            <p className="text-xs text-muted-foreground">
-                              Dealer list unavailable. Please try again after schedule sync.
-                            </p>
-                          )}
-                        </div>
-                      )}
+                      <div className="space-y-2">
+                        <Label>Handover Dealer *</Label>
+                        <Select
+                          value={newOrder.handoverDealer || ''}
+                          onValueChange={(value) => setNewOrder({ ...newOrder, handoverDealer: value })}
+                          disabled={handoverDealerChoices.length === 0}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select handover dealer" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {handoverDealerChoices.map((dealer) => (
+                              <SelectItem key={dealer} value={dealer}>
+                                {dealer}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        {handoverDealerChoices.length === 0 && (
+                          <p className="text-xs text-muted-foreground">
+                            Dealer list unavailable. Please try again after schedule sync.
+                          </p>
+                        )}
+                      </div>
 
                       <div className="space-y-2">
                         <Label>Model *</Label>
@@ -751,7 +846,16 @@ export default function OrdersAndSales() {
                       </div>
 
                       <div className="space-y-2">
-                        <Label>Contract Value</Label>
+                        <Label>Contract Number *</Label>
+                        <Input
+                          placeholder="Enter contract number"
+                          value={newOrder.contractNumber || ''}
+                          onChange={(event) => setNewOrder({ ...newOrder, contractNumber: event.target.value })}
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label>Contract Value *</Label>
                         <Input
                           type="number"
                           placeholder="Standard contract value"
@@ -914,6 +1018,7 @@ export default function OrdersAndSales() {
                   <TableRow>
                     <TableHead>Order ID</TableHead>
                     <TableHead>Model</TableHead>
+                    <TableHead>Contract Number</TableHead>
                     <TableHead className="text-right">Contract Value</TableHead>
                     <TableHead>Customer</TableHead>
                     <TableHead>Show</TableHead>
@@ -932,6 +1037,7 @@ export default function OrdersAndSales() {
                       <TableRow key={rowKey}>
                         <TableCell className="font-medium">{order.id || 'N/A'}</TableCell>
                         <TableCell>{order.model || 'Not set'}</TableCell>
+                        <TableCell>{order.contractNumber || 'Not set'}</TableCell>
                         <TableCell className="text-right">{formatCurrency(order.contractValue)}</TableCell>
                         <TableCell>{order.customerName || 'Not set'}</TableCell>
                         <TableCell>{order.showName}</TableCell>
@@ -940,25 +1046,42 @@ export default function OrdersAndSales() {
                         <TableCell>{formatDate(order.date)}</TableCell>
                         <TableCell>
                           <span className={`rounded-full px-2 py-1 text-xs font-semibold ${statusStyles[order.dealerStatus]}`}>
-                            {order.dealerStatus === 'Approved' ? 'Approved' : 'Pending'}
+                            {order.dealerStatus}
                           </span>
                         </TableCell>
                         <TableCell>{order.handoverDealer}</TableCell>
                         <TableCell className="text-right">
-                          {order.dealerStatus === 'Approved' ? (
-                            <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-800">
-                              Confirmed
-                            </span>
-                          ) : (
-                            <Button
-                              size="sm"
-                              variant="secondary"
-                              className="bg-yellow-100 text-yellow-800 hover:bg-yellow-200"
-                              onClick={() => handleConfirmationClick(order)}
-                            >
-                              Confirmation
-                            </Button>
-                          )}
+                          <div className="flex flex-wrap justify-end gap-2">
+                            {order.dealerStatus === 'Cancelled' ? (
+                              <Button
+                                size="sm"
+                                className="bg-emerald-600 text-white hover:bg-emerald-700"
+                                onClick={() => handleRecoverClick(order)}
+                              >
+                                Recover
+                              </Button>
+                            ) : (
+                              <>
+                                {order.dealerStatus === 'Approved' ? (
+                                  <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-800">
+                                    Confirmed
+                                  </span>
+                                ) : (
+                                  <Button
+                                    size="sm"
+                                    variant="secondary"
+                                    className="bg-yellow-100 text-yellow-800 hover:bg-yellow-200"
+                                    onClick={() => handleConfirmationClick(order)}
+                                  >
+                                    Confirmation
+                                  </Button>
+                                )}
+                                <Button size="sm" variant="destructive" onClick={() => handleCancelClick(order)}>
+                                  Cancellation
+                                </Button>
+                              </>
+                            )}
+                          </div>
                         </TableCell>
                       </TableRow>
                     );
@@ -974,8 +1097,20 @@ export default function OrdersAndSales() {
       <Dialog open={isDialogOpen} onOpenChange={handleDialogOpenChange}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Enter Confirmation Password</DialogTitle>
-            <DialogDescription>Confirming an order requires administrator approval.</DialogDescription>
+            <DialogTitle>
+              {pendingAction?.type === 'cancel'
+                ? 'Enter Cancellation Password'
+                : pendingAction?.type === 'recover'
+                  ? 'Enter Recovery Password'
+                  : 'Enter Confirmation Password'}
+            </DialogTitle>
+            <DialogDescription>
+              {pendingAction?.type === 'cancel'
+                ? 'Cancelling an order requires administrator approval.'
+                : pendingAction?.type === 'recover'
+                  ? 'Recovering an order requires administrator approval.'
+                  : 'Confirming an order requires administrator approval.'}
+            </DialogDescription>
           </DialogHeader>
           <div className="space-y-3 py-4">
             <Input
@@ -993,7 +1128,11 @@ export default function OrdersAndSales() {
             </Button>
             <Button onClick={handlePasswordSubmit}>
               <CheckCircle2 className="mr-2 h-4 w-4" />
-              Confirm
+              {pendingAction?.type === 'cancel'
+                ? 'Cancel Order'
+                : pendingAction?.type === 'recover'
+                  ? 'Recover Order'
+                  : 'Confirm'}
             </Button>
           </DialogFooter>
         </DialogContent>
