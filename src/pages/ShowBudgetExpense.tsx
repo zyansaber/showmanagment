@@ -144,6 +144,7 @@ const daysUntilStart = (row: BudgetRow) => {
 
 type FinanceLine = {
   aufnrNorm: string;
+  glAccountNorm: string;
   companyCode: string;
   postingDate?: string;
   amount: number;
@@ -158,8 +159,9 @@ const parseFinanceLines = (data: unknown): FinanceLine[] => {
     if (!glBuckets || typeof glBuckets !== 'object') return;
     const aufnrNorm = leadingZeroSafe(aufnrKey);
 
-    Object.values(glBuckets as Record<string, unknown>).forEach((glValue) => {
+    Object.entries(glBuckets as Record<string, unknown>).forEach(([glKey, glValue]) => {
       if (!glValue || typeof glValue !== 'object') return;
+      const glAccountNorm = leadingZeroSafe(glKey);
       const glBucket = glValue as Record<string, unknown>;
       if (!glBucket.lines || typeof glBucket.lines !== 'object') return;
 
@@ -168,6 +170,7 @@ const parseFinanceLines = (data: unknown): FinanceLine[] => {
         const line = rawLine as Record<string, unknown>;
         lines.push({
           aufnrNorm,
+          glAccountNorm,
           companyCode: typeof line.company_code === 'string' ? line.company_code : 'NA',
           postingDate: typeof line.posting_date === 'string' ? line.posting_date : undefined,
           amount: numberOrZero(line.amount),
@@ -263,20 +266,30 @@ export default function ShowBudgetExpense() {
     const loadData = async () => {
       try {
         setLoading(true);
-        const [showsData, budgetsData, ordersData, financeData, internalOrdersData, teamData] = await Promise.all([
-          dbGet('shows'),
-          dbGet('showBudgets'),
-          dbGet('showOrders'),
-          dbGet('finance/glByAufnrGl'),
-          dbGet('finance/internalSalesOrders'),
-          dbGet('teamMembers'),
-        ]);
+        const [showsData, budgetsData, ordersData, financeData, internalOrdersData, teamData, expensesData] =
+          await Promise.all([
+            dbGet('shows'),
+            dbGet('showBudgets'),
+            dbGet('showOrders'),
+            dbGet('finance/glByAufnrGl'),
+            dbGet('finance/internalSalesOrders'),
+            dbGet('teamMembers'),
+            dbGet('finance/expenses'),
+          ]);
         const showList: Show[] = showsData ? Object.values(showsData) : [];
         const budgetMap = budgetsData ?? {};
         const orders: ShowOrder[] = ordersData ? Object.values(ordersData) : [];
         const confirmedOrders = orders.filter((order) => order.dealerConfirm || order.status === 'Approved');
         const teamMembers: TeamMember[] = teamData ? Object.values(teamData) : [];
         const financeLines = parseFinanceLines(financeData);
+        const allowedGlCodes = new Set(
+          expensesData
+            ? Object.values(expensesData as Record<string, { glCode?: string }>)
+                .map((item) => item?.glCode?.trim())
+                .filter((gl): gl is string => Boolean(gl))
+                .map((gl) => leadingZeroSafe(gl))
+            : []
+        );
         const showsById = showList.reduce<Record<string, Show>>((acc, show) => {
           if (show.id) acc[show.id] = show;
           return acc;
@@ -333,6 +346,7 @@ export default function ShowBudgetExpense() {
         }, {});
 
         const actualsByShow = financeLines.reduce<Record<string, { dealer: number; factory: number }>>((acc, line) => {
+          if (!allowedGlCodes.has(line.glAccountNorm)) return acc;
           if (getYearFromDate(line.postingDate) !== 2025) return acc;
           const mappedShow = aufnrShowMap[line.aufnrNorm];
           if (!mappedShow?.showId) return acc;

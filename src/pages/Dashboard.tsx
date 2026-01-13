@@ -30,6 +30,7 @@ type InternalSalesOrderRecord = {
 
 type FinanceLine = {
   aufnrNorm: string;
+  glAccountNorm: string;
   companyCode: string;
   postingDate?: string;
   amount: number;
@@ -51,15 +52,17 @@ export default function Dashboard() {
 
   const loadData = async () => {
     try {
-      const [showsData, membersData, ordersData, budgetsData, internalOrdersData, tasksData, financeData] = await Promise.all([
-        dbGet('shows'),
-        dbGet('teamMembers'),
-        dbGet('showOrders'),
-        dbGet('showBudgets'),
-        dbGet('finance/internalSalesOrders'),
-        dbGet('showTasks'),
-        dbGet('finance/glByAufnrGl'),
-      ]);
+      const [showsData, membersData, ordersData, budgetsData, internalOrdersData, tasksData, financeData, expensesData] =
+        await Promise.all([
+          dbGet('shows'),
+          dbGet('teamMembers'),
+          dbGet('showOrders'),
+          dbGet('showBudgets'),
+          dbGet('finance/internalSalesOrders'),
+          dbGet('showTasks'),
+          dbGet('finance/glByAufnrGl'),
+          dbGet('finance/expenses'),
+        ]);
 
       const showList = showsData ? Object.values(showsData) : [];
       setShows(showList);
@@ -79,7 +82,16 @@ export default function Dashboard() {
       }, {} as Record<string, Show>);
       const aufnrShowMap = buildAufnrShowMap(internalOrdersData, showsById);
       const financeLines = parseFinanceLines(financeData);
+      const allowedGlCodes = new Set(
+        expensesData
+          ? Object.values(expensesData as Record<string, { glCode?: string }>)
+              .map((item) => item?.glCode?.trim())
+              .filter((gl): gl is string => Boolean(gl))
+              .map((gl) => leadingZeroSafe(gl))
+          : []
+      );
       const actuals = financeLines.reduce((acc, line) => {
+        if (!allowedGlCodes.has(line.glAccountNorm)) return acc;
         const mappedShow = aufnrShowMap[line.aufnrNorm];
         if (!mappedShow?.showId) return acc;
         const year = getYearFromDate(line.postingDate);
@@ -150,8 +162,9 @@ export default function Dashboard() {
       if (!glBuckets || typeof glBuckets !== 'object') return;
       const aufnrNorm = leadingZeroSafe(aufnrKey);
 
-      Object.values(glBuckets as Record<string, unknown>).forEach((glValue) => {
+      Object.entries(glBuckets as Record<string, unknown>).forEach(([glKey, glValue]) => {
         if (!glValue || typeof glValue !== 'object') return;
+        const glAccountNorm = leadingZeroSafe(glKey);
         const glBucket = glValue as Record<string, unknown>;
         if (!glBucket.lines || typeof glBucket.lines !== 'object') return;
 
@@ -160,6 +173,7 @@ export default function Dashboard() {
           const line = rawLine as Record<string, unknown>;
           lines.push({
             aufnrNorm,
+            glAccountNorm,
             companyCode: typeof line.company_code === 'string' ? line.company_code : 'NA',
             postingDate: typeof line.posting_date === 'string' ? line.posting_date : undefined,
             amount: numberOrZero(line.amount),
