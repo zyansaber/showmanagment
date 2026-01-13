@@ -111,6 +111,16 @@ const numberOrZero = (value: unknown) => {
   return 0;
 };
 
+const buildValidGlSet = (expensesData: unknown) => {
+  if (!expensesData || typeof expensesData !== 'object') return new Set<string>();
+  return new Set(
+    Object.values(expensesData as Record<string, { glCode?: string }>)
+      .map((item) => item?.glCode?.trim())
+      .filter(Boolean)
+      .map((code) => leadingZeroSafe(code as string))
+  );
+};
+
 const parseDateSafe = (value: string | undefined | null) => {
   if (!value) return null;
   const parsed = new Date(value);
@@ -149,17 +159,19 @@ type FinanceLine = {
   amount: number;
 };
 
-const parseFinanceLines = (data: unknown): FinanceLine[] => {
+const parseFinanceLines = (data: unknown, validGlAccounts: Set<string>): FinanceLine[] => {
   if (!data || typeof data !== 'object') return [];
   const lines: FinanceLine[] = [];
   const root = data as Record<string, unknown>;
+  const isAllowedGl = (glKey: string) => validGlAccounts.size > 0 && validGlAccounts.has(leadingZeroSafe(glKey));
 
   Object.entries(root).forEach(([aufnrKey, glBuckets]) => {
     if (!glBuckets || typeof glBuckets !== 'object') return;
     const aufnrNorm = leadingZeroSafe(aufnrKey);
 
-    Object.values(glBuckets as Record<string, unknown>).forEach((glValue) => {
+    Object.entries(glBuckets as Record<string, unknown>).forEach(([glKey, glValue]) => {
       if (!glValue || typeof glValue !== 'object') return;
+      if (!isAllowedGl(glKey)) return;
       const glBucket = glValue as Record<string, unknown>;
       if (!glBucket.lines || typeof glBucket.lines !== 'object') return;
 
@@ -263,20 +275,23 @@ export default function ShowBudgetExpense() {
     const loadData = async () => {
       try {
         setLoading(true);
-        const [showsData, budgetsData, ordersData, financeData, internalOrdersData, teamData] = await Promise.all([
+        const [showsData, budgetsData, ordersData, financeData, internalOrdersData, teamData, expensesData] =
+          await Promise.all([
           dbGet('shows'),
           dbGet('showBudgets'),
           dbGet('showOrders'),
           dbGet('finance/glByAufnrGl'),
           dbGet('finance/internalSalesOrders'),
           dbGet('teamMembers'),
+          dbGet('finance/expenses'),
         ]);
         const showList: Show[] = showsData ? Object.values(showsData) : [];
         const budgetMap = budgetsData ?? {};
         const orders: ShowOrder[] = ordersData ? Object.values(ordersData) : [];
         const confirmedOrders = orders.filter((order) => order.dealerConfirm || order.status === 'Approved');
         const teamMembers: TeamMember[] = teamData ? Object.values(teamData) : [];
-        const financeLines = parseFinanceLines(financeData);
+        const validGlAccounts = buildValidGlSet(expensesData);
+        const financeLines = parseFinanceLines(financeData, validGlAccounts);
         const showsById = showList.reduce<Record<string, Show>>((acc, show) => {
           if (show.id) acc[show.id] = show;
           return acc;
