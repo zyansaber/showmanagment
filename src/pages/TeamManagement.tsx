@@ -44,7 +44,13 @@ export default function TeamManagement() {
         dbGet('showOrders')
       ]);
 
-      setTeamMembers(membersData ? Object.values(membersData) : []);
+      const memberEntries = membersData ? Object.entries(membersData as Record<string, TeamMember>) : [];
+      const normalizedMembers = memberEntries.map(([key, value]) => {
+        const memberId =
+          typeof value.memberId === 'string' && value.memberId.trim().length > 0 ? value.memberId : key;
+        return { ...value, memberId };
+      });
+      setTeamMembers(normalizedMembers);
       setShows(showsData ? Object.values(showsData) : []);
       setOrders(ordersData ? Object.values(ordersData) : []);
     } catch (error) {
@@ -83,6 +89,10 @@ export default function TeamManagement() {
   };
 
   const handleToggleActive = async (memberId: string, currentFlag: 0 | 1) => {
+    if (!memberId) {
+      console.error('Missing team member ID while toggling status.');
+      return;
+    }
     try {
       const newFlag = currentFlag === 1 ? 0 : 1;
       await dbUpdate(`teamMembers/${memberId}`, { activeFlag: newFlag });
@@ -95,6 +105,10 @@ export default function TeamManagement() {
   };
 
   const handleEmailEditToggle = async (member: TeamMember) => {
+    if (!member.memberId) {
+      console.error('Missing team member ID while editing email.');
+      return;
+    }
     if (editingEmailMemberId === member.memberId) {
       try {
         await dbUpdate(`teamMembers/${member.memberId}`, { email: emailDraft });
@@ -126,11 +140,19 @@ export default function TeamManagement() {
   };
 
   const handleRoleEdit = (member: TeamMember) => {
+    if (!member.memberId) {
+      console.error('Missing team member ID while editing role.');
+      return;
+    }
     setEditingRoleMemberId(member.memberId);
     setRoleDraft(member.role);
   };
 
   const handleSaveRole = async (memberId: string) => {
+    if (!memberId) {
+      console.error('Missing team member ID while saving role.');
+      return;
+    }
     try {
       await dbUpdate(`teamMembers/${memberId}`, { role: roleDraft });
       setTeamMembers((prev) =>
