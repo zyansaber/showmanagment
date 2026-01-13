@@ -291,6 +291,7 @@ export default function FinanceDetail() {
   const [members, setMembers] = useState<PersonOption[]>([]);
   const [memberFilter, setMemberFilter] = useState<string>(ALL_MEMBERS);
   const [memberTokensLookup, setMemberTokensLookup] = useState<Record<string, string[]>>({});
+  const allowedGlCodes = useMemo(() => new Set(Object.keys(glNameLookup)), [glNameLookup]);
 
   const loadData = async () => {
     try {
@@ -437,6 +438,7 @@ export default function FinanceDetail() {
   const summaryTotals = useMemo(() => {
     return filteredSummaries.reduce(
       (acc, row) => {
+        if (!allowedGlCodes.has(row.glAccountNorm)) return acc;
         acc.net += row.netAmount;
         acc.debit += row.debitAmount;
         acc.credit += row.creditAmount;
@@ -445,7 +447,7 @@ export default function FinanceDetail() {
       },
       { net: 0, debit: 0, credit: 0, lines: 0 }
     );
-  }, [filteredSummaries]);
+  }, [filteredSummaries, allowedGlCodes]);
 
   const clearFilters = () =>
     setFilters({
@@ -581,6 +583,7 @@ export default function FinanceDetail() {
             <CardContent className="grid gap-3 sm:grid-cols-2">
               {[...new Set(summaries.map((row) => row.glAccountNorm))].map((gl) => {
                 const isActive = filters.glCode === gl;
+                const isIncluded = allowedGlCodes.has(gl);
                 const glName = glNameLookup[gl] || 'Undefined GL Code';
                 const glNet = summaries
                   .filter((row) => row.glAccountNorm === gl && (!filters.company || row.companyCode === filters.company))
@@ -589,13 +592,20 @@ export default function FinanceDetail() {
                   <button
                     key={gl}
                     className={`rounded-lg border p-3 text-left shadow-sm transition hover:shadow-md ${
-                      isActive ? 'border-blue-500 ring-2 ring-blue-200 bg-blue-50' : 'border-slate-200 bg-white'
+                      isActive
+                        ? 'border-blue-500 ring-2 ring-blue-200 bg-blue-50'
+                        : isIncluded
+                          ? 'border-emerald-300 bg-emerald-50/40'
+                          : 'border-slate-200 bg-white'
                     }`}
                     onClick={() => setFilters((prev) => ({ ...prev, glCode: isActive ? '' : gl }))}
                   >
                     <div className="flex items-center justify-between">
                       <p className="text-sm font-semibold text-slate-900">{gl || '—'}</p>
-                      {isActive && <Badge variant="secondary">Selected</Badge>}
+                      <div className="flex items-center gap-2">
+                        {isIncluded && <Badge variant="outline">Included</Badge>}
+                        {isActive && <Badge variant="secondary">Selected</Badge>}
+                      </div>
                     </div>
                     <p className="text-xs text-slate-600">备注: {glName}</p>
                     <p className="mt-2 text-sm font-semibold">{formatAmountStyled(glNet)}</p>
@@ -614,7 +624,12 @@ export default function FinanceDetail() {
               {['3110', '3120'].map((company) => {
                 const isActive = filters.company === company;
                 const companyNet = summaries
-                  .filter((row) => row.companyCode === company && (!filters.glCode || row.glAccountNorm === filters.glCode))
+                  .filter(
+                    (row) =>
+                      row.companyCode === company &&
+                      (!filters.glCode || row.glAccountNorm === filters.glCode) &&
+                      allowedGlCodes.has(row.glAccountNorm)
+                  )
                   .reduce((acc, row) => acc + row.netAmount, 0);
                 const label = company === '3110' ? 'Factory Cost' : 'Dealer Cost';
                 return (
