@@ -51,7 +51,8 @@ export default function Dashboard() {
 
   const loadData = async () => {
     try {
-      const [showsData, membersData, ordersData, budgetsData, internalOrdersData, tasksData, financeData] = await Promise.all([
+      const [showsData, membersData, ordersData, budgetsData, internalOrdersData, tasksData, financeData, expensesData] =
+        await Promise.all([
         dbGet('shows'),
         dbGet('teamMembers'),
         dbGet('showOrders'),
@@ -59,6 +60,7 @@ export default function Dashboard() {
         dbGet('finance/internalSalesOrders'),
         dbGet('showTasks'),
         dbGet('finance/glByAufnrGl'),
+        dbGet('finance/expenses'),
       ]);
 
       const showList = showsData ? Object.values(showsData) : [];
@@ -78,7 +80,8 @@ export default function Dashboard() {
         return acc;
       }, {} as Record<string, Show>);
       const aufnrShowMap = buildAufnrShowMap(internalOrdersData, showsById);
-      const financeLines = parseFinanceLines(financeData);
+      const validGlAccounts = buildValidGlSet(expensesData);
+      const financeLines = parseFinanceLines(financeData, validGlAccounts);
       const actuals = financeLines.reduce((acc, line) => {
         const mappedShow = aufnrShowMap[line.aufnrNorm];
         if (!mappedShow?.showId) return acc;
@@ -141,17 +144,29 @@ export default function Dashboard() {
     return 0;
   };
 
-  const parseFinanceLines = (data: unknown): FinanceLine[] => {
+  const buildValidGlSet = (expensesData: unknown) => {
+    if (!expensesData || typeof expensesData !== 'object') return new Set<string>();
+    return new Set(
+      Object.values(expensesData as Record<string, { glCode?: string }>)
+        .map((item) => item?.glCode?.trim())
+        .filter(Boolean)
+        .map((code) => leadingZeroSafe(code as string))
+    );
+  };
+
+  const parseFinanceLines = (data: unknown, validGlAccounts: Set<string>): FinanceLine[] => {
     if (!data || typeof data !== 'object') return [];
     const lines: FinanceLine[] = [];
     const root = data as Record<string, unknown>;
+    const isAllowedGl = (glKey: string) => validGlAccounts.size > 0 && validGlAccounts.has(leadingZeroSafe(glKey));
 
     Object.entries(root).forEach(([aufnrKey, glBuckets]) => {
       if (!glBuckets || typeof glBuckets !== 'object') return;
       const aufnrNorm = leadingZeroSafe(aufnrKey);
 
-      Object.values(glBuckets as Record<string, unknown>).forEach((glValue) => {
+      Object.entries(glBuckets as Record<string, unknown>).forEach(([glKey, glValue]) => {
         if (!glValue || typeof glValue !== 'object') return;
+        if (!isAllowedGl(glKey)) return;
         const glBucket = glValue as Record<string, unknown>;
         if (!glBucket.lines || typeof glBucket.lines !== 'object') return;
 
