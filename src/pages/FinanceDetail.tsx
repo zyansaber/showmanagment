@@ -100,16 +100,6 @@ const numberOrZero = (value: unknown) => {
   return 0;
 };
 
-const buildValidGlSet = (expensesData: unknown) => {
-  if (!expensesData || typeof expensesData !== 'object') return new Set<string>();
-  return new Set(
-    Object.values(expensesData as Record<string, ExpenseItem>)
-      .map((item) => item?.glCode?.trim())
-      .filter(Boolean)
-      .map((code) => leadingZeroSafe(code as string))
-  );
-};
-
 const sanitizeText = (text: string | undefined) => (text ?? '').toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ');
 
 const tokenizeText = (text: string | undefined) =>
@@ -335,27 +325,22 @@ export default function FinanceDetail() {
             return acc;
           }, {} as Record<string, string>)
         : {};
-      const validGlAccounts = buildValidGlSet(expensesData);
 
       const aufnrShowMap = buildAufnrShowMap(ordersData, shows);
 
-      const annotateSummary = parsed.summaries
-        .filter((row) => validGlAccounts.has(row.glAccountNorm))
-        .map((row) => ({
-          ...row,
-          glName: glNames[row.glAccountNorm] || 'Undefined GL Code',
-          showId: aufnrShowMap[row.aufnrNorm]?.showId,
-          showName: aufnrShowMap[row.aufnrNorm]?.showName || aufnrShowMap[row.aufnrNorm]?.showId,
-        }));
+      const annotateSummary = parsed.summaries.map((row) => ({
+        ...row,
+        glName: glNames[row.glAccountNorm] || 'Undefined GL Code',
+        showId: aufnrShowMap[row.aufnrNorm]?.showId,
+        showName: aufnrShowMap[row.aufnrNorm]?.showName || aufnrShowMap[row.aufnrNorm]?.showId,
+      }));
 
-      const annotateLines = parsed.lines
-        .filter((row) => validGlAccounts.has(row.glAccountNorm))
-        .map((row) => ({
-          ...row,
-          glName: glNames[row.glAccountNorm] || 'Undefined GL Code',
-          showId: aufnrShowMap[row.aufnrNorm]?.showId,
-          showName: aufnrShowMap[row.aufnrNorm]?.showName || aufnrShowMap[row.aufnrNorm]?.showId,
-        }));
+      const annotateLines = parsed.lines.map((row) => ({
+        ...row,
+        glName: glNames[row.glAccountNorm] || 'Undefined GL Code',
+        showId: aufnrShowMap[row.aufnrNorm]?.showId,
+        showName: aufnrShowMap[row.aufnrNorm]?.showName || aufnrShowMap[row.aufnrNorm]?.showId,
+      }));
 
       setShowLookup(shows);
       setGlNameLookup(glNames);
