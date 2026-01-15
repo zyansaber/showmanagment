@@ -7,7 +7,8 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { dbGet, dbUpdate, schedulingDbGet } from '@/lib/firebase';
+import { Textarea } from '@/components/ui/textarea';
+import { dbGet, dbSet, dbUpdate, schedulingDbGet } from '@/lib/firebase';
 import { useAuth } from '@/context/AuthContext';
 import type { ScheduleOrder } from '@/types';
 
@@ -43,6 +44,36 @@ type ProcessTemplate = {
   name: string;
 };
 
+type OrderStatusOption = {
+  id: string;
+  label: string;
+  description: string;
+  color: string;
+  sortOrder: number;
+};
+
+const STATUS_SWATCHES = [
+  '#FECACA',
+  '#FDE68A',
+  '#BBF7D0',
+  '#BFDBFE',
+  '#C7D2FE',
+  '#E9D5FF',
+  '#FBCFE8',
+  '#CBD5F5',
+  '#E2E8F0',
+  '#99F6E4',
+  '#F9A8D4',
+  '#FDBA74',
+];
+
+const createStatusId = () => {
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+    return crypto.randomUUID();
+  }
+  return `status-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+};
+
 export default function AdminSettings() {
   const { accounts, createAccount, updateAccount, deleteAccount, user } = useAuth();
   const [formState, setFormState] = useState(emptyAccountForm);
@@ -55,14 +86,18 @@ export default function AdminSettings() {
   const [showSearchTerm, setShowSearchTerm] = useState('');
   const [showSortKey, setShowSortKey] = useState<'name' | 'startDate' | 'finishDate'>('startDate');
   const [showSortDirection, setShowSortDirection] = useState<'asc' | 'desc'>('desc');
+  const [statusOptions, setStatusOptions] = useState<OrderStatusOption[]>([]);
+  const [statusDraft, setStatusDraft] = useState({ label: '', description: '', color: '#E2E8F0' });
+  const [savingStatusOptions, setSavingStatusOptions] = useState(false);
 
   const loadShowData = async () => {
     try {
       setLoadingShows(true);
-      const [showsData, templatesData, scheduleData] = await Promise.all([
+      const [showsData, templatesData, scheduleData, statusData] = await Promise.all([
         dbGet('shows'),
         dbGet('processTemplates'),
         schedulingDbGet('schedule'),
+        dbGet('orderStatusOptions'),
       ]);
       const showList = showsData
         ? (Object.entries(showsData) as Array<[string, Omit<ShowRecord, 'firebaseKey'>]>).map(
@@ -90,6 +125,16 @@ export default function AdminSettings() {
       } else {
         setDealerOptions([]);
       }
+      const statusList = statusData
+        ? (Object.entries(statusData as Record<string, Partial<OrderStatusOption>>).map(([id, value]) => ({
+            id,
+            label: value.label || '',
+            description: value.description || '',
+            color: value.color || '#E2E8F0',
+            sortOrder: typeof value.sortOrder === 'number' ? value.sortOrder : 0,
+          })) as OrderStatusOption[])
+        : [];
+      setStatusOptions(statusList.sort((a, b) => a.sortOrder - b.sortOrder));
       setShowSettings(() => {
         const next: Record<string, ShowSettings> = {};
         showList.forEach((show) => {
@@ -198,6 +243,71 @@ export default function AdminSettings() {
     }));
   };
 
+  const handleStatusOptionChange = (id: string, updates: Partial<OrderStatusOption>) => {
+    setStatusOptions((prev) =>
+      prev.map((option) =>
+        option.id === id
+          ? {
+              ...option,
+              ...updates,
+            }
+          : option
+      )
+    );
+  };
+
+  const handleAddStatusOption = () => {
+    if (!statusDraft.label.trim()) {
+      toast.error('Please add a status name');
+      return;
+    }
+    setStatusOptions((prev) => [
+      ...prev,
+      {
+        id: createStatusId(),
+        label: statusDraft.label.trim(),
+        description: statusDraft.description.trim(),
+        color: statusDraft.color,
+        sortOrder: prev.length,
+      },
+    ]);
+    setStatusDraft({ label: '', description: '', color: '#E2E8F0' });
+  };
+
+  const handleRemoveStatusOption = (id: string) => {
+    setStatusOptions((prev) => prev.filter((option) => option.id !== id));
+  };
+
+  const handleSaveStatusOptions = async () => {
+    try {
+      setSavingStatusOptions(true);
+      const payload = statusOptions.reduce<Record<string, Omit<OrderStatusOption, 'id'>>>(
+        (acc, option, index) => {
+          acc[option.id] = {
+            label: option.label.trim(),
+            description: option.description.trim(),
+            color: option.color,
+            sortOrder: index,
+          };
+          return acc;
+        },
+        {}
+      );
+      await dbSet('orderStatusOptions', payload as unknown as Record<string, unknown>);
+      setStatusOptions((prev) =>
+        prev
+          .map((option, index) => ({ ...option, sortOrder: index }))
+          .sort((a, b) => a.sortOrder - b.sortOrder)
+      );
+      toast.success('Order status options saved');
+    } catch (error) {
+      console.error(error);
+      toast.error('Failed to save order status options');
+    } finally {
+      setSavingStatusOptions(false);
+    }
+  };
+
   const handleSaveShowSettings = async (show: ShowRecord) => {
     const settings = showSettings[show.id];
     if (!settings) return;
@@ -297,6 +407,147 @@ export default function AdminSettings() {
                   </TableBody>
                 </Table>
               </div>
+            </div>
+          </CardContent>
+        </Card>
+      </section>
+
+      <section>
+        <Card>
+          <CardHeader>
+            <CardTitle>Order Status Legend</CardTitle>
+            <CardDescription>
+              Define the status colours and meanings used on the Orders &amp; Sales page. These colours also tint the
+              entire row in the orders table.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            <div className="grid gap-4 md:grid-cols-[1.2fr_1.8fr_0.7fr_auto]">
+              <div className="space-y-2">
+                <Label>Status name</Label>
+                <Input
+                  placeholder="e.g. Awaiting deposit"
+                  value={statusDraft.label}
+                  onChange={(event) => setStatusDraft((prev) => ({ ...prev, label: event.target.value }))}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Status meaning</Label>
+                <Textarea
+                  placeholder="Explain what this colour means..."
+                  value={statusDraft.description}
+                  onChange={(event) => setStatusDraft((prev) => ({ ...prev, description: event.target.value }))}
+                  rows={2}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Colour</Label>
+                <div className="flex items-center gap-2">
+                  <Input
+                    type="color"
+                    value={statusDraft.color}
+                    onChange={(event) => setStatusDraft((prev) => ({ ...prev, color: event.target.value }))}
+                    className="h-10 w-12 p-1"
+                  />
+                  <Input
+                    value={statusDraft.color}
+                    onChange={(event) => setStatusDraft((prev) => ({ ...prev, color: event.target.value }))}
+                  />
+                </div>
+              </div>
+              <div className="flex items-end">
+                <Button onClick={handleAddStatusOption}>Add status</Button>
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2 text-xs text-slate-500">
+              {STATUS_SWATCHES.map((swatch) => (
+                <button
+                  key={swatch}
+                  type="button"
+                  onClick={() => setStatusDraft((prev) => ({ ...prev, color: swatch }))}
+                  className="h-6 w-6 rounded-full border border-slate-200"
+                  style={{ backgroundColor: swatch }}
+                  aria-label={`Pick ${swatch}`}
+                />
+              ))}
+            </div>
+            <div className="space-y-4">
+              {statusOptions.length === 0 ? (
+                <p className="text-sm text-slate-500">
+                  No order statuses yet. Add a status above to start building your colour legend.
+                </p>
+              ) : (
+                statusOptions.map((option) => (
+                  <div key={option.id} className="rounded-lg border border-slate-200 p-4">
+                    <div className="grid gap-4 lg:grid-cols-[auto_1fr_2fr_1fr_auto] lg:items-start">
+                      <div
+                        className="h-10 w-10 rounded-full border border-slate-200"
+                        style={{ backgroundColor: option.color }}
+                      />
+                      <div className="space-y-2">
+                        <Label>Status name</Label>
+                        <Input
+                          value={option.label}
+                          onChange={(event) =>
+                            handleStatusOptionChange(option.id, { label: event.target.value })
+                          }
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Status meaning</Label>
+                        <Textarea
+                          value={option.description}
+                          onChange={(event) =>
+                            handleStatusOptionChange(option.id, { description: event.target.value })
+                          }
+                          rows={2}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Colour</Label>
+                        <div className="flex items-center gap-2">
+                          <Input
+                            type="color"
+                            value={option.color}
+                            onChange={(event) =>
+                              handleStatusOptionChange(option.id, { color: event.target.value })
+                            }
+                            className="h-10 w-12 p-1"
+                          />
+                          <Input
+                            value={option.color}
+                            onChange={(event) =>
+                              handleStatusOptionChange(option.id, { color: event.target.value })
+                            }
+                          />
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-end">
+                        <Button variant="outline" onClick={() => handleRemoveStatusOption(option.id)}>
+                          Remove
+                        </Button>
+                      </div>
+                    </div>
+                    <div className="mt-3 flex flex-wrap gap-2 text-xs text-slate-500">
+                      {STATUS_SWATCHES.map((swatch) => (
+                        <button
+                          key={`${option.id}-${swatch}`}
+                          type="button"
+                          onClick={() => handleStatusOptionChange(option.id, { color: swatch })}
+                          className="h-6 w-6 rounded-full border border-slate-200"
+                          style={{ backgroundColor: swatch }}
+                          aria-label={`Pick ${swatch}`}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+            <div className="flex justify-end">
+              <Button onClick={handleSaveStatusOptions} disabled={savingStatusOptions}>
+                {savingStatusOptions ? 'Saving…' : 'Save status legend'}
+              </Button>
             </div>
           </CardContent>
         </Card>
