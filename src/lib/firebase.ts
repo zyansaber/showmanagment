@@ -2,6 +2,7 @@ import { initializeApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
 import { getDatabase, ref, set, get, update, remove, push, query, orderByChild, equalTo } from "firebase/database";
 import { getAnalytics } from "firebase/analytics";
+import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
 
 // Primary Firebase (Show Management)
 const firebaseConfig = {
@@ -33,6 +34,7 @@ export const auth = getAuth(app);
 export const database = getDatabase(app);
 export const schedulingDatabase = getDatabase(schedulingApp);
 export const analytics = getAnalytics(app);
+export const storage = getStorage(app);
 
 // Database helper functions for primary Firebase
 export const dbRef = (path: string) => ref(database, path);
@@ -74,4 +76,10 @@ export const schedulingDbRemove = (path: string) => remove(ref(schedulingDatabas
 export const schedulingDbPush = (path: string, data: Record<string, unknown>) => {
   const newRef = push(ref(schedulingDatabase, path));
   return set(newRef, data).then(() => newRef.key);
+};
+
+export const uploadStorageFile = async (path: string, file: File) => {
+  const fileRef = storageRef(storage, path);
+  await uploadBytes(fileRef, file);
+  return getDownloadURL(fileRef);
 };
