@@ -8,7 +8,6 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
-import OrderCommentsEditor from '@/components/OrderCommentsEditor';
 import { dbGet, dbSet, dbUpdate, schedulingDbGet } from '@/lib/firebase';
 import type { ScheduleOrder, Show, ShowOrder, TeamMember } from '@/types';
 import { toast } from 'sonner';
@@ -163,7 +162,6 @@ export default function OrdersAndSales() {
     contractValue: 0,
     contractNumber: '',
     handoverDealer: '',
-    orderComments: '',
   });
   const [statusFilter, setStatusFilter] = useState<'All' | DealerStatus>('All');
 
@@ -566,7 +564,6 @@ export default function OrdersAndSales() {
         contractNumber: newOrder.contractNumber?.trim() || '',
         handoverDealer: newOrder.handoverDealer?.trim() || '',
         status: 'Pending',
-        orderComments: newOrder.orderComments || '',
       };
 
       await dbSet(`showOrders/${order.id}`, order as unknown as Record<string, unknown>);
@@ -584,7 +581,6 @@ export default function OrdersAndSales() {
         contractValue: 0,
         contractNumber: '',
         handoverDealer: '',
-        orderComments: '',
       });
       toast.success('Order added successfully');
     } catch (err) {
@@ -703,311 +699,295 @@ export default function OrdersAndSales() {
                       Add Order
                     </Button>
                   </DialogTrigger>
-                  <DialogContent className="max-w-5xl">
+                  <DialogContent>
                     <DialogHeader>
                       <DialogTitle>Add New Order</DialogTitle>
                       <DialogDescription>Link a new order to an existing show</DialogDescription>
                     </DialogHeader>
-                    <div className="grid gap-6 py-2 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-                      <div className="space-y-4">
-                        <div className="space-y-2">
-                          <Label>Show *</Label>
-                          <Select
-                            value={newOrder.showId}
-                            onValueChange={(value) => setNewOrder({ ...newOrder, showId: value, salesperson: '' })}
-                          >
-                            <SelectTrigger>
-                              <SelectValue placeholder="Select show" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <div className="sticky top-0 z-10 flex items-center gap-2 border-b bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700">
-                                <Sparkles className="h-4 w-4 animate-pulse" />
-                                Current shows are highlighted first
-                              </div>
-                              {currentShowOptions.map((show) => (
-                                <SelectItem key={show.id} value={show.id}>
-                                  <div className="flex items-start justify-between gap-3">
-                                    <div className="flex flex-col">
-                                      <span className="font-medium">{show.name}</span>
-                                      <span className="text-xs text-muted-foreground">{formatShowDates(show)}</span>
-                                    </div>
-                                    <span
-                                      className={cn(
-                                        'rounded-full px-2 py-1 text-[11px] font-semibold',
-                                        showStatusStyles[show.timelineStatus]
-                                      )}
-                                    >
-                                      Current
-                                    </span>
+                    <div className="space-y-4 py-2">
+                      <div className="space-y-2">
+                        <Label>Show *</Label>
+                        <Select
+                          value={newOrder.showId}
+                          onValueChange={(value) => setNewOrder({ ...newOrder, showId: value, salesperson: '' })}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select show" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <div className="sticky top-0 z-10 flex items-center gap-2 border-b bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700">
+                              <Sparkles className="h-4 w-4 animate-pulse" />
+                              Current shows are highlighted first
+                            </div>
+                            {currentShowOptions.map((show) => (
+                              <SelectItem key={show.id} value={show.id}>
+                                <div className="flex items-start justify-between gap-3">
+                                  <div className="flex flex-col">
+                                    <span className="font-medium">{show.name}</span>
+                                    <span className="text-xs text-muted-foreground">{formatShowDates(show)}</span>
                                   </div>
-                                </SelectItem>
-                              ))}
-                              {currentShowOptions.length > 0 && (
-                                <div className="px-3 pb-1 pt-3 text-[11px] uppercase tracking-wide text-muted-foreground">
-                                  Scheduled & finished
+                                  <span
+                                    className={cn(
+                                      'rounded-full px-2 py-1 text-[11px] font-semibold',
+                                      showStatusStyles[show.timelineStatus]
+                                    )}
+                                  >
+                                    Current
+                                  </span>
                                 </div>
-                              )}
-                              {otherShowOptions.map((show) => (
-                                <SelectItem key={show.id} value={show.id}>
-                                  <div className="flex items-start justify-between gap-3">
-                                    <div className="flex flex-col">
-                                      <span className="font-medium">{show.name}</span>
-                                      <span className="text-xs text-muted-foreground">{formatShowDates(show)}</span>
-                                    </div>
-                                    <span
-                                      className={cn(
-                                        'rounded-full px-2 py-1 text-[11px] font-semibold',
-                                        showStatusStyles[show.timelineStatus]
-                                      )}
-                                    >
-                                      {show.timelineStatus}
-                                    </span>
+                              </SelectItem>
+                            ))}
+                            {currentShowOptions.length > 0 && (
+                              <div className="px-3 pb-1 pt-3 text-[11px] uppercase tracking-wide text-muted-foreground">
+                                Scheduled & finished
+                              </div>
+                            )}
+                            {otherShowOptions.map((show) => (
+                              <SelectItem key={show.id} value={show.id}>
+                                <div className="flex items-start justify-between gap-3">
+                                  <div className="flex flex-col">
+                                    <span className="font-medium">{show.name}</span>
+                                    <span className="text-xs text-muted-foreground">{formatShowDates(show)}</span>
                                   </div>
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-
-                        <div className="space-y-2">
-                          <Label>Handover Dealer *</Label>
-                          <Select
-                            value={newOrder.handoverDealer || ''}
-                            onValueChange={(value) => setNewOrder({ ...newOrder, handoverDealer: value })}
-                            disabled={handoverDealerChoices.length === 0}
-                          >
-                            <SelectTrigger>
-                              <SelectValue placeholder="Select handover dealer" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {handoverDealerChoices.map((dealer) => (
-                                <SelectItem key={dealer} value={dealer}>
-                                  {dealer}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                          {handoverDealerChoices.length === 0 && (
-                            <p className="text-xs text-muted-foreground">
-                              Dealer list unavailable. Please try again after schedule sync.
-                            </p>
-                          )}
-                        </div>
-
-                        <div className="space-y-2">
-                          <Label>Model *</Label>
-                          <Popover open={isModelPickerOpen} onOpenChange={setIsModelPickerOpen}>
-                            <PopoverTrigger asChild>
-                              <Button
-                                variant="outline"
-                                role="combobox"
-                                aria-expanded={isModelPickerOpen}
-                                className="w-full justify-between"
-                                disabled={modelOptions.length === 0}
-                              >
-                                {newOrder.model || 'Select model'}
-                              </Button>
-                            </PopoverTrigger>
-                            <PopoverContent className="w-[320px] p-0">
-                              <Command>
-                                <CommandInput placeholder="Search model..." />
-                                <CommandList>
-                                  <CommandEmpty>No model found.</CommandEmpty>
-                                  <CommandGroup heading="Schedule models">
-                                    {modelOptions.map((model) => (
-                                      <CommandItem
-                                        key={model}
-                                        value={model}
-                                        onSelect={(value) => {
-                                          const defaultValue = contractPriceMap[value.toLowerCase()] ?? 0;
-                                          setNewOrder({ ...newOrder, model: value, contractValue: defaultValue });
-                                          setIsModelPickerOpen(false);
-                                        }}
-                                      >
-                                        <Check
-                                          className={cn(
-                                            'mr-2 h-4 w-4',
-                                            newOrder.model === model ? 'opacity-100' : 'opacity-0'
-                                          )}
-                                        />
-                                        {model}
-                                      </CommandItem>
-                                    ))}
-                                  </CommandGroup>
-                                </CommandList>
-                              </Command>
-                            </PopoverContent>
-                          </Popover>
-                          {newOrder.model && (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="mt-2"
-                              onClick={() => setNewOrder({ ...newOrder, model: '', contractValue: 0 })}
-                            >
-                              Clear selection
-                            </Button>
-                          )}
-                          {modelOptions.length === 0 && (
-                            <p className="text-xs text-muted-foreground">
-                              Model list unavailable. Please try again after schedule sync.
-                            </p>
-                          )}
-                        </div>
-
-                        <div className="space-y-2">
-                          <Label>Contract Number *</Label>
-                          <Input
-                            placeholder="Enter contract number"
-                            value={newOrder.contractNumber || ''}
-                            onChange={(event) => setNewOrder({ ...newOrder, contractNumber: event.target.value })}
-                          />
-                        </div>
-
-                        <div className="space-y-2">
-                          <Label>Contract Value *</Label>
-                          <Input
-                            type="number"
-                            placeholder="Standard contract value"
-                            value={newOrder.contractValue ?? ''}
-                            onChange={(event) =>
-                              setNewOrder({ ...newOrder, contractValue: parseContractValue(event.target.value) })
-                            }
-                          />
-                          <p className="text-xs text-muted-foreground">
-                            Prefilled from the Caravan Contract Price dataset; adjust if needed for this order.
-                          </p>
-                        </div>
-
-                        <div className="space-y-2">
-                          <Label>Customer Name *</Label>
-                          <Input
-                            placeholder="Enter customer name"
-                            value={newOrder.customerName || ''}
-                            onChange={(event) => setNewOrder({ ...newOrder, customerName: event.target.value })}
-                          />
-                        </div>
-
-                        <div className="space-y-2">
-                          <Label>Order Type</Label>
-                          <Select
-                            value={newOrder.orderType}
-                            onValueChange={(value) =>
-                              setNewOrder({ ...newOrder, orderType: value as ShowOrder['orderType'] })
-                            }
-                          >
-                            <SelectTrigger>
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="New Order">New Order</SelectItem>
-                              <SelectItem value="Transfer from Stock">Transfer from Stock</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-
-                        <div className="space-y-2">
-                          <Label>Salesperson *</Label>
-                          <Popover open={isSalespersonPickerOpen} onOpenChange={setIsSalespersonPickerOpen}>
-                            <PopoverTrigger asChild>
-                              <Button
-                                variant="outline"
-                                role="combobox"
-                                aria-expanded={isSalespersonPickerOpen}
-                                className="w-full justify-between"
-                                disabled={!selectedShow}
-                              >
-                                {newOrder.salesperson || 'Select salesperson'}
-                              </Button>
-                            </PopoverTrigger>
-                            <PopoverContent className="w-[280px] p-0">
-                              <Command>
-                                <CommandInput placeholder="Search team member..." />
-                                <CommandList>
-                                  <CommandEmpty>No team member found.</CommandEmpty>
-                                  <CommandGroup heading={selectedShow ? 'Team Members' : 'Select a show first'}>
-                                    {showTeamMembers.map((member) => (
-                                      <CommandItem
-                                        key={member.memberId}
-                                        value={member.memberName}
-                                        onSelect={(value) => {
-                                          setNewOrder({ ...newOrder, salesperson: value });
-                                          setIsSalespersonPickerOpen(false);
-                                        }}
-                                      >
-                                        <Check
-                                          className={cn(
-                                            'mr-2 h-4 w-4',
-                                            newOrder.salesperson === member.memberName ? 'opacity-100' : 'opacity-0'
-                                          )}
-                                        />
-                                        <div className="flex flex-col">
-                                          <span>{member.memberName}</span>
-                                          <span className="text-xs text-muted-foreground">{member.role}</span>
-                                        </div>
-                                      </CommandItem>
-                                    ))}
-                                  </CommandGroup>
-                                  {selectedShow && (
-                                    <CommandGroup heading="Add team member to this show">
-                                      {availableTeamMembers.length === 0 ? (
-                                        <div className="px-3 py-2 text-xs text-muted-foreground">
-                                          All active team members are already on this show.
-                                        </div>
-                                      ) : (
-                                        availableTeamMembers.map((member) => (
-                                          <CommandItem
-                                            key={member.memberId}
-                                            value={`add-${member.memberId}`}
-                                            onSelect={() => handleAddTeamMemberToShow(member)}
-                                            className="flex items-start justify-between gap-2"
-                                          >
-                                            <div className="flex flex-col">
-                                              <span className="font-medium">{member.memberName}</span>
-                                              <span className="text-xs text-muted-foreground">{member.role}</span>
-                                            </div>
-                                            {addingTeamMemberId === member.memberId ? (
-                                              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-                                            ) : (
-                                              <span className="rounded-full bg-emerald-50 px-2 py-1 text-[11px] font-semibold text-emerald-700">
-                                                Add to show
-                                              </span>
-                                            )}
-                                          </CommandItem>
-                                        ))
-                                      )}
-                                    </CommandGroup>
-                                  )}
-                                </CommandList>
-                              </Command>
-                            </PopoverContent>
-                          </Popover>
-                          {newOrder.salesperson && (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="mt-2"
-                              onClick={() => setNewOrder({ ...newOrder, salesperson: '' })}
-                            >
-                              Clear selection
-                            </Button>
-                          )}
-                        </div>
-
-                        <div className="space-y-2">
-                          <Label>Date *</Label>
-                          <Input
-                            type="date"
-                            value={newOrder.date}
-                            onChange={(event) => setNewOrder({ ...newOrder, date: event.target.value })}
-                          />
-                        </div>
+                                  <span
+                                    className={cn(
+                                      'rounded-full px-2 py-1 text-[11px] font-semibold',
+                                      showStatusStyles[show.timelineStatus]
+                                    )}
+                                  >
+                                    {show.timelineStatus}
+                                  </span>
+                                </div>
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                       </div>
-                      <div className="space-y-3">
-                        <Label>Order Comments</Label>
-                        <OrderCommentsEditor
-                          value={newOrder.orderComments || ''}
-                          onChange={(value) => setNewOrder({ ...newOrder, orderComments: value })}
+
+                      <div className="space-y-2">
+                        <Label>Handover Dealer *</Label>
+                        <Select
+                          value={newOrder.handoverDealer || ''}
+                          onValueChange={(value) => setNewOrder({ ...newOrder, handoverDealer: value })}
+                          disabled={handoverDealerChoices.length === 0}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select handover dealer" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {handoverDealerChoices.map((dealer) => (
+                              <SelectItem key={dealer} value={dealer}>
+                                {dealer}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        {handoverDealerChoices.length === 0 && (
+                          <p className="text-xs text-muted-foreground">
+                            Dealer list unavailable. Please try again after schedule sync.
+                          </p>
+                        )}
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label>Model *</Label>
+                        <Popover open={isModelPickerOpen} onOpenChange={setIsModelPickerOpen}>
+                          <PopoverTrigger asChild>
+                            <Button
+                              variant="outline"
+                              role="combobox"
+                              aria-expanded={isModelPickerOpen}
+                              className="w-full justify-between"
+                              disabled={modelOptions.length === 0}
+                            >
+                              {newOrder.model || 'Select model'}
+                            </Button>
+                          </PopoverTrigger>
+                          <PopoverContent className="w-[320px] p-0">
+                            <Command>
+                              <CommandInput placeholder="Search model..." />
+                              <CommandList>
+                                <CommandEmpty>No model found.</CommandEmpty>
+                                <CommandGroup heading="Schedule models">
+                                  {modelOptions.map((model) => (
+                                    <CommandItem
+                                      key={model}
+                                      value={model}
+                                      onSelect={(value) => {
+                                        const defaultValue = contractPriceMap[value.toLowerCase()] ?? 0;
+                                        setNewOrder({ ...newOrder, model: value, contractValue: defaultValue });
+                                        setIsModelPickerOpen(false);
+                                      }}
+                                    >
+                                      <Check
+                                        className={cn('mr-2 h-4 w-4', newOrder.model === model ? 'opacity-100' : 'opacity-0')}
+                                      />
+                                      {model}
+                                    </CommandItem>
+                                  ))}
+                                </CommandGroup>
+                              </CommandList>
+                            </Command>
+                          </PopoverContent>
+                        </Popover>
+                        {newOrder.model && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="mt-2"
+                            onClick={() => setNewOrder({ ...newOrder, model: '', contractValue: 0 })}
+                          >
+                            Clear selection
+                          </Button>
+                        )}
+                        {modelOptions.length === 0 && (
+                          <p className="text-xs text-muted-foreground">Model list unavailable. Please try again after schedule sync.</p>
+                        )}
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label>Contract Number *</Label>
+                        <Input
+                          placeholder="Enter contract number"
+                          value={newOrder.contractNumber || ''}
+                          onChange={(event) => setNewOrder({ ...newOrder, contractNumber: event.target.value })}
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label>Contract Value *</Label>
+                        <Input
+                          type="number"
+                          placeholder="Standard contract value"
+                          value={newOrder.contractValue ?? ''}
+                          onChange={(event) => setNewOrder({ ...newOrder, contractValue: parseContractValue(event.target.value) })}
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          Prefilled from the Caravan Contract Price dataset; adjust if needed for this order.
+                        </p>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label>Customer Name *</Label>
+                        <Input
+                          placeholder="Enter customer name"
+                          value={newOrder.customerName || ''}
+                          onChange={(event) =>
+                            setNewOrder({ ...newOrder, customerName: event.target.value })
+                          }
+                        />
+                      </div>
+                      
+                      <div className="space-y-2">
+                        <Label>Order Type</Label>
+                        <Select
+                          value={newOrder.orderType}
+                          onValueChange={(value) => setNewOrder({ ...newOrder, orderType: value as ShowOrder['orderType'] })}
+                        >
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="New Order">New Order</SelectItem>
+                            <SelectItem value="Transfer from Stock">Transfer from Stock</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label>Salesperson *</Label>
+                        <Popover open={isSalespersonPickerOpen} onOpenChange={setIsSalespersonPickerOpen}>
+                          <PopoverTrigger asChild>
+                            <Button
+                              variant="outline"
+                              role="combobox"
+                              aria-expanded={isSalespersonPickerOpen}
+                              className="w-full justify-between"
+                              disabled={!selectedShow}
+                            >
+                              {newOrder.salesperson || 'Select salesperson'}
+                            </Button>
+                          </PopoverTrigger>
+                          <PopoverContent className="w-[280px] p-0">
+                            <Command>
+                              <CommandInput placeholder="Search team member..." />
+                              <CommandList>
+                                <CommandEmpty>No team member found.</CommandEmpty>
+                                <CommandGroup heading={selectedShow ? 'Team Members' : 'Select a show first'}>
+                                  {showTeamMembers.map((member) => (
+                                    <CommandItem
+                                      key={member.memberId}
+                                      value={member.memberName}
+                                      onSelect={(value) => {
+                                        setNewOrder({ ...newOrder, salesperson: value });
+                                        setIsSalespersonPickerOpen(false);
+                                      }}
+                                    >
+                                      <Check
+                                        className={cn(
+                                          'mr-2 h-4 w-4',
+                                          newOrder.salesperson === member.memberName ? 'opacity-100' : 'opacity-0'
+                                        )}
+                                      />
+                                      <div className="flex flex-col">
+                                        <span>{member.memberName}</span>
+                                        <span className="text-xs text-muted-foreground">{member.role}</span>
+                                      </div>
+                                    </CommandItem>
+                                  ))}
+                                </CommandGroup>
+                                {selectedShow && (
+                                  <CommandGroup heading="Add team member to this show">
+                                    {availableTeamMembers.length === 0 ? (
+                                      <div className="px-3 py-2 text-xs text-muted-foreground">
+                                        All active team members are already on this show.
+                                      </div>
+                                    ) : (
+                                      availableTeamMembers.map((member) => (
+                                        <CommandItem
+                                          key={member.memberId}
+                                          value={`add-${member.memberId}`}
+                                          onSelect={() => handleAddTeamMemberToShow(member)}
+                                          className="flex items-start justify-between gap-2"
+                                        >
+                                          <div className="flex flex-col">
+                                            <span className="font-medium">{member.memberName}</span>
+                                            <span className="text-xs text-muted-foreground">{member.role}</span>
+                                          </div>
+                                          {addingTeamMemberId === member.memberId ? (
+                                            <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                                          ) : (
+                                            <span className="rounded-full bg-emerald-50 px-2 py-1 text-[11px] font-semibold text-emerald-700">
+                                              Add to show
+                                            </span>
+                                          )}
+                                        </CommandItem>
+                                      ))
+                                    )}
+                                  </CommandGroup>
+                                )}
+                              </CommandList>
+                            </Command>
+                          </PopoverContent>
+                        </Popover>
+                        {newOrder.salesperson && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="mt-2"
+                            onClick={() => setNewOrder({ ...newOrder, salesperson: '' })}
+                          >
+                            Clear selection
+                          </Button>
+                        )}
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label>Date *</Label>
+                        <Input
+                          type="date"
+                          value={newOrder.date}
+                          onChange={(event) => setNewOrder({ ...newOrder, date: event.target.value })}
                         />
                       </div>
                     </div>
