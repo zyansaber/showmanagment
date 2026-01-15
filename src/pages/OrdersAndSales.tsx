@@ -23,23 +23,7 @@ type DealerStatus = 'Pending' | 'Approved' | 'Cancelled';
 type ShowTimelineStatus = 'Finished' | 'Current' | 'Not Started';
 type ActionType = 'confirm' | 'cancel' | 'recover';
 
-type ShowOrderWithContract = ShowOrder & {
-  contractValue?: number;
-  contractNumber?: string;
-  dealNumber?: number;
-  conditions?: string;
-  topUpDate?: string;
-  deposit?: number;
-  orderStatusId?: string;
-};
-
-type OrderStatusOption = {
-  id: string;
-  label: string;
-  description?: string;
-  color: string;
-  sortOrder: number;
-};
+type ShowOrderWithContract = ShowOrder & { contractValue?: number; contractNumber?: string };
 
 interface DecoratedOrder extends ShowOrderWithContract {
   showName: string;
@@ -53,8 +37,6 @@ type OrderAttachment = {
   path: string;
   uploadedAt: string;
 };
-
-const DEFAULT_DEPOSIT = 5000;
 
 const statusStyles: Record<DealerStatus, string> = {
   Pending: 'bg-yellow-100 text-yellow-800',
@@ -112,40 +94,6 @@ const parseDateValue = (value: string | undefined | null) => {
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 };
 
-const normalizeHex = (value: string) => value.replace('#', '').trim();
-
-const hexToRgb = (hex: string) => {
-  const cleaned = normalizeHex(hex);
-  if (cleaned.length === 3) {
-    const expanded = cleaned
-      .split('')
-      .map((char) => char + char)
-      .join('');
-    const int = Number.parseInt(expanded, 16);
-    return {
-      r: (int >> 16) & 255,
-      g: (int >> 8) & 255,
-      b: int & 255,
-    };
-  }
-  if (cleaned.length === 6) {
-    const int = Number.parseInt(cleaned, 16);
-    return {
-      r: (int >> 16) & 255,
-      g: (int >> 8) & 255,
-      b: int & 255,
-    };
-  }
-  return null;
-};
-
-const getTextColorForBackground = (hex: string) => {
-  const rgb = hexToRgb(hex);
-  if (!rgb) return '#0f172a';
-  const brightness = (rgb.r * 299 + rgb.g * 587 + rgb.b * 114) / 1000;
-  return brightness > 160 ? '#0f172a' : '#ffffff';
-};
-
 const deriveShowTimelineStatus = (show: Show): ShowTimelineStatus => {
   const normalized = (show.status || '').toLowerCase();
   if (normalized.includes('finish')) return 'Finished';
@@ -198,7 +146,6 @@ export default function OrdersAndSales() {
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
   const [dealerOptions, setDealerOptions] = useState<string[]>([]);
   const [modelOptions, setModelOptions] = useState<string[]>([]);
-  const [statusOptions, setStatusOptions] = useState<OrderStatusOption[]>([]);
   const [contractPriceMap, setContractPriceMap] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -228,12 +175,8 @@ export default function OrdersAndSales() {
     contractNumber: '',
     handoverDealer: '',
     salespersonOrderComments: '',
-    conditions: '',
-    topUpDate: '',
-    orderStatusId: '',
   });
-  const [statusFilter, setStatusFilter] = useState<'all' | 'unassigned' | string>('all');
-  const [dealerFilter, setDealerFilter] = useState('all');
+  const [statusFilter, setStatusFilter] = useState<'All' | DealerStatus>('All');
 
   const requiresPassword = !authExpiry || authExpiry <= Date.now();
 
@@ -252,13 +195,12 @@ export default function OrdersAndSales() {
   useEffect(() => {
     const loadData = async () => {
       try {
-        const [ordersData, showsData, teamData, scheduleData, contractData, statusData] = await Promise.all([
+        const [ordersData, showsData, teamData, scheduleData, contractData] = await Promise.all([
           dbGet('showOrders'),
           dbGet('shows'),
           dbGet('teamMembers'),
           schedulingDbGet('schedule'),
           dbGet('finance/caravanContractPrices'),
-          dbGet('orderStatusOptions'),
         ]);
 
         const ordersList: ShowOrderWithContract[] = ordersData
@@ -272,16 +214,6 @@ export default function OrdersAndSales() {
         const showList = showsData ? Object.values(showsData) : [];
         setShows(showList);
         setTeamMembers(teamData ? Object.values(teamData) : []);
-        const statusList = statusData
-          ? (Object.entries(statusData as Record<string, Partial<OrderStatusOption>>).map(([id, value]) => ({
-              id,
-              label: value.label || '',
-              description: value.description || '',
-              color: value.color || '#E2E8F0',
-              sortOrder: typeof value.sortOrder === 'number' ? value.sortOrder : 0,
-            })) as OrderStatusOption[])
-          : [];
-        setStatusOptions(statusList.sort((a, b) => a.sortOrder - b.sortOrder));
 
         const contractPrices = contractData
           ? Object.values(contractData as Record<string, Record<string, unknown>>).reduce<Record<string, number>>(
@@ -341,27 +273,6 @@ export default function OrdersAndSales() {
     return order.dealerConfirm ? 'Approved' : 'Pending';
   }, []);
 
-  const statusLookup = useMemo(() => {
-    return statusOptions.reduce<Record<string, OrderStatusOption>>((acc, option) => {
-      acc[option.id] = option;
-      return acc;
-    }, {});
-  }, [statusOptions]);
-
-  const dealerFilterOptions = useMemo(() => {
-    const combined = new Set<string>();
-    dealerOptions.forEach((dealer) => combined.add(dealer));
-    shows.forEach((show) => {
-      if (show.handoverDealer) {
-        combined.add(show.handoverDealer);
-      }
-    });
-    orders.forEach((order) => {
-      if (order.handoverDealer) combined.add(order.handoverDealer);
-    });
-    return Array.from(combined).sort((a, b) => a.localeCompare(b));
-  }, [dealerOptions, orders, shows]);
-
   const decoratedOrders: DecoratedOrder[] = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
     return orders
@@ -372,12 +283,8 @@ export default function OrdersAndSales() {
         return Number.isNaN(dateB) ? -1 : Number.isNaN(dateA) ? 1 : dateB - dateA;
       })
       .filter((order) => {
-        if (statusFilter === 'unassigned' && order.orderStatusId) return false;
-        if (statusFilter !== 'all' && statusFilter !== 'unassigned' && order.orderStatusId !== statusFilter) {
-          return false;
-        }
-        const dealerValue = order.handoverDealer || showLookup[order.showId]?.handoverDealer || '';
-        if (dealerFilter !== 'all' && dealerValue !== dealerFilter) return false;
+        const dealerStatus = deriveDealerStatus(order);
+        if (statusFilter !== 'All' && dealerStatus !== statusFilter) return false;
         if (!term) return true;
         const matchedShow = showLookup[order.showId];
         const haystack = [
@@ -386,11 +293,8 @@ export default function OrdersAndSales() {
           order.customerName,
           order.salesperson,
           order.model,
+          order.id,
           order.contractNumber,
-          order.dealNumber ? `deal-${order.dealNumber}` : '',
-          order.conditions,
-          order.topUpDate,
-          statusLookup[order.orderStatusId || '']?.label,
           matchedShow?.name,
           matchedShow?.handoverDealer,
         ]
@@ -404,22 +308,12 @@ export default function OrdersAndSales() {
         showName: showLookup[order.showId]?.name || 'Unknown Show',
         handoverDealer: order.handoverDealer || showLookup[order.showId]?.handoverDealer || 'Not set',
         dealerStatus: deriveDealerStatus(order),
-    }));
-  }, [dealerFilter, deriveDealerStatus, orders, searchTerm, showLookup, statusFilter, statusLookup]);
+      }));
+  }, [deriveDealerStatus, orders, searchTerm, showLookup, statusFilter]);
 
-  const statusCounts = useMemo(
-    () =>
-      statusOptions.reduce<Record<string, number>>((acc, option) => {
-        acc[option.id] = orders.filter((order) => order.orderStatusId === option.id).length;
-        return acc;
-      }, {}),
-    [orders, statusOptions]
-  );
-
-  const unassignedCount = useMemo(
-    () => orders.filter((order) => !order.orderStatusId).length,
-    [orders]
-  );
+  const totalOrders = orders.length;
+  const pendingOrders = orders.filter((order) => deriveDealerStatus(order) === 'Pending').length;
+  const approvedOrders = orders.filter((order) => deriveDealerStatus(order) === 'Approved').length;
 
   const selectedShow = useMemo(() => shows.find((show) => show.id === newOrder.showId), [newOrder.showId, shows]);
 
@@ -480,42 +374,10 @@ export default function OrdersAndSales() {
     return Array.from(all).sort((a, b) => a.localeCompare(b));
   }, [dealerOptions, selectedShow]);
 
-  useEffect(() => {
-    if (!editingOrder && !newOrder.orderStatusId && statusOptions.length > 0) {
-      setNewOrder((prev) => ({ ...prev, orderStatusId: statusOptions[0].id }));
-    }
-  }, [editingOrder, newOrder.orderStatusId, statusOptions]);
-
   const persistAuthExpiry = (expiresAt: number) => {
     setAuthExpiry(expiresAt);
     if (typeof window !== 'undefined') {
       window.localStorage.setItem(CONFIRMATION_CACHE_KEY, expiresAt.toString());
-    }
-  };
-
-  const getNextDealNumber = (showId: string) => {
-    const maxExisting = orders
-      .filter((order) => order.showId === showId)
-      .reduce((max, order) => Math.max(max, Number(order.dealNumber || 0)), 0);
-    return maxExisting + 1;
-  };
-
-  const handleStatusChange = async (order: ShowOrderWithContract, statusId: string) => {
-    if (!order.id) return;
-    const nextStatusId = statusId === 'none' ? '' : statusId;
-    try {
-      await dbUpdate(`showOrders/${order.id}`, {
-        orderStatusId: nextStatusId || null,
-      });
-      setOrders((prev) =>
-        prev.map((existing) =>
-          existing.id === order.id ? { ...existing, orderStatusId: nextStatusId } : existing
-        )
-      );
-      toast.success('Status updated');
-    } catch (err) {
-      console.error('Error updating status:', err);
-      toast.error('Failed to update status');
     }
   };
 
@@ -718,9 +580,6 @@ export default function OrdersAndSales() {
       contractNumber: '',
       handoverDealer: '',
       salespersonOrderComments: '',
-      conditions: '',
-      topUpDate: '',
-      orderStatusId: statusOptions[0]?.id || '',
     });
     setAttachmentFiles([]);
     setExistingAttachments([]);
@@ -757,7 +616,6 @@ export default function OrdersAndSales() {
       const uploadedAttachments = await uploadAttachments(orderId, attachmentFiles);
       const mergedAttachments = [...existingAttachments, ...uploadedAttachments];
 
-      const dealNumber = editingOrder?.dealNumber ?? getNextDealNumber(newOrder.showId);
       const order: ShowOrderWithContract = {
         id: orderId,
         showId: newOrder.showId,
@@ -773,11 +631,6 @@ export default function OrdersAndSales() {
         status: 'Pending',
         salespersonOrderComments: newOrder.salespersonOrderComments || '',
         orderAttachments: mergedAttachments,
-        dealNumber,
-        deposit: editingOrder?.deposit ?? DEFAULT_DEPOSIT,
-        conditions: newOrder.conditions || '',
-        topUpDate: newOrder.topUpDate || '',
-        orderStatusId: newOrder.orderStatusId || '',
       };
 
       if (editingOrder) {
@@ -850,9 +703,6 @@ export default function OrdersAndSales() {
       contractNumber: order.contractNumber || '',
       handoverDealer: order.handoverDealer || '',
       salespersonOrderComments: order.salespersonOrderComments || '',
-      conditions: order.conditions || '',
-      topUpDate: order.topUpDate || '',
-      orderStatusId: order.orderStatusId || '',
     });
     setIsAddingOrder(true);
   };
@@ -885,49 +735,44 @@ export default function OrdersAndSales() {
         </Card>
       )}
 
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-3 xl:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
         <Card
           role="button"
           tabIndex={0}
-          onClick={() => setStatusFilter('all')}
-          onKeyDown={(event) => event.key === 'Enter' && setStatusFilter('all')}
-          className={cn('cursor-pointer transition shadow-sm', statusFilter === 'all' ? 'ring-2 ring-blue-500' : '')}
+          onClick={() => setStatusFilter('All')}
+          onKeyDown={(event) => event.key === 'Enter' && setStatusFilter('All')}
+          className={cn('cursor-pointer transition shadow-sm', statusFilter === 'All' ? 'ring-2 ring-blue-500' : '')}
         >
           <CardHeader className="pb-2">
-            <CardDescription>All Statuses</CardDescription>
-            <CardTitle className="text-3xl">{orders.length}</CardTitle>
+            <CardDescription>Total Orders</CardDescription>
+            <CardTitle className="text-3xl">{totalOrders}</CardTitle>
           </CardHeader>
         </Card>
-        {statusOptions.map((status) => (
-          <Card
-            key={status.id}
-            role="button"
-            tabIndex={0}
-            onClick={() => setStatusFilter(status.id)}
-            onKeyDown={(event) => event.key === 'Enter' && setStatusFilter(status.id)}
-            className={cn(
-              'cursor-pointer transition shadow-sm',
-              statusFilter === status.id ? 'ring-2 ring-slate-400' : ''
-            )}
-            style={{ borderTop: `4px solid ${status.color}` }}
-          >
-            <CardHeader className="pb-2">
-              <CardDescription>{status.label || 'Untitled status'}</CardDescription>
-              <CardTitle className="text-3xl">{statusCounts[status.id] ?? 0}</CardTitle>
-              {status.description && <p className="text-xs text-slate-500">{status.description}</p>}
-            </CardHeader>
-          </Card>
-        ))}
         <Card
           role="button"
           tabIndex={0}
-          onClick={() => setStatusFilter('unassigned')}
-          onKeyDown={(event) => event.key === 'Enter' && setStatusFilter('unassigned')}
-          className={cn('cursor-pointer transition shadow-sm', statusFilter === 'unassigned' ? 'ring-2 ring-slate-400' : '')}
+          onClick={() => setStatusFilter('Pending')}
+          onKeyDown={(event) => event.key === 'Enter' && setStatusFilter('Pending')}
+          className={cn(
+            'cursor-pointer transition shadow-sm',
+            statusFilter === 'Pending' ? 'ring-2 ring-yellow-500' : ''
+          )}
         >
           <CardHeader className="pb-2">
-            <CardDescription>Unassigned Status</CardDescription>
-            <CardTitle className="text-3xl">{unassignedCount}</CardTitle>
+            <CardDescription>Pending Confirmation</CardDescription>
+            <CardTitle className="text-3xl text-yellow-600">{pendingOrders}</CardTitle>
+          </CardHeader>
+        </Card>
+        <Card
+          role="button"
+          tabIndex={0}
+          onClick={() => setStatusFilter('Approved')}
+          onKeyDown={(event) => event.key === 'Enter' && setStatusFilter('Approved')}
+          className={cn('cursor-pointer transition shadow-sm', statusFilter === 'Approved' ? 'ring-2 ring-green-500' : '')}
+        >
+          <CardHeader className="pb-2">
+            <CardDescription>Approved Orders</CardDescription>
+            <CardTitle className="text-3xl text-green-600">{approvedOrders}</CardTitle>
           </CardHeader>
         </Card>
       </div>
@@ -1256,11 +1101,6 @@ export default function OrdersAndSales() {
                             onChange={(event) => setNewOrder({ ...newOrder, date: event.target.value })}
                           />
                         </div>
-                        <div className="space-y-2">
-                          <Label>Deposit</Label>
-                          <Input value={formatCurrency(DEFAULT_DEPOSIT)} disabled />
-                          <p className="text-xs text-muted-foreground">Deposit is fixed at $5,000 for every order.</p>
-                        </div>
                       </div>
                       <div className="space-y-3">
                         <Label>Salesperson Order Comments</Label>
@@ -1291,49 +1131,6 @@ export default function OrdersAndSales() {
                             </div>
                           )}
                         </div>
-                        <div className="space-y-2">
-                          <Label>Conditions</Label>
-                          <Input
-                            placeholder="Add any deal conditions"
-                            value={newOrder.conditions || ''}
-                            onChange={(event) => setNewOrder({ ...newOrder, conditions: event.target.value })}
-                          />
-                        </div>
-                        <div className="space-y-2">
-                          <Label>Top Up Date</Label>
-                          <Input
-                            type="date"
-                            value={newOrder.topUpDate || ''}
-                            onChange={(event) => setNewOrder({ ...newOrder, topUpDate: event.target.value })}
-                          />
-                        </div>
-                        <div className="space-y-2">
-                          <Label>Status</Label>
-                          <Select
-                            value={newOrder.orderStatusId || 'none'}
-                            onValueChange={(value) =>
-                              setNewOrder({ ...newOrder, orderStatusId: value === 'none' ? '' : value })
-                            }
-                          >
-                            <SelectTrigger>
-                              <SelectValue placeholder="Select status" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="none">No status</SelectItem>
-                              {statusOptions.map((status) => (
-                                <SelectItem key={status.id} value={status.id}>
-                                  <div className="flex items-center gap-2">
-                                    <span
-                                      className="h-3 w-3 rounded-full border border-slate-200"
-                                      style={{ backgroundColor: status.color }}
-                                    />
-                                    <span>{status.label}</span>
-                                  </div>
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
                       </div>
                     </div>
                     <DialogFooter>
@@ -1349,26 +1146,11 @@ export default function OrdersAndSales() {
                 <div className="flex items-center gap-2">
                   <Search className="h-4 w-4 text-gray-500" />
                   <Input
-                    placeholder="Search by deal #, show, model, customer, salesperson or type"
+                    placeholder="Search by order ID, show, model, customer, salesperson or type"
                     value={searchTerm}
                     onChange={(event) => setSearchTerm(event.target.value)}
                     className="w-full lg:w-72"
                   />
-                </div>
-                <div className="min-w-[200px]">
-                  <Select value={dealerFilter} onValueChange={setDealerFilter}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Filter dealer" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All dealers</SelectItem>
-                      {dealerFilterOptions.map((dealer) => (
-                        <SelectItem key={dealer} value={dealer}>
-                          {dealer}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
                 </div>
               </div>
             </div>
@@ -1379,42 +1161,25 @@ export default function OrdersAndSales() {
                 <TableHeader>
                   <TableRow>
                     <TableHead className="w-10" />
-                    <TableHead>Ordering Date</TableHead>
-                    <TableHead>Deal #</TableHead>
-                    <TableHead>Customer Name</TableHead>
+                    <TableHead>Order ID</TableHead>
                     <TableHead>Model</TableHead>
                     <TableHead>Contract Number</TableHead>
                     <TableHead className="text-right">Contract Value</TableHead>
-                    <TableHead>Sales Person</TableHead>
-                    <TableHead>Deposit</TableHead>
-                    <TableHead>Conditions</TableHead>
-                    <TableHead>Top Up Date</TableHead>
+                    <TableHead>Customer</TableHead>
+                    <TableHead>Show</TableHead>
                     <TableHead>Type</TableHead>
-                    <TableHead>Handover Dealer</TableHead>
+                    <TableHead>Salesperson</TableHead>
+                    <TableHead>Date</TableHead>
                     <TableHead>Dealer Status</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead className="text-right">Action</TableHead>
+                    <TableHead>Handover Dealer</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {decoratedOrders.map((order) => {
                     const rowKey = order.id || `${order.showId}-${order.date}`;
-                    const statusOption = order.orderStatusId ? statusLookup[order.orderStatusId] : undefined;
-                    const rowBackground = statusOption?.color;
-                    const rowTextColor = rowBackground ? getTextColorForBackground(rowBackground) : undefined;
                     return (
-                      <TableRow
-                        key={rowKey}
-                        className="transition-colors"
-                        style={
-                          rowBackground
-                            ? {
-                                backgroundColor: rowBackground,
-                                color: rowTextColor,
-                              }
-                            : undefined
-                        }
-                      >
+                      <TableRow key={rowKey}>
                         <TableCell>
                           <Button
                             variant="ghost"
@@ -1429,51 +1194,21 @@ export default function OrdersAndSales() {
                             </span>
                           </Button>
                         </TableCell>
-                        <TableCell>{formatDate(order.date)}</TableCell>
-                        <TableCell className="font-semibold">#{order.dealNumber ?? '-'}</TableCell>
-                        <TableCell>{order.customerName || 'Not set'}</TableCell>
+                        <TableCell className="font-medium">{order.id || 'N/A'}</TableCell>
                         <TableCell>{order.model || 'Not set'}</TableCell>
                         <TableCell>{order.contractNumber || 'Not set'}</TableCell>
                         <TableCell className="text-right">{formatCurrency(order.contractValue)}</TableCell>
-                        <TableCell>{order.salesperson || 'Unassigned'}</TableCell>
-                        <TableCell>
-                          <span className="inline-flex items-center rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-800">
-                            {formatCurrency(order.deposit ?? DEFAULT_DEPOSIT)}
-                          </span>
-                        </TableCell>
-                        <TableCell className="max-w-[200px] whitespace-normal">{order.conditions || '-'}</TableCell>
-                        <TableCell>{formatDate(order.topUpDate || '')}</TableCell>
+                        <TableCell>{order.customerName || 'Not set'}</TableCell>
+                        <TableCell>{order.showName}</TableCell>
                         <TableCell>{order.orderType}</TableCell>
-                        <TableCell>{order.handoverDealer}</TableCell>
+                        <TableCell>{order.salesperson || 'Unassigned'}</TableCell>
+                        <TableCell>{formatDate(order.date)}</TableCell>
                         <TableCell>
                           <span className={`rounded-full px-2 py-1 text-xs font-semibold ${statusStyles[order.dealerStatus]}`}>
                             {order.dealerStatus}
                           </span>
                         </TableCell>
-                        <TableCell>
-                          <Select
-                            value={order.orderStatusId || 'none'}
-                            onValueChange={(value) => handleStatusChange(order, value)}
-                          >
-                            <SelectTrigger className="min-w-[160px]">
-                              <SelectValue placeholder="Select status" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="none">No status</SelectItem>
-                              {statusOptions.map((status) => (
-                                <SelectItem key={status.id} value={status.id}>
-                                  <div className="flex items-center gap-2">
-                                    <span
-                                      className="h-3 w-3 rounded-full border border-slate-200"
-                                      style={{ backgroundColor: status.color }}
-                                    />
-                                    <span>{status.label}</span>
-                                  </div>
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </TableCell>
+                        <TableCell>{order.handoverDealer}</TableCell>
                         <TableCell className="text-right">
                           <div className="flex flex-wrap justify-end gap-2">
                             {order.dealerStatus === 'Cancelled' ? (
