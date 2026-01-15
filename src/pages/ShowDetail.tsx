@@ -47,6 +47,8 @@ const STATUS_PROGRESS_MAP: Record<ShowTask['status'], number> = {
   Done: 100,
 };
 
+const DEFAULT_DEPOSIT = 5000;
+
 const normalisePercentComplete = (value: unknown): number => {
   const numeric =
     typeof value === 'number'
@@ -185,6 +187,8 @@ export default function ShowDetail() {
     contractNumber: '',
     handoverDealer: '',
     salespersonOrderComments: '',
+    conditions: '',
+    topUpDate: '',
   });
 
   const [newTask, setNewTask] = useState<Partial<ShowTask>>({
@@ -675,10 +679,17 @@ export default function ShowDetail() {
       contractNumber: '',
       handoverDealer: '',
       salespersonOrderComments: '',
+      conditions: '',
+      topUpDate: '',
     });
     setAttachmentFiles([]);
     setExistingAttachments([]);
     setEditingOrder(null);
+  };
+
+  const getNextDealNumber = () => {
+    const maxExisting = orders.reduce((max, order) => Math.max(max, Number(order.dealNumber || 0)), 0);
+    return maxExisting + 1;
   };
 
   const handleAddOrder = async () => {
@@ -728,6 +739,10 @@ export default function ShowDetail() {
         status: 'Pending',
         salespersonOrderComments: newOrder.salespersonOrderComments || '',
         orderAttachments: mergedAttachments,
+        dealNumber: editingOrder?.dealNumber ?? getNextDealNumber(),
+        deposit: editingOrder?.deposit ?? DEFAULT_DEPOSIT,
+        conditions: newOrder.conditions || '',
+        topUpDate: newOrder.topUpDate || '',
       };
 
       if (editingOrder) {
@@ -773,6 +788,8 @@ export default function ShowDetail() {
       contractNumber: order.contractNumber || '',
       handoverDealer: order.handoverDealer || '',
       salespersonOrderComments: order.salespersonOrderComments || '',
+      conditions: order.conditions || '',
+      topUpDate: order.topUpDate || '',
     });
     setIsAddingOrder(true);
   };
@@ -2378,6 +2395,11 @@ export default function ShowDetail() {
                           </p>
                         </div>
                         <div>
+                          <Label>Deposit</Label>
+                          <Input value={`$${DEFAULT_DEPOSIT.toLocaleString('en-AU')}`} disabled />
+                          <p className="text-xs text-muted-foreground">Deposit is fixed at $5,000 for every order.</p>
+                        </div>
+                        <div>
                           <Label>Customer Name *</Label>
                           <Input
                             placeholder="Enter customer name"
@@ -2474,6 +2496,22 @@ export default function ShowDetail() {
                           value={newOrder.salespersonOrderComments || ''}
                           onChange={(value) => setNewOrder({ ...newOrder, salespersonOrderComments: value })}
                         />
+                        <div className="space-y-2">
+                          <Label>Conditions</Label>
+                          <Input
+                            placeholder="Add any deal conditions"
+                            value={newOrder.conditions || ''}
+                            onChange={(event) => setNewOrder({ ...newOrder, conditions: event.target.value })}
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Top Up Date</Label>
+                          <Input
+                            type="date"
+                            value={newOrder.topUpDate || ''}
+                            onChange={(event) => setNewOrder({ ...newOrder, topUpDate: event.target.value })}
+                          />
+                        </div>
                         <div className="space-y-2">
                           <Label>Attachments</Label>
                           <Input
