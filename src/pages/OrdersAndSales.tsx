@@ -18,12 +18,46 @@ import { cn } from '@/lib/utils';
 const CONFIRMATION_PASSWORD = 'admin123';
 const CONFIRMATION_CACHE_KEY = 'orders-dashboard-confirmation';
 const CONFIRMATION_DURATION_MS = 5 * 60 * 1000; // 5 minutes
+const CONFIRMATION_STATUS_ID = 'confirmation';
+const CANCELLATION_STATUS_ID = 'cancellation';
+const DEFAULT_STATUS_OPTIONS: OrderStatusOption[] = [
+  {
+    id: CONFIRMATION_STATUS_ID,
+    label: 'Confirmation',
+    description: 'Order is confirmed and approved.',
+    color: '#BBF7D0',
+    sortOrder: 0,
+  },
+  {
+    id: CANCELLATION_STATUS_ID,
+    label: 'Cancellation',
+    description: 'Order has been cancelled.',
+    color: '#FECACA',
+    sortOrder: 1,
+  },
+];
 
 type DealerStatus = 'Pending' | 'Approved' | 'Cancelled';
 type ShowTimelineStatus = 'Finished' | 'Current' | 'Not Started';
-type ActionType = 'confirm' | 'cancel' | 'recover';
+type ActionType = 'confirm' | 'cancel';
 
-type ShowOrderWithContract = ShowOrder & { contractValue?: number; contractNumber?: string };
+type ShowOrderWithContract = ShowOrder & {
+  contractValue?: number;
+  contractNumber?: string;
+  dealNumber?: number;
+  conditions?: string;
+  topUpDate?: string;
+  deposit?: number;
+  orderStatusId?: string;
+};
+
+type OrderStatusOption = {
+  id: string;
+  label: string;
+  description?: string;
+  color: string;
+  sortOrder: number;
+};
 
 interface DecoratedOrder extends ShowOrderWithContract {
   showName: string;
@@ -37,6 +71,8 @@ type OrderAttachment = {
   path: string;
   uploadedAt: string;
 };
+
+const DEFAULT_DEPOSIT = 5000;
 
 const statusStyles: Record<DealerStatus, string> = {
   Pending: 'bg-yellow-100 text-yellow-800',
@@ -94,6 +130,40 @@ const parseDateValue = (value: string | undefined | null) => {
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 };
 
+const normalizeHex = (value: string) => value.replace('#', '').trim();
+
+const hexToRgb = (hex: string) => {
+  const cleaned = normalizeHex(hex);
+  if (cleaned.length === 3) {
+    const expanded = cleaned
+      .split('')
+      .map((char) => char + char)
+      .join('');
+    const int = Number.parseInt(expanded, 16);
+    return {
+      r: (int >> 16) & 255,
+      g: (int >> 8) & 255,
+      b: int & 255,
+    };
+  }
+  if (cleaned.length === 6) {
+    const int = Number.parseInt(cleaned, 16);
+    return {
+      r: (int >> 16) & 255,
+      g: (int >> 8) & 255,
+      b: int & 255,
+    };
+  }
+  return null;
+};
+
+const getTextColorForBackground = (hex: string) => {
+  const rgb = hexToRgb(hex);
+  if (!rgb) return '#0f172a';
+  const brightness = (rgb.r * 299 + rgb.g * 587 + rgb.b * 114) / 1000;
+  return brightness > 160 ? '#0f172a' : '#ffffff';
+};
+
 const deriveShowTimelineStatus = (show: Show): ShowTimelineStatus => {
   const normalized = (show.status || '').toLowerCase();
   if (normalized.includes('finish')) return 'Finished';
@@ -146,6 +216,7 @@ export default function OrdersAndSales() {
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
   const [dealerOptions, setDealerOptions] = useState<string[]>([]);
   const [modelOptions, setModelOptions] = useState<string[]>([]);
+  const [statusOptions, setStatusOptions] = useState<OrderStatusOption[]>([]);
   const [contractPriceMap, setContractPriceMap] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -175,8 +246,13 @@ export default function OrdersAndSales() {
     contractNumber: '',
     handoverDealer: '',
     salespersonOrderComments: '',
+    conditions: '',
+    topUpDate: '',
+    orderStatusId: '',
   });
-  const [statusFilter, setStatusFilter] = useState<'All' | DealerStatus>('All');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'unassigned' | string>('all');
+  const [dealerFilter, setDealerFilter] = useState('all');
+  const [inlineEdits, setInlineEdits] = useState<Record<string, { conditions?: string; topUpDate?: string }>>({});
 
   const requiresPassword = !authExpiry || authExpiry <= Date.now();
 
@@ -195,12 +271,13 @@ export default function OrdersAndSales() {
   useEffect(() => {
     const loadData = async () => {
       try {
-        const [ordersData, showsData, teamData, scheduleData, contractData] = await Promise.all([
+        const [ordersData, showsData, teamData, scheduleData, contractData, statusData] = await Promise.all([
           dbGet('showOrders'),
           dbGet('shows'),
           dbGet('teamMembers'),
           schedulingDbGet('schedule'),
           dbGet('finance/caravanContractPrices'),
+          dbGet('orderStatusOptions'),
         ]);
 
         const ordersList: ShowOrderWithContract[] = ordersData
@@ -214,6 +291,24 @@ export default function OrdersAndSales() {
         const showList = showsData ? Object.values(showsData) : [];
         setShows(showList);
         setTeamMembers(teamData ? Object.values(teamData) : []);
+        const statusList = statusData
+          ? (Object.entries(statusData as Record<string, Partial<OrderStatusOption>>).map(([id, value]) => ({
+              id,
+              label: value.label || '',
+              description: value.description || '',
+              color: value.color || '#E2E8F0',
+              sortOrder: typeof value.sortOrder === 'number' ? value.sortOrder : 0,
+            })) as OrderStatusOption[])
+          : [];
+        const mergedStatusMap = new Map<string, OrderStatusOption>();
+        [...DEFAULT_STATUS_OPTIONS, ...statusList].forEach((option) => {
+          if (!mergedStatusMap.has(option.id)) {
+            mergedStatusMap.set(option.id, option);
+          }
+        });
+        setStatusOptions(
+          Array.from(mergedStatusMap.values()).sort((a, b) => a.sortOrder - b.sortOrder)
+        );
 
         const contractPrices = contractData
           ? Object.values(contractData as Record<string, Record<string, unknown>>).reduce<Record<string, number>>(
@@ -273,6 +368,27 @@ export default function OrdersAndSales() {
     return order.dealerConfirm ? 'Approved' : 'Pending';
   }, []);
 
+  const statusLookup = useMemo(() => {
+    return statusOptions.reduce<Record<string, OrderStatusOption>>((acc, option) => {
+      acc[option.id] = option;
+      return acc;
+    }, {});
+  }, [statusOptions]);
+
+  const dealerFilterOptions = useMemo(() => {
+    const combined = new Set<string>();
+    dealerOptions.forEach((dealer) => combined.add(dealer));
+    shows.forEach((show) => {
+      if (show.handoverDealer) {
+        combined.add(show.handoverDealer);
+      }
+    });
+    orders.forEach((order) => {
+      if (order.handoverDealer) combined.add(order.handoverDealer);
+    });
+    return Array.from(combined).sort((a, b) => a.localeCompare(b));
+  }, [dealerOptions, orders, shows]);
+
   const decoratedOrders: DecoratedOrder[] = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
     return orders
@@ -283,8 +399,12 @@ export default function OrdersAndSales() {
         return Number.isNaN(dateB) ? -1 : Number.isNaN(dateA) ? 1 : dateB - dateA;
       })
       .filter((order) => {
-        const dealerStatus = deriveDealerStatus(order);
-        if (statusFilter !== 'All' && dealerStatus !== statusFilter) return false;
+        if (statusFilter === 'unassigned' && order.orderStatusId) return false;
+        if (statusFilter !== 'all' && statusFilter !== 'unassigned' && order.orderStatusId !== statusFilter) {
+          return false;
+        }
+        const dealerValue = order.handoverDealer || showLookup[order.showId]?.handoverDealer || '';
+        if (dealerFilter !== 'all' && dealerValue !== dealerFilter) return false;
         if (!term) return true;
         const matchedShow = showLookup[order.showId];
         const haystack = [
@@ -293,8 +413,11 @@ export default function OrdersAndSales() {
           order.customerName,
           order.salesperson,
           order.model,
-          order.id,
           order.contractNumber,
+          order.dealNumber ? `deal-${order.dealNumber}` : '',
+          order.conditions,
+          order.topUpDate,
+          statusLookup[order.orderStatusId || '']?.label,
           matchedShow?.name,
           matchedShow?.handoverDealer,
         ]
@@ -308,12 +431,22 @@ export default function OrdersAndSales() {
         showName: showLookup[order.showId]?.name || 'Unknown Show',
         handoverDealer: order.handoverDealer || showLookup[order.showId]?.handoverDealer || 'Not set',
         dealerStatus: deriveDealerStatus(order),
-      }));
-  }, [deriveDealerStatus, orders, searchTerm, showLookup, statusFilter]);
+    }));
+  }, [dealerFilter, deriveDealerStatus, orders, searchTerm, showLookup, statusFilter, statusLookup]);
 
-  const totalOrders = orders.length;
-  const pendingOrders = orders.filter((order) => deriveDealerStatus(order) === 'Pending').length;
-  const approvedOrders = orders.filter((order) => deriveDealerStatus(order) === 'Approved').length;
+  const statusCounts = useMemo(
+    () =>
+      statusOptions.reduce<Record<string, number>>((acc, option) => {
+        acc[option.id] = orders.filter((order) => order.orderStatusId === option.id).length;
+        return acc;
+      }, {}),
+    [orders, statusOptions]
+  );
+
+  const unassignedCount = useMemo(
+    () => orders.filter((order) => !order.orderStatusId).length,
+    [orders]
+  );
 
   const selectedShow = useMemo(() => shows.find((show) => show.id === newOrder.showId), [newOrder.showId, shows]);
 
@@ -374,10 +507,99 @@ export default function OrdersAndSales() {
     return Array.from(all).sort((a, b) => a.localeCompare(b));
   }, [dealerOptions, selectedShow]);
 
+  useEffect(() => {
+    if (!editingOrder && !newOrder.orderStatusId && statusOptions.length > 0) {
+      setNewOrder((prev) => ({ ...prev, orderStatusId: statusOptions[0].id }));
+    }
+  }, [editingOrder, newOrder.orderStatusId, statusOptions]);
+
   const persistAuthExpiry = (expiresAt: number) => {
     setAuthExpiry(expiresAt);
     if (typeof window !== 'undefined') {
       window.localStorage.setItem(CONFIRMATION_CACHE_KEY, expiresAt.toString());
+    }
+  };
+
+  const getNextDealNumber = (showId: string) => {
+    const maxExisting = orders
+      .filter((order) => order.showId === showId)
+      .reduce((max, order) => Math.max(max, Number(order.dealNumber || 0)), 0);
+    return maxExisting + 1;
+  };
+
+  const handleStatusChange = async (order: ShowOrderWithContract, statusId: string) => {
+    if (!order.id) return;
+    const nextStatusId = statusId === 'none' ? '' : statusId;
+    try {
+      await dbUpdate(`showOrders/${order.id}`, {
+        orderStatusId: nextStatusId || null,
+      });
+      setOrders((prev) =>
+        prev.map((existing) =>
+          existing.id === order.id ? { ...existing, orderStatusId: nextStatusId } : existing
+        )
+      );
+      toast.success('Status updated');
+    } catch (err) {
+      console.error('Error updating status:', err);
+      toast.error('Failed to update status');
+    }
+  };
+
+  const handleOrderStatusSelection = (order: ShowOrderWithContract, statusId: string) => {
+    if (statusId === 'none') {
+      handleStatusChange(order, statusId);
+      return;
+    }
+    if (statusId === CONFIRMATION_STATUS_ID) {
+      handleConfirmationClick(order);
+      return;
+    }
+    if (statusId === CANCELLATION_STATUS_ID) {
+      handleCancelClick(order);
+      return;
+    }
+    handleStatusChange(order, statusId);
+  };
+
+  const getInlineValue = (
+    order: ShowOrderWithContract,
+    field: 'conditions' | 'topUpDate'
+  ) => inlineEdits[order.id || '']?.[field] ?? order[field] ?? '';
+
+  const updateInlineDraft = (
+    orderId: string | undefined,
+    field: 'conditions' | 'topUpDate',
+    value: string
+  ) => {
+    if (!orderId) return;
+    setInlineEdits((prev) => ({
+      ...prev,
+      [orderId]: {
+        ...prev[orderId],
+        [field]: value,
+      },
+    }));
+  };
+
+  const saveInlineField = async (
+    order: ShowOrderWithContract,
+    field: 'conditions' | 'topUpDate'
+  ) => {
+    if (!order.id) return;
+    const value = (inlineEdits[order.id]?.[field] ?? order[field] ?? '').trim();
+    if ((order[field] ?? '') === value) return;
+    try {
+      await dbUpdate(`showOrders/${order.id}`, {
+        [field]: value,
+      } as unknown as Record<string, unknown>);
+      setOrders((prev) =>
+        prev.map((existing) => (existing.id === order.id ? { ...existing, [field]: value } : existing))
+      );
+      toast.success('Order updated');
+    } catch (err) {
+      console.error('Error updating order', err);
+      toast.error('Failed to update order');
     }
   };
 
@@ -394,11 +616,18 @@ export default function OrdersAndSales() {
         dealerConfirm: true,
         approvedBy: 'Orders Dashboard',
         date: order.date,
+        orderStatusId: CONFIRMATION_STATUS_ID,
       });
       setOrders((prev) =>
         prev.map((existing) =>
           existing.id === order.id
-            ? { ...existing, status: 'Approved', dealerConfirm: true, approvedBy: 'Orders Dashboard' }
+            ? {
+                ...existing,
+                status: 'Approved',
+                dealerConfirm: true,
+                approvedBy: 'Orders Dashboard',
+                orderStatusId: CONFIRMATION_STATUS_ID,
+              }
             : existing
         )
       );
@@ -438,11 +667,18 @@ export default function OrdersAndSales() {
         status: 'Cancelled',
         dealerConfirm: false,
         cancelledBy: 'Orders Dashboard',
+        orderStatusId: CANCELLATION_STATUS_ID,
       });
       setOrders((prev) =>
         prev.map((existing) =>
           existing.id === order.id
-            ? { ...existing, status: 'Cancelled', dealerConfirm: false, cancelledBy: 'Orders Dashboard' }
+            ? {
+                ...existing,
+                status: 'Cancelled',
+                dealerConfirm: false,
+                cancelledBy: 'Orders Dashboard',
+                orderStatusId: CANCELLATION_STATUS_ID,
+              }
             : existing
         )
       );
@@ -450,35 +686,6 @@ export default function OrdersAndSales() {
     } catch (err) {
       console.error('Error cancelling order:', err);
       toast.error('Failed to cancel order. Please try again.');
-    } finally {
-      setPendingAction(null);
-    }
-  };
-
-  const recoverOrder = async (order: ShowOrderWithContract) => {
-    if (!order.id) {
-      toast.error('Order is missing an ID.');
-      setPendingAction(null);
-      return;
-    }
-
-    try {
-      await dbUpdate(`showOrders/${order.id}`, {
-        status: 'Approved',
-        dealerConfirm: true,
-        approvedBy: 'Orders Dashboard',
-      });
-      setOrders((prev) =>
-        prev.map((existing) =>
-          existing.id === order.id
-            ? { ...existing, status: 'Approved', dealerConfirm: true, approvedBy: 'Orders Dashboard' }
-            : existing
-        )
-      );
-      toast.success(`Order ${order.id} recovered.`);
-    } catch (err) {
-      console.error('Error recovering order:', err);
-      toast.error('Failed to recover order. Please try again.');
     } finally {
       setPendingAction(null);
     }
@@ -499,21 +706,6 @@ export default function OrdersAndSales() {
     cancelOrder(order);
   };
 
-  const handleRecoverClick = (order: ShowOrderWithContract) => {
-    if (deriveDealerStatus(order) !== 'Cancelled') {
-      toast.info('Order is not cancelled.');
-      return;
-    }
-
-    if (requiresPassword) {
-      setPendingAction({ type: 'recover', order });
-      setIsDialogOpen(true);
-      return;
-    }
-
-    recoverOrder(order);
-  };
-
   const handlePasswordSubmit = () => {
     if (passwordInput.trim() !== CONFIRMATION_PASSWORD) {
       toast.error('Incorrect password');
@@ -530,8 +722,6 @@ export default function OrdersAndSales() {
       confirmOrder(pendingAction.order);
     } else if (pendingAction.type === 'cancel') {
       cancelOrder(pendingAction.order);
-    } else {
-      recoverOrder(pendingAction.order);
     }
   };
 
@@ -580,6 +770,9 @@ export default function OrdersAndSales() {
       contractNumber: '',
       handoverDealer: '',
       salespersonOrderComments: '',
+      conditions: '',
+      topUpDate: '',
+      orderStatusId: statusOptions[0]?.id || '',
     });
     setAttachmentFiles([]);
     setExistingAttachments([]);
@@ -616,6 +809,7 @@ export default function OrdersAndSales() {
       const uploadedAttachments = await uploadAttachments(orderId, attachmentFiles);
       const mergedAttachments = [...existingAttachments, ...uploadedAttachments];
 
+      const dealNumber = editingOrder?.dealNumber ?? getNextDealNumber(newOrder.showId);
       const order: ShowOrderWithContract = {
         id: orderId,
         showId: newOrder.showId,
@@ -631,6 +825,11 @@ export default function OrdersAndSales() {
         status: 'Pending',
         salespersonOrderComments: newOrder.salespersonOrderComments || '',
         orderAttachments: mergedAttachments,
+        dealNumber,
+        deposit: editingOrder?.deposit ?? DEFAULT_DEPOSIT,
+        conditions: newOrder.conditions || '',
+        topUpDate: newOrder.topUpDate || '',
+        orderStatusId: newOrder.orderStatusId || '',
       };
 
       if (editingOrder) {
@@ -703,6 +902,9 @@ export default function OrdersAndSales() {
       contractNumber: order.contractNumber || '',
       handoverDealer: order.handoverDealer || '',
       salespersonOrderComments: order.salespersonOrderComments || '',
+      conditions: order.conditions || '',
+      topUpDate: order.topUpDate || '',
+      orderStatusId: order.orderStatusId || '',
     });
     setIsAddingOrder(true);
   };
@@ -735,44 +937,49 @@ export default function OrdersAndSales() {
         </Card>
       )}
 
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-3 xl:grid-cols-4">
         <Card
           role="button"
           tabIndex={0}
-          onClick={() => setStatusFilter('All')}
-          onKeyDown={(event) => event.key === 'Enter' && setStatusFilter('All')}
-          className={cn('cursor-pointer transition shadow-sm', statusFilter === 'All' ? 'ring-2 ring-blue-500' : '')}
+          onClick={() => setStatusFilter('all')}
+          onKeyDown={(event) => event.key === 'Enter' && setStatusFilter('all')}
+          className={cn('cursor-pointer transition shadow-sm', statusFilter === 'all' ? 'ring-2 ring-blue-500' : '')}
         >
           <CardHeader className="pb-2">
-            <CardDescription>Total Orders</CardDescription>
-            <CardTitle className="text-3xl">{totalOrders}</CardTitle>
+            <CardDescription>All Statuses</CardDescription>
+            <CardTitle className="text-3xl">{orders.length}</CardTitle>
           </CardHeader>
         </Card>
+        {statusOptions.map((status) => (
+          <Card
+            key={status.id}
+            role="button"
+            tabIndex={0}
+            onClick={() => setStatusFilter(status.id)}
+            onKeyDown={(event) => event.key === 'Enter' && setStatusFilter(status.id)}
+            className={cn(
+              'cursor-pointer transition shadow-sm',
+              statusFilter === status.id ? 'ring-2 ring-slate-400' : ''
+            )}
+            style={{ borderTop: `4px solid ${status.color}` }}
+          >
+            <CardHeader className="pb-2">
+              <CardDescription>{status.label || 'Untitled status'}</CardDescription>
+              <CardTitle className="text-3xl">{statusCounts[status.id] ?? 0}</CardTitle>
+              {status.description && <p className="text-xs text-slate-500">{status.description}</p>}
+            </CardHeader>
+          </Card>
+        ))}
         <Card
           role="button"
           tabIndex={0}
-          onClick={() => setStatusFilter('Pending')}
-          onKeyDown={(event) => event.key === 'Enter' && setStatusFilter('Pending')}
-          className={cn(
-            'cursor-pointer transition shadow-sm',
-            statusFilter === 'Pending' ? 'ring-2 ring-yellow-500' : ''
-          )}
+          onClick={() => setStatusFilter('unassigned')}
+          onKeyDown={(event) => event.key === 'Enter' && setStatusFilter('unassigned')}
+          className={cn('cursor-pointer transition shadow-sm', statusFilter === 'unassigned' ? 'ring-2 ring-slate-400' : '')}
         >
           <CardHeader className="pb-2">
-            <CardDescription>Pending Confirmation</CardDescription>
-            <CardTitle className="text-3xl text-yellow-600">{pendingOrders}</CardTitle>
-          </CardHeader>
-        </Card>
-        <Card
-          role="button"
-          tabIndex={0}
-          onClick={() => setStatusFilter('Approved')}
-          onKeyDown={(event) => event.key === 'Enter' && setStatusFilter('Approved')}
-          className={cn('cursor-pointer transition shadow-sm', statusFilter === 'Approved' ? 'ring-2 ring-green-500' : '')}
-        >
-          <CardHeader className="pb-2">
-            <CardDescription>Approved Orders</CardDescription>
-            <CardTitle className="text-3xl text-green-600">{approvedOrders}</CardTitle>
+            <CardDescription>Unassigned Status</CardDescription>
+            <CardTitle className="text-3xl">{unassignedCount}</CardTitle>
           </CardHeader>
         </Card>
       </div>
@@ -1101,6 +1308,11 @@ export default function OrdersAndSales() {
                             onChange={(event) => setNewOrder({ ...newOrder, date: event.target.value })}
                           />
                         </div>
+                        <div className="space-y-2">
+                          <Label>Deposit</Label>
+                          <Input value={formatCurrency(DEFAULT_DEPOSIT)} disabled />
+                          <p className="text-xs text-muted-foreground">Deposit is fixed at $5,000 for every order.</p>
+                        </div>
                       </div>
                       <div className="space-y-3">
                         <Label>Salesperson Order Comments</Label>
@@ -1131,6 +1343,49 @@ export default function OrdersAndSales() {
                             </div>
                           )}
                         </div>
+                        <div className="space-y-2">
+                          <Label>Conditions</Label>
+                          <Input
+                            placeholder="Add any deal conditions"
+                            value={newOrder.conditions || ''}
+                            onChange={(event) => setNewOrder({ ...newOrder, conditions: event.target.value })}
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Top Up Date</Label>
+                          <Input
+                            placeholder="Add top up details"
+                            value={newOrder.topUpDate || ''}
+                            onChange={(event) => setNewOrder({ ...newOrder, topUpDate: event.target.value })}
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Status</Label>
+                          <Select
+                            value={newOrder.orderStatusId || 'none'}
+                            onValueChange={(value) =>
+                              setNewOrder({ ...newOrder, orderStatusId: value === 'none' ? '' : value })
+                            }
+                          >
+                            <SelectTrigger>
+                              <SelectValue placeholder="Select status" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="none">No status</SelectItem>
+                              {statusOptions.map((status) => (
+                                <SelectItem key={status.id} value={status.id}>
+                                  <div className="flex items-center gap-2">
+                                    <span
+                                      className="h-3 w-3 rounded-full border border-slate-200"
+                                      style={{ backgroundColor: status.color }}
+                                    />
+                                    <span>{status.label}</span>
+                                  </div>
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
                       </div>
                     </div>
                     <DialogFooter>
@@ -1146,11 +1401,26 @@ export default function OrdersAndSales() {
                 <div className="flex items-center gap-2">
                   <Search className="h-4 w-4 text-gray-500" />
                   <Input
-                    placeholder="Search by order ID, show, model, customer, salesperson or type"
+                    placeholder="Search by deal #, show, model, customer, salesperson or type"
                     value={searchTerm}
                     onChange={(event) => setSearchTerm(event.target.value)}
                     className="w-full lg:w-72"
                   />
+                </div>
+                <div className="min-w-[200px]">
+                  <Select value={dealerFilter} onValueChange={setDealerFilter}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Filter dealer" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All dealers</SelectItem>
+                      {dealerFilterOptions.map((dealer) => (
+                        <SelectItem key={dealer} value={dealer}>
+                          {dealer}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
               </div>
             </div>
@@ -1161,25 +1431,41 @@ export default function OrdersAndSales() {
                 <TableHeader>
                   <TableRow>
                     <TableHead className="w-10" />
-                    <TableHead>Order ID</TableHead>
+                    <TableHead>Ordering Date</TableHead>
+                    <TableHead>Deal #</TableHead>
+                    <TableHead>Customer Name</TableHead>
                     <TableHead>Model</TableHead>
                     <TableHead>Contract Number</TableHead>
                     <TableHead className="text-right">Contract Value</TableHead>
-                    <TableHead>Customer</TableHead>
-                    <TableHead>Show</TableHead>
+                    <TableHead>Sales Person</TableHead>
+                    <TableHead>Deposit</TableHead>
+                    <TableHead>Conditions</TableHead>
+                    <TableHead>Top Up Date</TableHead>
                     <TableHead>Type</TableHead>
-                    <TableHead>Salesperson</TableHead>
-                    <TableHead>Date</TableHead>
-                    <TableHead>Dealer Status</TableHead>
                     <TableHead>Handover Dealer</TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
+                    <TableHead>Dealer Status</TableHead>
+                    <TableHead>Status</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {decoratedOrders.map((order) => {
                     const rowKey = order.id || `${order.showId}-${order.date}`;
+                    const statusOption = order.orderStatusId ? statusLookup[order.orderStatusId] : undefined;
+                    const rowBackground = statusOption?.color;
+                    const rowTextColor = rowBackground ? getTextColorForBackground(rowBackground) : undefined;
                     return (
-                      <TableRow key={rowKey}>
+                      <TableRow
+                        key={rowKey}
+                        className="transition-colors"
+                        style={
+                          rowBackground
+                            ? {
+                                backgroundColor: rowBackground,
+                                color: rowTextColor,
+                              }
+                            : undefined
+                        }
+                      >
                         <TableCell>
                           <Button
                             variant="ghost"
@@ -1194,53 +1480,70 @@ export default function OrdersAndSales() {
                             </span>
                           </Button>
                         </TableCell>
-                        <TableCell className="font-medium">{order.id || 'N/A'}</TableCell>
+                        <TableCell>{formatDate(order.date)}</TableCell>
+                        <TableCell className="font-semibold">#{order.dealNumber ?? '-'}</TableCell>
+                        <TableCell>{order.customerName || 'Not set'}</TableCell>
                         <TableCell>{order.model || 'Not set'}</TableCell>
                         <TableCell>{order.contractNumber || 'Not set'}</TableCell>
                         <TableCell className="text-right">{formatCurrency(order.contractValue)}</TableCell>
-                        <TableCell>{order.customerName || 'Not set'}</TableCell>
-                        <TableCell>{order.showName}</TableCell>
-                        <TableCell>{order.orderType}</TableCell>
                         <TableCell>{order.salesperson || 'Unassigned'}</TableCell>
-                        <TableCell>{formatDate(order.date)}</TableCell>
+                        <TableCell>
+                          <span className="inline-flex items-center rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-800">
+                            {formatCurrency(order.deposit ?? DEFAULT_DEPOSIT)}
+                          </span>
+                        </TableCell>
+                        <TableCell className="max-w-[220px]">
+                          <Input
+                            value={getInlineValue(order, 'conditions')}
+                            onChange={(event) =>
+                              updateInlineDraft(order.id, 'conditions', event.target.value)
+                            }
+                            onBlur={() => saveInlineField(order, 'conditions')}
+                            placeholder="Add conditions"
+                            className="min-w-[180px]"
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <Input
+                            value={getInlineValue(order, 'topUpDate')}
+                            onChange={(event) =>
+                              updateInlineDraft(order.id, 'topUpDate', event.target.value)
+                            }
+                            onBlur={() => saveInlineField(order, 'topUpDate')}
+                            placeholder="Add top up details"
+                            className="min-w-[150px]"
+                          />
+                        </TableCell>
+                        <TableCell>{order.orderType}</TableCell>
+                        <TableCell>{order.handoverDealer}</TableCell>
                         <TableCell>
                           <span className={`rounded-full px-2 py-1 text-xs font-semibold ${statusStyles[order.dealerStatus]}`}>
                             {order.dealerStatus}
                           </span>
                         </TableCell>
-                        <TableCell>{order.handoverDealer}</TableCell>
-                        <TableCell className="text-right">
-                          <div className="flex flex-wrap justify-end gap-2">
-                            {order.dealerStatus === 'Cancelled' ? (
-                              <Button
-                                size="sm"
-                                className="bg-emerald-600 text-white hover:bg-emerald-700"
-                                onClick={() => handleRecoverClick(order)}
-                              >
-                                Recover
-                              </Button>
-                            ) : (
-                              <>
-                                {order.dealerStatus === 'Approved' ? (
-                                  <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-800">
-                                    Confirmed
-                                  </span>
-                                ) : (
-                                  <Button
-                                    size="sm"
-                                    variant="secondary"
-                                    className="bg-yellow-100 text-yellow-800 hover:bg-yellow-200"
-                                    onClick={() => handleConfirmationClick(order)}
-                                  >
-                                    Confirmation
-                                  </Button>
-                                )}
-                                <Button size="sm" variant="destructive" onClick={() => handleCancelClick(order)}>
-                                  Cancellation
-                                </Button>
-                              </>
-                            )}
-                          </div>
+                        <TableCell>
+                          <Select
+                            value={order.orderStatusId || 'none'}
+                            onValueChange={(value) => handleOrderStatusSelection(order, value)}
+                          >
+                            <SelectTrigger className="min-w-[160px]">
+                              <SelectValue placeholder="Select status" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="none">No status</SelectItem>
+                              {statusOptions.map((status) => (
+                                <SelectItem key={status.id} value={status.id}>
+                                  <div className="flex items-center gap-2">
+                                    <span
+                                      className="h-3 w-3 rounded-full border border-slate-200"
+                                      style={{ backgroundColor: status.color }}
+                                    />
+                                    <span>{status.label}</span>
+                                  </div>
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
                         </TableCell>
                       </TableRow>
                     );
@@ -1259,16 +1562,12 @@ export default function OrdersAndSales() {
             <DialogTitle>
               {pendingAction?.type === 'cancel'
                 ? 'Enter Cancellation Password'
-                : pendingAction?.type === 'recover'
-                  ? 'Enter Recovery Password'
-                  : 'Enter Confirmation Password'}
+                : 'Enter Confirmation Password'}
             </DialogTitle>
             <DialogDescription>
               {pendingAction?.type === 'cancel'
                 ? 'Cancelling an order requires administrator approval.'
-                : pendingAction?.type === 'recover'
-                  ? 'Recovering an order requires administrator approval.'
-                  : 'Confirming an order requires administrator approval.'}
+                : 'Confirming an order requires administrator approval.'}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3 py-4">
@@ -1287,11 +1586,7 @@ export default function OrdersAndSales() {
             </Button>
             <Button onClick={handlePasswordSubmit}>
               <CheckCircle2 className="mr-2 h-4 w-4" />
-              {pendingAction?.type === 'cancel'
-                ? 'Cancel Order'
-                : pendingAction?.type === 'recover'
-                  ? 'Recover Order'
-                  : 'Confirm'}
+              {pendingAction?.type === 'cancel' ? 'Cancel Order' : 'Confirm'}
             </Button>
           </DialogFooter>
         </DialogContent>
