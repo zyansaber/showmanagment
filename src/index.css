@@ -95,8 +95,16 @@
     @apply border-border;
   }
 
+  html {
+    @apply bg-background text-foreground;
+    height: 100%;
+    zoom: 0.8;
+  }
+
   body {
     @apply bg-background text-foreground;
+    width: 125%;
+    min-height: 125%;
   }
 }
 
