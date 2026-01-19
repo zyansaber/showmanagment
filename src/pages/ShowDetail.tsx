@@ -2277,7 +2277,7 @@ export default function ShowDetail() {
                       Add Order
                     </Button>
                   </DialogTrigger>
-                  <DialogContent className="max-w-5xl">
+                  <DialogContent className="max-h-[90vh] w-full max-w-4xl overflow-y-auto">
                     <DialogHeader>
                       <DialogTitle>{editingOrder ? 'Edit Order' : 'Add New Order'}</DialogTitle>
                       <DialogDescription>
