@@ -263,43 +263,30 @@ export default function ShowTeamAssignments() {
           <CardDescription>Select a show to assign team members and track their days.</CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="rounded-xl border border-slate-200 bg-gradient-to-br from-slate-50 via-white to-slate-100 p-5 shadow-sm">
-            <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
-              <div className="space-y-2">
-                <Label className="text-xs uppercase tracking-wide text-slate-500">Show</Label>
-                <Select value={selectedShowId} onValueChange={setSelectedShowId}>
-                  <SelectTrigger className="w-full lg:w-[320px]">
-                    <SelectValue placeholder="Choose a show" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {selectableShows.map((show) => (
-                      <SelectItem key={show.id} value={show.id!}>
-                        <div className="flex flex-col gap-1">
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="font-medium">{show.name || show.id}</span>
-                            {renderTimingBadge(show)}
-                          </div>
-                          <span className="text-xs text-slate-500">{formatDateRange(show)}</span>
+          <div className="rounded-2xl border border-slate-200/80 bg-gradient-to-br from-white via-slate-50 to-blue-50 p-6 shadow-md">
+            <div className="space-y-3">
+              <Label className="text-xs uppercase tracking-[0.2em] text-slate-500">Choose show</Label>
+              <Select value={selectedShowId} onValueChange={setSelectedShowId}>
+                <SelectTrigger className="h-14 w-full rounded-xl border-slate-200 bg-white/90 text-base shadow-sm transition hover:border-blue-200 focus:ring-2 focus:ring-blue-200 lg:text-lg">
+                  <SelectValue placeholder="Select a show to manage the team" />
+                </SelectTrigger>
+                <SelectContent>
+                  {selectableShows.map((show) => (
+                    <SelectItem key={show.id} value={show.id!}>
+                      <div className="flex flex-col gap-1">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-medium">{show.name || show.id}</span>
+                          {renderTimingBadge(show)}
                         </div>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="flex-1 rounded-lg border border-white/70 bg-white/80 p-4 shadow-sm">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div>
-                    <p className="text-xs uppercase tracking-wide text-slate-500">Selected show</p>
-                    <p className="text-lg font-semibold text-slate-900">
-                      {selectedShow?.name || 'No show selected'}
-                    </p>
-                  </div>
-                  {renderTimingBadge(selectedShow)}
-                </div>
-                <p className="mt-2 text-sm text-slate-600">
-                  {selectedShow ? formatDateRange(selectedShow) : 'Pick a show to view its team.'}
-                </p>
-              </div>
+                        <span className="text-xs text-slate-500">{formatDateRange(show)}</span>
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-sm text-slate-500">
+                Pick a show to unlock team assignments and show day tracking.
+              </p>
             </div>
           </div>
         </CardContent>
