@@ -15,8 +15,6 @@ import {
   Briefcase,
   ClipboardList,
   FileSpreadsheet,
-  FileText,
-  PenTool,
   Wallet,
   Banknote,
   Calculator,
@@ -26,12 +24,10 @@ import Dashboard from './pages/Dashboard';
 import ShowCalendar from './pages/ShowCalendar';
 import ShowDetail from './pages/ShowDetail';
 import ShowManagement from './pages/ShowManagement';
-import ShowLayoutDesigner from './pages/ShowLayoutDesigner';
 import TeamManagement from './pages/TeamManagement';
 import PowerBI from './pages/PowerBI';
 import ProcessTemplates from './pages/ProcessTemplates';
 import OrdersAndSales from './pages/OrdersAndSales';
-import ShowReport from './pages/ShowReport';
 import ShowBudgetExpense from './pages/ShowBudgetExpense';
 import AIHelpAssistant from './components/AIHelpAssistant';
 import Finance from './pages/Finance';
@@ -39,6 +35,7 @@ import FinanceDetail from './pages/FinanceDetail';
 import Login from './pages/Login';
 import AdminSettings from './pages/AdminSettings';
 import BudgetSetting from './pages/BudgetSetting';
+import ShowTeamAssignments from './pages/ShowTeamAssignments';
 import ProtectedRoute from './components/ProtectedRoute';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { Navigate } from 'react-router-dom';
@@ -57,9 +54,8 @@ function Sidebar({ isOpen, setIsOpen }: { isOpen: boolean; setIsOpen: (open: boo
         { icon: LayoutDashboard, label: 'Dashboard', path: '/' },
         { icon: Calendar, label: 'Show Calendar', path: '/calendar' },
         { icon: Briefcase, label: 'Show Management', path: '/shows' },
-        { icon: PenTool, label: 'Show Layout Studio', path: '/layout-studio' },
         { icon: FileSpreadsheet, label: 'Orders & Sales', path: '/orders' },
-        { icon: FileText, label: 'Show Report', path: '/show-report' },
+        { icon: Users, label: 'Show Team', path: '/show-team' },
       ],
     },
     {
@@ -280,15 +276,6 @@ function AppLayout() {
               }
             />
             <Route
-              path="/layout-studio"
-              element={
-                <ProtectedRoute>
-                  <ShowLayoutDesigner />
-                </ProtectedRoute>
-              }
-            />
-
-            <Route
               path="/orders"
               element={
                 <ProtectedRoute>
@@ -321,18 +308,18 @@ function AppLayout() {
               }
             />
             <Route
-              path="/show-report"
-              element={
-                <ProtectedRoute>
-                  <ShowReport />
-                </ProtectedRoute>
-              }
-            />
-            <Route
               path="/budget"
               element={
                 <ProtectedRoute>
                   <ShowBudgetExpense />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/show-team"
+              element={
+                <ProtectedRoute>
+                  <ShowTeamAssignments />
                 </ProtectedRoute>
               }
             />
