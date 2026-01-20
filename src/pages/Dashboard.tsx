@@ -664,34 +664,25 @@ export default function Dashboard() {
                           </div>
                         )}
                       </div>
-                      {entry.isCurrent ? (
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                          <div className="flex items-center justify-between rounded-lg border bg-slate-50 px-3 py-2">
-                            <div>
-                              <p className="text-xs uppercase tracking-wide text-slate-500">Sales</p>
-                              <p className="text-lg font-semibold text-slate-900">{formatNumber(entry.data.salesActual)}</p>
-                            </div>
-                            <div className="text-right">
-                              <p className="text-xs text-slate-500">Target</p>
-                              <p className="text-sm font-semibold text-blue-700">{formatNumber(entry.data.targetSales)}</p>
-                            </div>
-                          </div>
-                          <div className="flex items-center justify-between rounded-lg border bg-slate-50 px-3 py-2">
-                            <div>
-                              <p className="text-xs uppercase tracking-wide text-slate-500">Team Members</p>
-                              <p className="text-lg font-semibold text-slate-900">{entry.data.teamMemberCount}</p>
-                            </div>
-                            <div className="text-right text-xs text-slate-500">Assigned to this show</div>
-                          </div>
-                        </div>
-                      ) : (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <div className="flex items-center justify-between rounded-lg border bg-slate-50 px-3 py-2">
                           <div>
                             <p className="text-xs uppercase tracking-wide text-slate-500">Sales</p>
                             <p className="text-lg font-semibold text-slate-900">{formatNumber(entry.data.salesActual)}</p>
                           </div>
+                          <div className="text-right">
+                            <p className="text-xs text-slate-500">Target</p>
+                            <p className="text-sm font-semibold text-blue-700">{formatNumber(entry.data.targetSales)}</p>
+                          </div>
                         </div>
-                      )}
+                        <div className="flex items-center justify-between rounded-lg border bg-slate-50 px-3 py-2">
+                          <div>
+                            <p className="text-xs uppercase tracking-wide text-slate-500">Team Members</p>
+                            <p className="text-lg font-semibold text-slate-900">{entry.data.teamMemberCount}</p>
+                          </div>
+                          <div className="text-right text-xs text-slate-500">Assigned to this show</div>
+                        </div>
+                      </div>
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         {[
                           {
