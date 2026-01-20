@@ -3,6 +3,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -44,6 +45,11 @@ type ShowOrderWithContract = ShowOrder & {
   conditions?: string;
   topUpDate?: string;
   deposit?: number;
+  paymentMethod?: 'Cash' | 'Finance' | '';
+  tradeIn?: boolean;
+  tradeInAllowance?: number;
+  depositReceived?: number;
+  expectedHandoverDate?: string;
   orderStatusId?: string;
 };
 
@@ -225,6 +231,8 @@ export default function OrdersAndSales() {
   const [attachmentFiles, setAttachmentFiles] = useState<File[]>([]);
   const [existingAttachments, setExistingAttachments] = useState<OrderAttachment[]>([]);
   const [isSavingOrder, setIsSavingOrder] = useState(false);
+  const [isDetailOpen, setIsDetailOpen] = useState(false);
+  const [detailOrder, setDetailOrder] = useState<DecoratedOrder | null>(null);
   const [newOrder, setNewOrder] = useState<Partial<ShowOrderWithContract>>({
     chassisNumber: '',
     model: '',
@@ -240,6 +248,11 @@ export default function OrdersAndSales() {
     salespersonOrderComments: '',
     conditions: '',
     topUpDate: '',
+    paymentMethod: '',
+    tradeIn: false,
+    tradeInAllowance: 0,
+    depositReceived: DEFAULT_DEPOSIT,
+    expectedHandoverDate: '',
     orderStatusId: '',
   });
   const [statusFilter, setStatusFilter] = useState<'all' | 'unassigned' | string>('all');
@@ -391,6 +404,11 @@ export default function OrdersAndSales() {
           order.dealNumber ? `deal-${order.dealNumber}` : '',
           order.conditions,
           order.topUpDate,
+          order.paymentMethod,
+          order.tradeIn ? 'trade-in' : '',
+          order.tradeInAllowance ? `${order.tradeInAllowance}` : '',
+          order.depositReceived ? `${order.depositReceived}` : '',
+          order.expectedHandoverDate,
           statusLookup[order.orderStatusId || '']?.label,
           matchedShow?.name,
           matchedShow?.handoverDealer,
@@ -682,6 +700,11 @@ export default function OrdersAndSales() {
       salespersonOrderComments: '',
       conditions: '',
       topUpDate: '',
+      paymentMethod: '',
+      tradeIn: false,
+      tradeInAllowance: 0,
+      depositReceived: DEFAULT_DEPOSIT,
+      expectedHandoverDate: '',
       orderStatusId: '',
     });
     setAttachmentFiles([]);
@@ -739,6 +762,11 @@ export default function OrdersAndSales() {
         deposit: editingOrder?.deposit ?? DEFAULT_DEPOSIT,
         conditions: newOrder.conditions || '',
         topUpDate: newOrder.topUpDate || '',
+        paymentMethod: newOrder.paymentMethod || '',
+        tradeIn: Boolean(newOrder.tradeIn),
+        tradeInAllowance: parseContractValue(newOrder.tradeInAllowance),
+        depositReceived: parseContractValue(newOrder.depositReceived),
+        expectedHandoverDate: newOrder.expectedHandoverDate || '',
         orderStatusId: newOrder.orderStatusId || '',
       };
 
@@ -814,6 +842,11 @@ export default function OrdersAndSales() {
       salespersonOrderComments: order.salespersonOrderComments || '',
       conditions: order.conditions || '',
       topUpDate: order.topUpDate || '',
+      paymentMethod: order.paymentMethod || '',
+      tradeIn: Boolean(order.tradeIn),
+      tradeInAllowance: order.tradeInAllowance ?? 0,
+      depositReceived: order.depositReceived ?? order.deposit ?? DEFAULT_DEPOSIT,
+      expectedHandoverDate: order.expectedHandoverDate || '',
       orderStatusId: order.orderStatusId || '',
     });
     setIsAddingOrder(true);
@@ -1221,9 +1254,78 @@ export default function OrdersAndSales() {
                           />
                         </div>
                         <div className="space-y-2">
-                          <Label>Deposit</Label>
-                          <Input value={formatCurrency(DEFAULT_DEPOSIT)} disabled />
-                          <p className="text-xs text-muted-foreground">Deposit is fixed at $5,000 for every order.</p>
+                          <Label>Payment Method</Label>
+                          <div className="flex flex-wrap gap-4">
+                            <label className="flex items-center gap-2 text-sm text-slate-700">
+                              <Checkbox
+                                checked={newOrder.paymentMethod === 'Cash'}
+                                onCheckedChange={(checked) =>
+                                  setNewOrder({ ...newOrder, paymentMethod: checked ? 'Cash' : '' })
+                                }
+                              />
+                              Cash
+                            </label>
+                            <label className="flex items-center gap-2 text-sm text-slate-700">
+                              <Checkbox
+                                checked={newOrder.paymentMethod === 'Finance'}
+                                onCheckedChange={(checked) =>
+                                  setNewOrder({ ...newOrder, paymentMethod: checked ? 'Finance' : '' })
+                                }
+                              />
+                              Finance
+                            </label>
+                          </div>
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Trade In</Label>
+                          <label className="flex items-center gap-2 text-sm text-slate-700">
+                            <Checkbox
+                              checked={Boolean(newOrder.tradeIn)}
+                              onCheckedChange={(checked) =>
+                                setNewOrder({
+                                  ...newOrder,
+                                  tradeIn: Boolean(checked),
+                                  tradeInAllowance: checked ? newOrder.tradeInAllowance ?? 0 : 0,
+                                })
+                              }
+                            />
+                            Trade-in included
+                          </label>
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Trade-in Allowance (AUD)</Label>
+                          <Input
+                            type="number"
+                            min={0}
+                            step={1}
+                            placeholder="0"
+                            disabled={!newOrder.tradeIn}
+                            value={newOrder.tradeInAllowance ?? ''}
+                            onChange={(event) =>
+                              setNewOrder({ ...newOrder, tradeInAllowance: parseContractValue(event.target.value) })
+                            }
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Deposit Received (AUD)</Label>
+                          <Input
+                            type="number"
+                            min={0}
+                            step={1}
+                            placeholder="0"
+                            value={newOrder.depositReceived ?? ''}
+                            onChange={(event) =>
+                              setNewOrder({ ...newOrder, depositReceived: parseContractValue(event.target.value) })
+                            }
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Expected Handover Date</Label>
+                          <Input
+                            type="date"
+                            value={newOrder.expectedHandoverDate || ''}
+                            onChange={(event) => setNewOrder({ ...newOrder, expectedHandoverDate: event.target.value })}
+                          />
                         </div>
                       </div>
                       <div className="space-y-3">
@@ -1342,7 +1444,7 @@ export default function OrdersAndSales() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="w-10" />
+                    <TableHead className="w-24">Actions</TableHead>
                     <TableHead>Ordering Date</TableHead>
                     <TableHead>Deal #</TableHead>
                     <TableHead>Customer Name</TableHead>
@@ -1350,7 +1452,7 @@ export default function OrdersAndSales() {
                     <TableHead>Contract Number</TableHead>
                     <TableHead className="text-right">Contract Value</TableHead>
                     <TableHead>Sales Person</TableHead>
-                    <TableHead>Deposit</TableHead>
+                    <TableHead>Deposit Received</TableHead>
                     <TableHead>Conditions</TableHead>
                     <TableHead>Top Up Date</TableHead>
                     <TableHead>Type</TableHead>
@@ -1379,18 +1481,30 @@ export default function OrdersAndSales() {
                         }
                       >
                         <TableCell>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-8 w-8 p-0"
-                            onClick={() => handleEditOrder(order, order.dealerStatus)}
-                            disabled={order.dealerStatus === 'Confirmed'}
-                            aria-label="Edit order"
-                          >
-                            <span role="img" aria-hidden="true">
-                              🖊
-                            </span>
-                          </Button>
+                          <div className="flex items-center gap-2">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-8 w-8 p-0"
+                              onClick={() => handleEditOrder(order, order.dealerStatus)}
+                              disabled={order.dealerStatus === 'Confirmed'}
+                              aria-label="Edit order"
+                            >
+                              <span role="img" aria-hidden="true">
+                                🖊
+                              </span>
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                setDetailOrder(order);
+                                setIsDetailOpen(true);
+                              }}
+                            >
+                              Details
+                            </Button>
+                          </div>
                         </TableCell>
                         <TableCell>{formatDate(order.date)}</TableCell>
                         <TableCell className="font-semibold">#{order.dealNumber ?? '-'}</TableCell>
@@ -1401,7 +1515,7 @@ export default function OrdersAndSales() {
                         <TableCell>{order.salesperson || 'Unassigned'}</TableCell>
                         <TableCell>
                           <span className="inline-flex items-center rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-800">
-                            {formatCurrency(order.deposit ?? DEFAULT_DEPOSIT)}
+                            {formatCurrency(order.depositReceived ?? order.deposit ?? DEFAULT_DEPOSIT)}
                           </span>
                         </TableCell>
                         <TableCell className="max-w-[220px]">
@@ -1468,6 +1582,137 @@ export default function OrdersAndSales() {
           </CardContent>
         </Card>
 
+      <Dialog
+        open={isDetailOpen}
+        onOpenChange={(open) => {
+          setIsDetailOpen(open);
+          if (!open) {
+            setDetailOrder(null);
+          }
+        }}
+      >
+        <DialogContent className="max-h-[90vh] w-full max-w-3xl overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Order Details</DialogTitle>
+            <DialogDescription>Full order record for this caravan sale.</DialogDescription>
+          </DialogHeader>
+          {detailOrder ? (
+            <div className="space-y-6">
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div>
+                  <p className="text-xs uppercase text-muted-foreground">Show</p>
+                  <p className="font-medium">{detailOrder.showName}</p>
+                </div>
+                <div>
+                  <p className="text-xs uppercase text-muted-foreground">Ordering Date</p>
+                  <p className="font-medium">{formatDate(detailOrder.date)}</p>
+                </div>
+                <div>
+                  <p className="text-xs uppercase text-muted-foreground">Deal #</p>
+                  <p className="font-medium">#{detailOrder.dealNumber ?? '-'}</p>
+                </div>
+                <div>
+                  <p className="text-xs uppercase text-muted-foreground">Customer</p>
+                  <p className="font-medium">{detailOrder.customerName || 'Not set'}</p>
+                </div>
+                <div>
+                  <p className="text-xs uppercase text-muted-foreground">Model</p>
+                  <p className="font-medium">{detailOrder.model || 'Not set'}</p>
+                </div>
+                <div>
+                  <p className="text-xs uppercase text-muted-foreground">Contract Number</p>
+                  <p className="font-medium">{detailOrder.contractNumber || 'Not set'}</p>
+                </div>
+                <div>
+                  <p className="text-xs uppercase text-muted-foreground">Contract Value</p>
+                  <p className="font-medium">{formatCurrency(detailOrder.contractValue)}</p>
+                </div>
+                <div>
+                  <p className="text-xs uppercase text-muted-foreground">Payment Method</p>
+                  <p className="font-medium">{detailOrder.paymentMethod || 'Not set'}</p>
+                </div>
+                <div>
+                  <p className="text-xs uppercase text-muted-foreground">Trade In</p>
+                  <p className="font-medium">{detailOrder.tradeIn ? 'Yes' : 'No'}</p>
+                </div>
+                <div>
+                  <p className="text-xs uppercase text-muted-foreground">Trade-in Allowance</p>
+                  <p className="font-medium">{formatCurrency(detailOrder.tradeInAllowance)}</p>
+                </div>
+                <div>
+                  <p className="text-xs uppercase text-muted-foreground">Deposit Received</p>
+                  <p className="font-medium">
+                    {formatCurrency(detailOrder.depositReceived ?? detailOrder.deposit ?? DEFAULT_DEPOSIT)}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs uppercase text-muted-foreground">Expected Handover Date</p>
+                  <p className="font-medium">
+                    {detailOrder.expectedHandoverDate ? formatDate(detailOrder.expectedHandoverDate) : 'Not set'}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs uppercase text-muted-foreground">Salesperson</p>
+                  <p className="font-medium">{detailOrder.salesperson || 'Unassigned'}</p>
+                </div>
+                <div>
+                  <p className="text-xs uppercase text-muted-foreground">Order Type</p>
+                  <p className="font-medium">{detailOrder.orderType}</p>
+                </div>
+                <div>
+                  <p className="text-xs uppercase text-muted-foreground">Handover Dealer</p>
+                  <p className="font-medium">{detailOrder.handoverDealer || 'Not set'}</p>
+                </div>
+                <div>
+                  <p className="text-xs uppercase text-muted-foreground">Dealer Status</p>
+                  <p className="font-medium">{detailOrder.dealerStatus}</p>
+                </div>
+                <div>
+                  <p className="text-xs uppercase text-muted-foreground">Status</p>
+                  <p className="font-medium">{detailOrder.status || 'Pending'}</p>
+                </div>
+                <div>
+                  <p className="text-xs uppercase text-muted-foreground">Conditions</p>
+                  <p className="font-medium">{detailOrder.conditions || 'None'}</p>
+                </div>
+                <div>
+                  <p className="text-xs uppercase text-muted-foreground">Top Up Date</p>
+                  <p className="font-medium">{detailOrder.topUpDate || 'Not set'}</p>
+                </div>
+              </div>
+              <div>
+                <p className="text-xs uppercase text-muted-foreground">Salesperson Comments</p>
+                <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+                  {detailOrder.salespersonOrderComments || 'No comments recorded.'}
+                </div>
+              </div>
+              <div>
+                <p className="text-xs uppercase text-muted-foreground">Attachments</p>
+                {detailOrder.orderAttachments && detailOrder.orderAttachments.length > 0 ? (
+                  <ul className="space-y-1 text-sm">
+                    {(detailOrder.orderAttachments as OrderAttachment[]).map((file) => (
+                      <li key={file.path}>
+                        <a href={file.url} target="_blank" rel="noreferrer" className="text-blue-600 underline">
+                          {file.name}
+                        </a>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-sm text-slate-500">No attachments uploaded.</p>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div className="py-6 text-sm text-slate-500">No order selected.</div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsDetailOpen(false)}>
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
