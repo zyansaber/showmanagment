@@ -262,41 +262,43 @@ export default function ShowTeamAssignments() {
           </CardTitle>
           <CardDescription>Select a show to assign team members and track their days.</CardDescription>
         </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid gap-4 lg:grid-cols-[280px,1fr]">
-            <div className="space-y-2">
-              <Label>Select show</Label>
-              <Select value={selectedShowId} onValueChange={setSelectedShowId}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Choose a show" />
-                </SelectTrigger>
-                <SelectContent>
-                  {selectableShows.map((show) => (
-                    <SelectItem key={show.id} value={show.id!}>
-                      <div className="flex flex-col gap-1">
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="font-medium">{show.name || show.id}</span>
-                          {renderTimingBadge(show)}
+        <CardContent>
+          <div className="rounded-xl border border-slate-200 bg-gradient-to-br from-slate-50 via-white to-slate-100 p-5 shadow-sm">
+            <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+              <div className="space-y-2">
+                <Label className="text-xs uppercase tracking-wide text-slate-500">Show</Label>
+                <Select value={selectedShowId} onValueChange={setSelectedShowId}>
+                  <SelectTrigger className="w-full lg:w-[320px]">
+                    <SelectValue placeholder="Choose a show" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {selectableShows.map((show) => (
+                      <SelectItem key={show.id} value={show.id!}>
+                        <div className="flex flex-col gap-1">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-medium">{show.name || show.id}</span>
+                            {renderTimingBadge(show)}
+                          </div>
+                          <span className="text-xs text-slate-500">{formatDateRange(show)}</span>
                         </div>
-                        <span className="text-xs text-slate-500">{formatDateRange(show)}</span>
-                      </div>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="flex flex-col gap-3 rounded-lg border border-slate-200 bg-slate-50 p-4">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div>
-                  <p className="text-sm text-slate-500">Selected show</p>
-                  <p className="text-base font-semibold text-slate-900">
-                    {selectedShow?.name || 'No show selected'}
-                  </p>
-                </div>
-                {renderTimingBadge(selectedShow)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
-              <div className="text-sm text-slate-600">
-                {selectedShow ? formatDateRange(selectedShow) : 'Pick a show to view its team.'}
+              <div className="flex-1 rounded-lg border border-white/70 bg-white/80 p-4 shadow-sm">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <p className="text-xs uppercase tracking-wide text-slate-500">Selected show</p>
+                    <p className="text-lg font-semibold text-slate-900">
+                      {selectedShow?.name || 'No show selected'}
+                    </p>
+                  </div>
+                  {renderTimingBadge(selectedShow)}
+                </div>
+                <p className="mt-2 text-sm text-slate-600">
+                  {selectedShow ? formatDateRange(selectedShow) : 'Pick a show to view its team.'}
+                </p>
               </div>
             </div>
           </div>
@@ -308,7 +310,11 @@ export default function ShowTeamAssignments() {
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
               <CardTitle>Assign Team Members</CardTitle>
-              <CardDescription>Choose who will attend the selected show.</CardDescription>
+              <CardDescription>
+                Choose who will attend the selected show. {selectedTeamMembers.length > 0
+                  ? `${selectedTeamMembers.length} selected`
+                  : 'No members selected yet.'}
+              </CardDescription>
             </div>
             <Button onClick={handleSaveTeam} disabled={!selectedShow}>
               Save Team
@@ -322,7 +328,7 @@ export default function ShowTeamAssignments() {
                 <label
                   key={member.memberId}
                   htmlFor={`team-${member.memberId}`}
-                  className="flex items-start gap-3 rounded-lg border border-slate-200 p-3 hover:bg-slate-50"
+                  className="flex items-start gap-3 rounded-lg border border-slate-200 bg-white p-3 shadow-sm transition hover:-translate-y-0.5 hover:border-blue-200 hover:bg-blue-50/30 hover:shadow-md"
                 >
                   <Checkbox
                     id={`team-${member.memberId}`}
@@ -359,7 +365,10 @@ export default function ShowTeamAssignments() {
             showTeamMembers.length > 0 ? (
               <div className="grid gap-4 md:grid-cols-2">
                 {showTeamMembers.map((member) => (
-                  <div key={member.memberId} className="rounded-lg border border-slate-200 p-4">
+                  <div
+                    key={member.memberId}
+                    className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm"
+                  >
                     <div className="flex items-start justify-between">
                       <div>
                         <p className="font-medium text-slate-900">{member.memberName}</p>
