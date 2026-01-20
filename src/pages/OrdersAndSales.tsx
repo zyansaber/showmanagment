@@ -717,6 +717,10 @@ export default function OrdersAndSales() {
       toast.error('Approved orders cannot be edited.');
       return;
     }
+    if (newOrder.orderType === 'Transfer from Stock' && !newOrder.chassisNumber?.trim()) {
+      toast.error('Please enter a chassis number for transfer orders');
+      return;
+    }
     const contractValue = parseContractValue(newOrder.contractValue);
     if (
       !newOrder.salesperson ||
@@ -1156,6 +1160,17 @@ export default function OrdersAndSales() {
                             </SelectContent>
                           </Select>
                         </div>
+
+                        {newOrder.orderType === 'Transfer from Stock' && (
+                          <div className="space-y-2">
+                            <Label>Chassis Number *</Label>
+                            <Input
+                              placeholder="Enter chassis number"
+                              value={newOrder.chassisNumber || ''}
+                              onChange={(event) => setNewOrder({ ...newOrder, chassisNumber: event.target.value })}
+                            />
+                          </div>
+                        )}
 
                         <div className="space-y-2">
                           <Label>Salesperson *</Label>
