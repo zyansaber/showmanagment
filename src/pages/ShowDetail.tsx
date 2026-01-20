@@ -147,16 +147,13 @@ export default function ShowDetail() {
   const [orders, setOrders] = useState<ShowOrder[]>([]);
   const [tasks, setTasks] = useState<ShowTask[]>([]);
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
-  const [teamMemberKeys, setTeamMemberKeys] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [isAddingOrder, setIsAddingOrder] = useState(false);
   const [editingOrder, setEditingOrder] = useState<ShowOrder | null>(null);
   const [isAddingTask, setIsAddingTask] = useState(false);
   const [isEditingInfo, setIsEditingInfo] = useState(false);
-  const [isManagingTeam, setIsManagingTeam] = useState(false);
   const [editedShow, setEditedShow] = useState<Partial<Show>>({});
   const [selectedTeamMembers, setSelectedTeamMembers] = useState<string[]>([]);
-  const [memberDayDrafts, setMemberDayDrafts] = useState<Record<string, string>>({});
   const [processTemplates, setProcessTemplates] = useState<ProcessTemplate[]>([]);
   const [isUsingTemplate, setIsUsingTemplate] = useState(false);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>('');
@@ -291,13 +288,10 @@ export default function ShowDetail() {
       setTasks(tasksForShow);
 
       const teamEntries = teamData ? Object.entries(teamData as Record<string, TeamMember>) : [];
-      const memberKeyMap: Record<string, string> = {};
-      const allTeamMembers = teamEntries.map(([key, value]) => {
-        const memberId = value.memberId || key;
-        memberKeyMap[memberId] = key;
-        return { ...value, memberId };
-      });
-      setTeamMemberKeys(memberKeyMap);
+      const allTeamMembers = teamEntries.map(([key, value]) => ({
+        ...value,
+        memberId: value.memberId || key,
+      }));
       setTeamMembers(allTeamMembers.filter(m => m.activeFlag === 1));
 
       if (templatesData) {
@@ -519,75 +513,6 @@ export default function ShowDetail() {
     return `$${numeric.toLocaleString('en-AU', { maximumFractionDigits: 0 })}`;
   };
 
-  const buildMemberShowDaysList = (member: TeamMember) => {
-    const rawDays = member.showDays;
-    if (Array.isArray(rawDays)) {
-      return rawDays
-        .map((entry) => ({
-          showId: typeof entry?.showId === 'string' ? entry.showId : '',
-          showName: typeof entry?.showName === 'string' ? entry.showName : '',
-          days: typeof entry?.days === 'number' ? entry.days : Number(entry?.days),
-        }))
-        .filter((entry) => entry.showId && Number.isFinite(entry.days) && entry.days > 0);
-    }
-    if (rawDays && typeof rawDays === 'object') {
-      return Object.entries(rawDays).reduce(
-        (acc, [showId, days]) => {
-          const numeric = typeof days === 'number' ? days : Number(days);
-          if (Number.isFinite(numeric) && numeric > 0) {
-            acc.push({ showId, showName: '', days: numeric });
-          }
-          return acc;
-        },
-        [] as { showId: string; showName: string; days: number }[]
-      );
-    }
-    return [] as { showId: string; showName: string; days: number }[];
-  };
-
-  const handleSaveMemberDays = async (member: TeamMember) => {
-    if (!showId) {
-      toast.error('Unable to determine show ID for saving days.');
-      return;
-    }
-
-    if (!member.memberId) {
-      toast.error('Unable to determine team member ID for saving days.');
-      return;
-    }
-
-    const rawValue = memberDayDrafts[member.memberId];
-    const parsed = Number(rawValue);
-    const days = Number.isFinite(parsed) && parsed > 0 ? Math.round(parsed) : 0;
-    const existingDays = buildMemberShowDaysList(member);
-    const updatedDays = existingDays.filter((entry) => entry.showId !== showId);
-
-    if (days > 0) {
-      updatedDays.push({
-        showId,
-        showName: show?.name || '',
-        days,
-      });
-    }
-
-    const memberKey = teamMemberKeys[member.memberId] || member.memberId;
-    if (!memberKey) {
-      toast.error('Unable to determine team member record for saving days.');
-      return;
-    }
-
-    try {
-      await dbUpdate(`teamMembers/${memberKey}`, { showDays: updatedDays });
-      setTeamMembers((prev) =>
-        prev.map((m) => (m.memberId === member.memberId ? { ...m, showDays: updatedDays } : m))
-      );
-      setMemberDayDrafts((prev) => ({ ...prev, [member.memberId]: days > 0 ? String(days) : '' }));
-      toast.success('Team member days updated.');
-    } catch (error) {
-      console.error('Error updating team member days:', error);
-      toast.error('Failed to update team member days.');
-    }
-  };
 
   const handleSaveShowInfo = async () => {
     try {
@@ -1103,11 +1028,6 @@ export default function ShowDetail() {
     return <Badge className={colors[status] || 'bg-gray-500'}>{status}</Badge>;
   };
 
-  const getMemberShowDaysValue = (member: TeamMember, showId: string) => {
-    const match = buildMemberShowDaysList(member).find((entry) => entry.showId === showId);
-    return match ? match.days : 0;
-  };
-
   const showId = show?.id || id || '';
   const showTeamMembers = useMemo(
     () => teamMembers.filter((member) => selectedTeamMembers.includes(member.memberId)),
@@ -1118,24 +1038,6 @@ export default function ShowDetail() {
     const all = new Set([...defaults, ...handoverDealerOptions]);
     return Array.from(all).sort((a, b) => a.localeCompare(b));
   }, [handoverDealerOptions, show?.handoverDealer]);
-
-  useEffect(() => {
-    setMemberDayDrafts({});
-  }, [showId]);
-
-  useEffect(() => {
-    if (!showId) return;
-    setMemberDayDrafts((prev) => {
-      const next = { ...prev };
-      showTeamMembers.forEach((member) => {
-        if (next[member.memberId] === undefined) {
-          const storedDays = getMemberShowDaysValue(member, showId);
-          next[member.memberId] = storedDays > 0 ? String(storedDays) : '';
-        }
-      });
-      return next;
-    });
-  }, [showId, showTeamMembers]);
 
   if (loading) {
     return (
@@ -1570,69 +1472,12 @@ export default function ShowDetail() {
               <div className="flex justify-between items-center">
                 <div>
                   <CardTitle>Team Members</CardTitle>
-                  <CardDescription>Manage team members assigned to this show</CardDescription>
+                  <CardDescription>Review team members assigned to this show</CardDescription>
                 </div>
-                <Dialog open={isManagingTeam} onOpenChange={setIsManagingTeam}>
-                  <DialogTrigger asChild>
-                    <Button>
-                      <Users className="h-4 w-4 mr-2" />
-                      Manage Team
-                    </Button>
-                  </DialogTrigger>
-                  <DialogContent className="max-w-2xl">
-                    <DialogHeader>
-                      <DialogTitle>Select Team Members</DialogTitle>
-                      <DialogDescription>Choose team members to assign to this show</DialogDescription>
-                    </DialogHeader>
-                    <div className="space-y-4 py-4 max-h-[60vh] overflow-y-auto">
-                      {teamMembers.map((member) => (
-                        <div key={member.memberId} className="flex items-center space-x-2 p-3 border rounded-lg hover:bg-gray-50">
-                          <Checkbox
-                            id={member.memberId}
-                            checked={selectedTeamMembers.includes(member.memberId)}
-                            onCheckedChange={(checked) => {
-                              if (checked) {
-                                setSelectedTeamMembers([...selectedTeamMembers, member.memberId]);
-                              } else {
-                                setSelectedTeamMembers(selectedTeamMembers.filter(id => id !== member.memberId));
-                              }
-                            }}
-                          />
-                          <label
-                            htmlFor={member.memberId}
-                            className="flex-1 cursor-pointer"
-                          >
-                            <div className="font-medium">{member.memberName}</div>
-                            <div className="text-sm text-gray-500">{member.role} • {member.email}</div>
-                          </label>
-                        </div>
-                      ))}
-                    </div>
-                    <div className="flex justify-end gap-2">
-                      <Button variant="outline" onClick={() => setIsManagingTeam(false)}>
-                        Cancel
-                      </Button>
-                      <Button onClick={async () => {
-                        const firebaseKey = currentShowKey || id;
-                        if (!firebaseKey) {
-                          toast.error('Unable to determine show location in database.');
-                          return;
-                        }
-                        try {
-                          await dbUpdate(`shows/${firebaseKey}`, { teamMembers: selectedTeamMembers });
-                          setShow({ ...show!, teamMembers: selectedTeamMembers });
-                          setIsManagingTeam(false);
-                          toast.success('Team members updated successfully');
-                        } catch (error) {
-                          console.error('Error updating team members:', error);
-                          toast.error('Failed to update team members');
-                        }
-                      }}>
-                        Save Team
-                      </Button>
-                    </div>
-                  </DialogContent>
-                </Dialog>
+                <Button variant="secondary" onClick={() => navigate('/show-team')}>
+                  <Users className="h-4 w-4 mr-2" />
+                  Open Team Assignments
+                </Button>
               </div>
             </CardHeader>
             <CardContent>
@@ -1649,28 +1494,7 @@ export default function ShowDetail() {
                           </div>
                           <Badge variant="outline">{member.activeFlag === 1 ? 'Active' : 'Inactive'}</Badge>
                         </div>
-                        <div className="mt-4 flex items-center gap-2">
-                          <Label className="text-xs uppercase text-gray-500">Days</Label>
-                          <Input
-                            type="number"
-                            min={0}
-                            value={memberDayDrafts[member.memberId] ?? ''}
-                            onChange={(event) =>
-                              setMemberDayDrafts((prev) => ({
-                                ...prev,
-                                [member.memberId]: event.target.value,
-                              }))
-                            }
-                            className="h-8 w-24"
-                          />
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => handleSaveMemberDays(member)}
-                          >
-                            Save
-                          </Button>
-                        </div>
+                        <p className="mt-4 text-sm text-gray-500">Manage days in the Show Team page.</p>
                       </CardContent>
                     </Card>
                   ))}
@@ -1678,9 +1502,9 @@ export default function ShowDetail() {
               ) : (
                 <div className="text-center py-12">
                   <p className="text-gray-500 mb-4">No team members assigned yet</p>
-                  <Button onClick={() => setIsManagingTeam(true)}>
+                  <Button onClick={() => navigate('/show-team')}>
                     <Users className="h-4 w-4 mr-2" />
-                    Add Team Members
+                    Assign Team Members
                   </Button>
                 </div>
               )}

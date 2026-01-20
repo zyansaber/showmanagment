@@ -47,14 +47,6 @@ const assistantActions: AssistantAction[] = [
     getPath: () => '/process-templates',
   },
   {
-    id: 'reports',
-    title: 'Generate performance report',
-    description: 'Build executive-ready summaries with KPIs and insights.',
-    requiresShow: true,
-    cta: 'Create report',
-    getPath: (show) => (show ? `/show-report?showId=${encodeURIComponent(show.id)}` : null),
-  },
-  {
     id: 'powerbi',
     title: 'Open BI dashboards',
     description: 'Review live metrics, targets, and dealer performance.',
