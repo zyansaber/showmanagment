@@ -36,6 +36,7 @@ import Login from './pages/Login';
 import AdminSettings from './pages/AdminSettings';
 import BudgetSetting from './pages/BudgetSetting';
 import ShowTeamAssignments from './pages/ShowTeamAssignments';
+import ShowTeamMatrix from './pages/ShowTeamMatrix';
 import ProtectedRoute from './components/ProtectedRoute';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { Navigate } from 'react-router-dom';
@@ -56,6 +57,7 @@ function Sidebar({ isOpen, setIsOpen }: { isOpen: boolean; setIsOpen: (open: boo
         { icon: Briefcase, label: 'Show Management', path: '/shows' },
         { icon: FileSpreadsheet, label: 'Orders & Sales', path: '/orders' },
         { icon: Users, label: 'Show Team', path: '/show-team' },
+        { icon: FileSpreadsheet, label: 'Show Team Matrix', path: '/show-team-matrix' },
       ],
     },
     {
@@ -320,6 +322,14 @@ function AppLayout() {
               element={
                 <ProtectedRoute>
                   <ShowTeamAssignments />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/show-team-matrix"
+              element={
+                <ProtectedRoute>
+                  <ShowTeamMatrix />
                 </ProtectedRoute>
               }
             />
