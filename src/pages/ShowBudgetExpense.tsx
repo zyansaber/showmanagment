@@ -279,9 +279,7 @@ export default function ShowBudgetExpense() {
         const showList: Show[] = showsData ? Object.values(showsData) : [];
         const budgetMap = budgetsData ?? {};
         const orders: ShowOrder[] = ordersData ? Object.values(ordersData) : [];
-        const confirmedOrders = orders.filter(
-          (order) => order.status?.toLowerCase() === 'confirmation' || order.dealerConfirm
-        );
+        const confirmedOrders = orders.filter((order) => order.dealerConfirm || order.status === 'Approved');
         const teamMembers: TeamMember[] = teamData ? Object.values(teamData) : [];
         const financeLines = parseFinanceLines(financeData);
         const allowedGlCodes = new Set(
@@ -349,6 +347,7 @@ export default function ShowBudgetExpense() {
 
         const actualsByShow = financeLines.reduce<Record<string, { dealer: number; factory: number }>>((acc, line) => {
           if (!allowedGlCodes.has(line.glAccountNorm)) return acc;
+          if (getYearFromDate(line.postingDate) !== 2025) return acc;
           const mappedShow = aufnrShowMap[line.aufnrNorm];
           if (!mappedShow?.showId) return acc;
           if (!acc[mappedShow.showId]) acc[mappedShow.showId] = { dealer: 0, factory: 0 };
