@@ -370,16 +370,29 @@ export default function OrdersAndSales() {
     }, {});
   }, [statusOptions]);
 
-  const showFilterOptions = useMemo(() => {
-    return shows
-      .slice()
-      .sort((a, b) => (a.name || a.id || '').localeCompare(b.name || b.id || ''))
-      .map((show) => ({
-        id: show.id || '',
-        label: show.name || show.id || 'Unknown Show',
+  const showFilterTabs = useMemo(() => {
+    const countMap = orders.reduce<Record<string, number>>((acc, order) => {
+      if (!order.showId) return acc;
+      acc[order.showId] = (acc[order.showId] || 0) + 1;
+      return acc;
+    }, {});
+
+    return Object.entries(countMap)
+      .map(([showId, count]) => ({
+        id: showId,
+        label: showLookup[showId]?.name || showId,
+        count,
       }))
-      .filter((show) => Boolean(show.id));
-  }, [shows]);
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }, [orders, showLookup]);
+
+  useEffect(() => {
+    if (showFilter === 'all') return;
+    const hasCurrentFilter = showFilterTabs.some((show) => show.id === showFilter);
+    if (!hasCurrentFilter) {
+      setShowFilter('all');
+    }
+  }, [showFilter, showFilterTabs]);
 
   const decoratedOrders: DecoratedOrder[] = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
@@ -937,8 +950,63 @@ export default function OrdersAndSales() {
         </Card>
       </div>
 
-        <Card>
-          <CardHeader>
+      <div className="space-y-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setShowFilter('all')}
+            className={cn(
+              'inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors',
+              showFilter === 'all'
+                ? 'border-blue-600 bg-blue-600 text-white shadow-sm'
+                : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50'
+            )}
+          >
+            <span>All Shows</span>
+            <span className={cn('rounded-full px-1.5 py-0.5 text-[10px]', showFilter === 'all' ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-600')}>
+              {orders.length}
+            </span>
+          </button>
+          {showFilterTabs.map((show) => {
+            const isActive = showFilter === show.id;
+            return (
+              <button
+                key={show.id}
+                type="button"
+                onClick={() => setShowFilter(show.id)}
+                className={cn(
+                  'inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors',
+                  isActive
+                    ? 'border-slate-900 bg-slate-900 text-white shadow-sm'
+                    : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50'
+                )}
+              >
+                <span>{show.label}</span>
+                <span
+                  className={cn(
+                    'rounded-full px-1.5 py-0.5 text-[10px]',
+                    isActive ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-600'
+                  )}
+                >
+                  {show.count}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+        <div className="flex items-center gap-2">
+          <Search className="h-4 w-4 text-gray-500" />
+          <Input
+            placeholder="Search by deal #, show, model, customer, salesperson or type"
+            value={searchTerm}
+            onChange={(event) => setSearchTerm(event.target.value)}
+            className="w-full lg:w-72"
+          />
+        </div>
+      </div>
+
+      <Card>
+        <CardHeader>
             <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
               <div>
                 <CardTitle>Orders List</CardTitle>
@@ -1431,34 +1499,10 @@ export default function OrdersAndSales() {
                     </DialogFooter>
                   </DialogContent>
                 </Dialog>
-                <div className="flex items-center gap-2">
-                  <Search className="h-4 w-4 text-gray-500" />
-                  <Input
-                    placeholder="Search by deal #, show, model, customer, salesperson or type"
-                    value={searchTerm}
-                    onChange={(event) => setSearchTerm(event.target.value)}
-                    className="w-full lg:w-72"
-                  />
-                </div>
-                <div className="min-w-[220px]">
-                  <Select value={showFilter} onValueChange={setShowFilter}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Filter show" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All shows</SelectItem>
-                      {showFilterOptions.map((show) => (
-                        <SelectItem key={show.id} value={show.id}>
-                          {show.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
               </div>
             </div>
           </CardHeader>
-          <CardContent>
+        <CardContent>
             {decoratedOrders.length > 0 ? (
               <Table>
                 <TableHeader>
