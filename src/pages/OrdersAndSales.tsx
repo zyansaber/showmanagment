@@ -256,7 +256,7 @@ export default function OrdersAndSales() {
     orderStatusId: '',
   });
   const [statusFilter, setStatusFilter] = useState<'all' | 'unassigned' | string>('all');
-  const [showFilter, setShowFilter] = useState('');
+  const [showFilter, setShowFilter] = useState('all');
   const [inlineEdits, setInlineEdits] = useState<Record<string, { conditions?: string; topUpDate?: string }>>({});
 
 
@@ -370,34 +370,16 @@ export default function OrdersAndSales() {
     }, {});
   }, [statusOptions]);
 
-  const showFilterTabs = useMemo(() => {
-    const countMap = orders.reduce<Record<string, number>>((acc, order) => {
-      if (!order.showId) return acc;
-      acc[order.showId] = (acc[order.showId] || 0) + 1;
-      return acc;
-    }, {});
-
-    return Object.entries(countMap)
-      .map(([showId, count]) => ({
-        id: showId,
-        label: showLookup[showId]?.name || showId,
-        count,
+  const showFilterOptions = useMemo(() => {
+    return shows
+      .slice()
+      .sort((a, b) => (a.name || a.id || '').localeCompare(b.name || b.id || ''))
+      .map((show) => ({
+        id: show.id || '',
+        label: show.name || show.id || 'Unknown Show',
       }))
-      .sort((a, b) => a.label.localeCompare(b.label));
-  }, [orders, showLookup]);
-
-  useEffect(() => {
-    if (showFilterTabs.length === 0) {
-      if (showFilter !== '') {
-        setShowFilter('');
-      }
-      return;
-    }
-    const hasCurrentFilter = showFilterTabs.some((show) => show.id === showFilter);
-    if (!hasCurrentFilter) {
-      setShowFilter(showFilterTabs[0].id);
-    }
-  }, [showFilter, showFilterTabs]);
+      .filter((show) => Boolean(show.id));
+  }, [shows]);
 
   const decoratedOrders: DecoratedOrder[] = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
@@ -413,7 +395,7 @@ export default function OrdersAndSales() {
         if (statusFilter !== 'all' && statusFilter !== 'unassigned' && order.orderStatusId !== statusFilter) {
           return false;
         }
-        if (showFilter && order.showId !== showFilter) return false;
+        if (showFilter !== 'all' && order.showId !== showFilter) return false;
         if (!term) return true;
         const matchedShow = showLookup[order.showId];
         const haystack = [
@@ -1458,36 +1440,21 @@ export default function OrdersAndSales() {
                     className="w-full lg:w-72"
                   />
                 </div>
-                {showFilterTabs.length > 0 && (
-                  <div className="flex flex-wrap items-center gap-2">
-                    {showFilterTabs.map((show) => {
-                      const isActive = showFilter === show.id;
-                      return (
-                        <button
-                          key={show.id}
-                          type="button"
-                          onClick={() => setShowFilter(show.id)}
-                          className={cn(
-                            'inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-medium transition-colors',
-                            isActive
-                              ? 'border-slate-900 bg-slate-900 text-white'
-                              : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50'
-                          )}
-                        >
-                          <span>{show.label}</span>
-                          <span
-                            className={cn(
-                              'rounded-full px-1.5 py-0.5 text-[10px]',
-                              isActive ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-600'
-                            )}
-                          >
-                            {show.count}
-                          </span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
+                <div className="min-w-[220px]">
+                  <Select value={showFilter} onValueChange={setShowFilter}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Filter show" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All shows</SelectItem>
+                      {showFilterOptions.map((show) => (
+                        <SelectItem key={show.id} value={show.id}>
+                          {show.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
             </div>
           </CardHeader>
