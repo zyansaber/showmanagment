@@ -90,6 +90,16 @@ const alreadySent = (val: unknown) => {
   return false;
 };
 
+const deriveStatusValue = (order: ShowOrder, statusLabelLookup: Record<string, string>) => {
+  const existing = String(order.status ?? '').trim();
+  if (existing) return existing;
+  const statusId = String(order.orderStatusId ?? '').trim().toLowerCase();
+  if (!statusId) return 'Pending';
+  if (statusId === 'confirmation') return 'Approved';
+  if (statusId === 'cancellation') return 'Cancelled';
+  return statusLabelLookup[statusId] || statusId;
+};
+
 const parseShowDaysEntriesRaw = (showDays: unknown): ShowDayEntry[] => {
   if (!showDays) return [];
   const out: ShowDayEntry[] = [];
@@ -361,6 +371,47 @@ const EmailDigestCenter = () => {
     }
   };
 
+  const backfillMissingStatus = async () => {
+    setLoading(true);
+    setMessage('');
+    try {
+      const [ordersSnap, statusSnap] = await Promise.all([
+        get(ref(database, SHOW_ORDERS_PATH)),
+        get(ref(database, 'orderStatusOptions')),
+      ]);
+      const orders = (ordersSnap.val() ?? {}) as Record<string, ShowOrder>;
+      const rawStatus = (statusSnap.val() ?? {}) as Record<string, { label?: string }>;
+      const statusLabelLookup = Object.entries(rawStatus).reduce<Record<string, string>>((acc, [id, row]) => {
+        const key = String(id).trim().toLowerCase();
+        const label = String(row?.label ?? '').trim();
+        if (key && label) acc[key] = label;
+        return acc;
+      }, {});
+
+      const updates: Record<string, unknown> = {};
+      let changed = 0;
+
+      for (const [orderKey, order] of Object.entries(orders)) {
+        const current = String(order.status ?? '').trim();
+        if (current) continue;
+        const derived = deriveStatusValue(order, statusLabelLookup);
+        updates[`${SHOW_ORDERS_PATH}/${orderKey}/status`] = derived;
+        changed += 1;
+      }
+
+      if (Object.keys(updates).length > 0) {
+        await update(ref(database), updates);
+      }
+
+      setMessage(`Backfill done. updated=${changed}`);
+      await loadPreview();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Failed to backfill status.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
     void loadPreview();
   }, []);
@@ -503,6 +554,9 @@ const EmailDigestCenter = () => {
         <div className="flex gap-2">
           <Button onClick={loadPreview} disabled={loading || sending}>
             <RefreshCw className="mr-2 h-4 w-4" /> Refresh
+          </Button>
+          <Button variant="outline" onClick={backfillMissingStatus} disabled={loading || sending}>
+            Backfill Missing Status
           </Button>
           <Button variant="outline" onClick={loadHistory} disabled={loading || sending}>
             <History className="mr-2 h-4 w-4" /> View History
