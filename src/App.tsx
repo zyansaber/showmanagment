@@ -19,6 +19,7 @@ import {
   Banknote,
   Calculator,
   ListTree,
+  Mail,
 } from 'lucide-react';
 import Dashboard from './pages/Dashboard';
 import ShowCalendar from './pages/ShowCalendar';
@@ -36,6 +37,7 @@ import Login from './pages/Login';
 import AdminSettings from './pages/AdminSettings';
 import BudgetSetting from './pages/BudgetSetting';
 import ShowTeamAssignments from './pages/ShowTeamAssignments';
+import EmailDigestCenter from './pages/EmailDigestCenter';
 import ProtectedRoute from './components/ProtectedRoute';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { Navigate } from 'react-router-dom';
@@ -73,6 +75,7 @@ function Sidebar({ isOpen, setIsOpen }: { isOpen: boolean; setIsOpen: (open: boo
         { icon: ClipboardList, label: 'Process Templates', path: '/process-templates' },
         { icon: Users, label: 'Team Management', path: '/team' },
         { icon: Users, label: 'Admin Settings', path: '/admin', adminOnly: true },
+        { icon: Mail, label: 'Order Digest Mail', path: '/order-digest-mail', adminOnly: true },
       ],
     },
   ];
@@ -352,6 +355,14 @@ function AppLayout() {
               element={
                 <ProtectedRoute requiredRole="admin">
                   <AdminSettings />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/order-digest-mail"
+              element={
+                <ProtectedRoute requiredRole="admin">
+                  <EmailDigestCenter />
                 </ProtectedRoute>
               }
             />
