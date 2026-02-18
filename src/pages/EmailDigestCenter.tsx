@@ -7,7 +7,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 
 type ShowOrder = {
   id?: string;
-  dealNumber?: number | string;
   showId?: string;
   salesperson?: string;
   customerName?: string;
@@ -89,6 +88,16 @@ const alreadySent = (val: unknown) => {
   if (typeof val === 'number') return true;
   if (typeof val === 'string' && val.trim() !== '') return true;
   return false;
+};
+
+const deriveStatusValue = (order: ShowOrder, statusLabelLookup: Record<string, string>) => {
+  const existing = String(order.status ?? '').trim();
+  if (existing) return existing;
+  const statusId = String(order.orderStatusId ?? '').trim().toLowerCase();
+  if (!statusId) return 'Pending';
+  if (statusId === 'confirmation') return 'Approved';
+  if (statusId === 'cancellation') return 'Cancelled';
+  return statusLabelLookup[statusId] || statusId;
 };
 
 const parseShowDaysEntriesRaw = (showDays: unknown): ShowDayEntry[] => {
@@ -235,22 +244,16 @@ const EmailDigestCenter = () => {
   const [previewOrders, setPreviewOrders] = useState<EmailOrder[]>([]);
 
   const showSections = useMemo(() => {
-    const bucket = new Map<string, { showName: string; rows: Array<{ dealNo: string; customerName: string; salesperson: string; thisRoundDays: number }> }>();
-    for (const digest of digests) {
-      for (const order of digest.orders) {
-        const key = order.showName || order.showId;
-        const section = bucket.get(key) ?? { showName: key, rows: [] };
-        const thisRoundDays = digest.workDays
-          .filter((entry) => entry.showId === order.showId)
-          .reduce((sum, entry) => sum + entry.addedDays, 0);
-        section.rows.push({
-          dealNo: order.dealNo,
-          customerName: order.customerName || '-',
-          salesperson: digest.member.memberName,
-          thisRoundDays,
-        });
-        bucket.set(key, section);
-      }
+    const bucket = new Map<string, { showName: string; rows: Array<{ dealNo: string; customerName: string; salesperson: string }> }>();
+    for (const order of previewOrders) {
+      const key = order.showName || order.showId;
+      const section = bucket.get(key) ?? { showName: key, rows: [] };
+      section.rows.push({
+        dealNo: order.dealNo,
+        customerName: order.customerName || '-',
+        salesperson: order.salesperson || '-',
+      });
+      bucket.set(key, section);
     }
     return Array.from(bucket.values()).sort((a, b) => a.showName.localeCompare(b.showName));
   }, [previewOrders]);
@@ -291,7 +294,7 @@ const EmailDigestCenter = () => {
 
         const normalizedOrder: EmailOrder = {
           orderKey,
-          dealNo: String(order.dealNumber ?? order.id ?? orderKey),
+          dealNo: String(order.id ?? orderKey),
           showId: String(order.showId),
           showName: showMap[String(order.showId)] ?? String(order.showId),
           customerName: String(order.customerName ?? ''),
@@ -368,89 +371,50 @@ const EmailDigestCenter = () => {
     }
   };
 
-  useEffect(() => {
-    void loadPreview();
-  }, []);
-
-  const markAsSentWithoutEmail = async () => {
-    setSending(true);
-    setMessage('Marking records as sent (without email)...');
-
+  const backfillMissingStatus = async () => {
+    setLoading(true);
+    setMessage('');
     try {
-      const [ordersSnap, teamSnap] = await Promise.all([get(ref(database, SHOW_ORDERS_PATH)), get(ref(database, TEAM_MEMBERS_PATH))]);
+      const [ordersSnap, statusSnap] = await Promise.all([
+        get(ref(database, SHOW_ORDERS_PATH)),
+        get(ref(database, 'orderStatusOptions')),
+      ]);
       const orders = (ordersSnap.val() ?? {}) as Record<string, ShowOrder>;
-      const team = (teamSnap.val() ?? {}) as Record<string, TeamMember>;
+      const rawStatus = (statusSnap.val() ?? {}) as Record<string, { label?: string }>;
+      const statusLabelLookup = Object.entries(rawStatus).reduce<Record<string, string>>((acc, [id, row]) => {
+        const key = String(id).trim().toLowerCase();
+        const label = String(row?.label ?? '').trim();
+        if (key && label) acc[key] = label;
+        return acc;
+      }, {});
 
       const updates: Record<string, unknown> = {};
+      let changed = 0;
 
-      const skipDigestId = makeConfirmationId('SKIP-MANUAL');
-      const skipTs = nowIso();
       for (const [orderKey, order] of Object.entries(orders)) {
-        if (order.status !== 'Approved') continue;
-        if (!order.showId || !SKIP_SHOW_IDS.has(order.showId)) continue;
-        if (alreadySent(order.emailconfirmation)) continue;
-        updates[`${SHOW_ORDERS_PATH}/${orderKey}/emailconfirmation`] = skipDigestId;
-        updates[`${SHOW_ORDERS_PATH}/${orderKey}/emailconfirmationAt`] = skipTs;
-        updates[`${SHOW_ORDERS_PATH}/${orderKey}/emailconfirmationTo`] = 'SKIPPED_NO_EMAIL_MANUAL';
-      }
-
-      for (const [memberKey, member] of Object.entries(team)) {
-        const entries = parseShowDaysEntriesRaw(member.showDays);
-        const sentMap = member.showDaysSent ?? {};
-        let touched = false;
-        for (const entry of entries) {
-          if (!SKIP_SHOW_IDS.has(entry.showId)) continue;
-          updates[`${TEAM_MEMBERS_PATH}/${memberKey}/showDaysSent/${entry.showId}`] = Math.max(toNum(sentMap[entry.showId] ?? 0), toNum(entry.days));
-          touched = true;
-        }
-        if (touched) updates[`${TEAM_MEMBERS_PATH}/${memberKey}/showDaysSentAt`] = skipTs;
-      }
-
-      let touchedDigestRows = 0;
-      for (const digest of digests) {
-        const parts = digest.orders.length ? chunk(digest.orders, MAX_ORDERS_PER_DIGEST) : [[] as EmailOrder[]];
-
-        for (let partIndex = 0; partIndex < parts.length; partIndex += 1) {
-          const part = parts[partIndex];
-          const includeWorkdays = partIndex === 0;
-          const digestId = makeConfirmationId('MANUAL');
-          const ts = nowIso();
-
-          updates[`${HISTORY_PATH}/${digestId}`] = {
-            digestId,
-            to: digest.member.email,
-            salesperson: digest.member.memberName,
-            sentAt: ts,
-            orderCount: part.length,
-            manual: true,
-          };
-
-          for (const order of part) {
-            updates[`${SHOW_ORDERS_PATH}/${order.orderKey}/emailconfirmation`] = digestId;
-            updates[`${SHOW_ORDERS_PATH}/${order.orderKey}/emailconfirmationAt`] = ts;
-            updates[`${SHOW_ORDERS_PATH}/${order.orderKey}/emailconfirmationTo`] = `${digest.member.email} (manual)`;
-            touchedDigestRows += 1;
-          }
-
-          if (includeWorkdays) {
-            for (const day of digest.workDays) {
-              updates[`${TEAM_MEMBERS_PATH}/${digest.member.key}/showDaysSent/${day.showId}`] = day.totalDays;
-            }
-            updates[`${TEAM_MEMBERS_PATH}/${digest.member.key}/showDaysSentAt`] = ts;
-            updates[`${TEAM_MEMBERS_PATH}/${digest.member.key}/showDaysSentConfirmationId`] = digestId;
-          }
-        }
+        const current = String(order.status ?? '').trim();
+        if (current) continue;
+        const derived = deriveStatusValue(order, statusLabelLookup);
+        updates[`${SHOW_ORDERS_PATH}/${orderKey}/status`] = derived;
+        changed += 1;
       }
 
       if (Object.keys(updates).length > 0) {
         await update(ref(database), updates);
       }
-      setMessage(`Manual fill complete. Marked ${touchedDigestRows} order records as sent without email.`);
+
+      setMessage(`Backfill done. updated=${changed}`);
       await loadPreview();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Failed to backfill status.');
     } finally {
-      setSending(false);
+      setLoading(false);
     }
   };
+
+  useEffect(() => {
+    void loadPreview();
+  }, []);
 
   const sendAll = async () => {
     if (digests.length === 0) {
@@ -591,14 +555,14 @@ const EmailDigestCenter = () => {
           <Button onClick={loadPreview} disabled={loading || sending}>
             <RefreshCw className="mr-2 h-4 w-4" /> Refresh
           </Button>
+          <Button variant="outline" onClick={backfillMissingStatus} disabled={loading || sending}>
+            Backfill Missing Status
+          </Button>
           <Button variant="outline" onClick={loadHistory} disabled={loading || sending}>
             <History className="mr-2 h-4 w-4" /> View History
           </Button>
           <Button onClick={sendAll} disabled={sending || loading || digests.length === 0}>
             <Send className="mr-2 h-4 w-4" /> Send Emails
-          </Button>
-          <Button variant="secondary" onClick={markAsSentWithoutEmail} disabled={sending || loading}>
-            Mark as Sent (No Email)
           </Button>
         </div>
       </div>
@@ -617,28 +581,26 @@ const EmailDigestCenter = () => {
             <p className="text-sm text-slate-500">No eligible data.</p>
           ) : (
             showSections.map((section) => (
-              <div key={section.showName} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+              <div key={section.showName} className="rounded-lg border border-slate-200 p-4">
                 <div className="mb-2 flex items-center justify-between">
                   <p className="font-semibold text-slate-900">{section.showName}</p>
                   <Mail className="h-4 w-4 text-slate-400" />
                 </div>
                 <div className="overflow-x-auto">
-                  <table className="w-full overflow-hidden rounded-lg text-sm">
+                  <table className="w-full text-sm">
                     <thead>
-                      <tr className="text-left text-xs uppercase tracking-wide text-slate-500">
-                        <th className="bg-slate-50 px-3 py-2">Deal #</th>
-                        <th className="bg-slate-50 px-3 py-2">Customer Name</th>
-                        <th className="bg-slate-50 px-3 py-2">Salesperson</th>
-                        <th className="bg-slate-50 px-3 py-2 text-right">This Round Days</th>
+                      <tr className="text-left text-slate-500">
+                        <th className="py-1 pr-2">Deal #</th>
+                        <th className="py-1 pr-2">Customer Name</th>
+                        <th className="py-1">Salesperson</th>
                       </tr>
                     </thead>
                     <tbody>
                       {section.rows.map((row, idx) => (
-                        <tr key={`${row.dealNo}-${idx}`} className="border-t border-slate-100 odd:bg-white even:bg-slate-50/40">
-                          <td className="px-3 py-2 font-semibold text-slate-900">{row.dealNo}</td>
-                          <td className="px-3 py-2">{row.customerName}</td>
-                          <td className="px-3 py-2">{row.salesperson}</td>
-                          <td className="px-3 py-2 text-right font-medium">{row.thisRoundDays}</td>
+                        <tr key={`${row.dealNo}-${idx}`} className="border-t border-slate-100">
+                          <td className="py-1 pr-2">{row.dealNo}</td>
+                          <td className="py-1 pr-2">{row.customerName}</td>
+                          <td className="py-1">{row.salesperson}</td>
                         </tr>
                       ))}
                     </tbody>
