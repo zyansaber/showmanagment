@@ -371,7 +371,10 @@ export default function OrdersAndSales() {
 
   const statusLookup = useMemo(() => {
     return statusOptions.reduce<Record<string, OrderStatusOption>>((acc, option) => {
-      acc[option.id] = option;
+      const key = String(option.id || '').trim();
+      if (!key) return acc;
+      acc[key] = option;
+      acc[key.toLowerCase()] = option;
       return acc;
     }, {});
   }, [statusOptions]);
@@ -466,11 +469,12 @@ export default function OrdersAndSales() {
 
   const resolveStatusValue = useCallback(
     (orderStatusId?: string) => {
-      const normalized = String(orderStatusId ?? '').trim().toLowerCase();
+      const rawStatusId = String(orderStatusId ?? '').trim();
+      const normalized = rawStatusId.toLowerCase();
       if (!normalized) return 'Pending';
       if (normalized === CONFIRMATION_STATUS_ID) return 'Approved';
       if (normalized === CANCELLATION_STATUS_ID) return 'Cancelled';
-      return statusLookup[normalized]?.label?.trim() || normalized;
+      return statusLookup[rawStatusId]?.label?.trim() || statusLookup[normalized]?.label?.trim() || 'Pending';
     },
     [statusLookup]
   );
