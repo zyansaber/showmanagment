@@ -12,7 +12,9 @@ import { dbGet, dbSet, dbUpdate } from '@/lib/firebase';
 import type { TeamMember, UserRole, Show, ShowOrder } from '@/types';
 
 export default function TeamManagement() {
-  const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
+  type TeamMemberRecord = TeamMember & { dbKey: string };
+
+  const [teamMembers, setTeamMembers] = useState<TeamMemberRecord[]>([]);
   const [shows, setShows] = useState<Show[]>([]);
   const [orders, setOrders] = useState<ShowOrder[]>([]);
   const [loading, setLoading] = useState(true);
@@ -48,7 +50,7 @@ export default function TeamManagement() {
       const normalizedMembers = memberEntries.map(([key, value]) => {
         const memberId =
           typeof value.memberId === 'string' && value.memberId.trim().length > 0 ? value.memberId : key;
-        return { ...value, memberId };
+        return { ...value, memberId, dbKey: key };
       });
       setTeamMembers(normalizedMembers);
       setShows(showsData ? Object.values(showsData) : []);
@@ -75,7 +77,7 @@ export default function TeamManagement() {
       };
       
       await dbSet(`teamMembers/${memberId}`, member as unknown as Record<string, unknown>);
-      setTeamMembers([...teamMembers, member]);
+      setTeamMembers([...teamMembers, { ...member, dbKey: memberId }]);
       setIsAddingMember(false);
       setNewMember({
         memberName: '',
@@ -88,32 +90,32 @@ export default function TeamManagement() {
     }
   };
 
-  const handleToggleActive = async (memberId: string, currentFlag: 0 | 1) => {
-    if (!memberId) {
+  const handleToggleActive = async (member: TeamMemberRecord) => {
+    if (!member.dbKey) {
       console.error('Missing team member ID while toggling status.');
       return;
     }
     try {
-      const newFlag = currentFlag === 1 ? 0 : 1;
-      await dbUpdate(`teamMembers/${memberId}`, { activeFlag: newFlag });
+      const newFlag = member.activeFlag === 1 ? 0 : 1;
+      await dbUpdate(`teamMembers/${member.dbKey}`, { activeFlag: newFlag });
       setTeamMembers(teamMembers.map(m => 
-        m.memberId === memberId ? { ...m, activeFlag: newFlag } : m
+        m.dbKey === member.dbKey ? { ...m, activeFlag: newFlag } : m
       ));
     } catch (error) {
       console.error('Error toggling member status:', error);
     }
   };
 
-  const handleEmailEditToggle = async (member: TeamMember) => {
-    if (!member.memberId) {
+  const handleEmailEditToggle = async (member: TeamMemberRecord) => {
+    if (!member.dbKey) {
       console.error('Missing team member ID while editing email.');
       return;
     }
-    if (editingEmailMemberId === member.memberId) {
+    if (editingEmailMemberId === member.dbKey) {
       try {
-        await dbUpdate(`teamMembers/${member.memberId}`, { email: emailDraft });
+        await dbUpdate(`teamMembers/${member.dbKey}`, { email: emailDraft });
         setTeamMembers(teamMembers.map((m) => (
-          m.memberId === member.memberId ? { ...m, email: emailDraft } : m
+          m.dbKey === member.dbKey ? { ...m, email: emailDraft } : m
         )));
         setEditingEmailMemberId(null);
       } catch (error) {
@@ -122,7 +124,7 @@ export default function TeamManagement() {
       return;
     }
 
-    setEditingEmailMemberId(member.memberId);
+    setEditingEmailMemberId(member.dbKey);
     setEmailDraft(member.email || '');
   };
 
@@ -139,25 +141,25 @@ export default function TeamManagement() {
     }
   };
 
-  const handleRoleEdit = (member: TeamMember) => {
-    if (!member.memberId) {
+  const handleRoleEdit = (member: TeamMemberRecord) => {
+    if (!member.dbKey) {
       console.error('Missing team member ID while editing role.');
       return;
     }
-    setEditingRoleMemberId(member.memberId);
+    setEditingRoleMemberId(member.dbKey);
     setRoleDraft(member.role);
   };
 
-  const handleSaveRole = async (memberId: string) => {
-    if (!memberId) {
+  const handleSaveRole = async (member: TeamMemberRecord) => {
+    if (!member.dbKey) {
       console.error('Missing team member ID while saving role.');
       return;
     }
     try {
-      await dbUpdate(`teamMembers/${memberId}`, { role: roleDraft });
+      await dbUpdate(`teamMembers/${member.dbKey}`, { role: roleDraft });
       setTeamMembers((prev) =>
-        prev.map((member) =>
-          member.memberId === memberId ? { ...member, role: roleDraft } : member
+        prev.map((entry) =>
+          entry.dbKey === member.dbKey ? { ...entry, role: roleDraft } : entry
         )
       );
       setEditingRoleMemberId(null);
@@ -459,11 +461,11 @@ export default function TeamManagement() {
               </TableHeader>
               <TableBody>
                 {teamMembers.map((member) => (
-                  <TableRow key={member.memberId}>
+                  <TableRow key={member.dbKey}>
                     <TableCell className="font-medium">{member.memberId}</TableCell>
                     <TableCell>{member.memberName}</TableCell>
                     <TableCell>
-                      {editingEmailMemberId === member.memberId ? (
+                      {editingEmailMemberId === member.dbKey ? (
                         <Input
                           value={emailDraft}
                           onChange={(e) => setEmailDraft(e.target.value)}
@@ -474,7 +476,7 @@ export default function TeamManagement() {
                       )}
                     </TableCell>
                     <TableCell>
-                      {editingRoleMemberId === member.memberId ? (
+                      {editingRoleMemberId === member.dbKey ? (
                         <div className="flex items-center gap-2">
                           <Select
                             value={roleDraft}
@@ -494,7 +496,7 @@ export default function TeamManagement() {
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={() => handleSaveRole(member.memberId)}
+                            onClick={() => handleSaveRole(member)}
                           >
                             <Check className="h-4 w-4" />
                           </Button>
@@ -532,7 +534,7 @@ export default function TeamManagement() {
                         <Button
                           variant="ghost"
                           size="sm"
-                          onClick={() => handleToggleActive(member.memberId, member.activeFlag)}
+                          onClick={() => handleToggleActive(member)}
                         >
                           <UserCheck className="h-4 w-4" />
                         </Button>
@@ -541,7 +543,7 @@ export default function TeamManagement() {
                           size="sm"
                           onClick={() => handleEmailEditToggle(member)}
                         >
-                          {editingEmailMemberId === member.memberId ? (
+                          {editingEmailMemberId === member.dbKey ? (
                             <Check className="h-4 w-4" />
                           ) : (
                             <Edit className="h-4 w-4" />
