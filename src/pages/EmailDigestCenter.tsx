@@ -14,6 +14,7 @@ type ShowOrder = {
   model?: string;
   status?: string;
   dealerConfirm?: boolean;
+  orderStatusId?: string;
   emailconfirmation?: string | boolean;
 };
 
@@ -231,6 +232,7 @@ const EmailDigestCenter = () => {
   const [sending, setSending] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [message, setMessage] = useState('');
+  const [previewOrders, setPreviewOrders] = useState<EmailOrder[]>([]);
 
   const showSections = useMemo(() => {
     const bucket = new Map<string, { showName: string; rows: Array<{ dealNo: string; customerName: string; salesperson: string; thisRoundDays: number }> }>();
@@ -251,7 +253,7 @@ const EmailDigestCenter = () => {
       }
     }
     return Array.from(bucket.values()).sort((a, b) => a.showName.localeCompare(b.showName));
-  }, [digests]);
+  }, [previewOrders]);
 
   const totalOrders = useMemo(() => digests.reduce((sum, d) => sum + d.orders.length, 0), [digests]);
   const totalWorkDays = useMemo(() => digests.reduce((sum, d) => sum + d.workDays.reduce((acc, item) => acc + item.addedDays, 0), 0), [digests]);
@@ -278,16 +280,16 @@ const EmailDigestCenter = () => {
       }
 
       const ordersByName: Record<string, EmailOrder[]> = {};
+      const allEligibleOrders: EmailOrder[] = [];
       for (const [orderKey, order] of Object.entries(orders)) {
         if (order.status !== 'Approved') continue;
-        if (order.dealerConfirm !== true) continue;
+        if (String(order.orderStatusId ?? '').trim().toLowerCase() !== 'confirmation') continue;
         if (!order.showId || SKIP_SHOW_IDS.has(order.showId)) continue;
         if (alreadySent(order.emailconfirmation)) continue;
         const nameKey = norm(order.salesperson);
         if (!nameKey) continue;
 
-        if (!ordersByName[nameKey]) ordersByName[nameKey] = [];
-        ordersByName[nameKey].push({
+        const normalizedOrder: EmailOrder = {
           orderKey,
           dealNo: String(order.dealNumber ?? order.id ?? orderKey),
           showId: String(order.showId),
@@ -295,7 +297,12 @@ const EmailDigestCenter = () => {
           customerName: String(order.customerName ?? ''),
           model: String(order.model ?? ''),
           salesperson: String(order.salesperson ?? ''),
-        });
+        };
+
+        allEligibleOrders.push(normalizedOrder);
+
+        if (!ordersByName[nameKey]) ordersByName[nameKey] = [];
+        ordersByName[nameKey].push(normalizedOrder);
       }
 
       const digestList: DigestPreview[] = [];
@@ -334,8 +341,10 @@ const EmailDigestCenter = () => {
       }
 
       setDigests(digestList);
-      setMessage(`Loaded ${digestList.length} recipients.`);
+      setPreviewOrders(allEligibleOrders);
+      setMessage(`Loaded ${digestList.length} recipients, ${allEligibleOrders.length} eligible orders.`);
     } catch (error) {
+      setPreviewOrders([]);
       setMessage(error instanceof Error ? error.message : 'Failed to load preview.');
     } finally {
       setLoading(false);
