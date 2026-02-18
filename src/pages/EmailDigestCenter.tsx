@@ -13,6 +13,7 @@ type ShowOrder = {
   customerName?: string;
   model?: string;
   status?: string;
+  orderStatusId?: string;
   dealerConfirm?: boolean;
   emailconfirmation?: string | boolean;
 };
@@ -58,6 +59,8 @@ const TEAM_MEMBERS_PATH = 'teamMembers';
 const SHOWS_PATH = 'shows';
 const HISTORY_PATH = 'emailDigestHistory';
 const MAX_ORDERS_PER_DIGEST = 15;
+const CONFIRMATION_STATUS_ID = 'confirmation';
+const CANCELLATION_STATUS_ID = 'cancellation';
 
 const SKIP_SHOW_IDS = new Set([
   '3aef2717-28d3-4df3-83e1-4174bf8f7cbe',
@@ -88,6 +91,15 @@ const alreadySent = (val: unknown) => {
   if (typeof val === 'number') return true;
   if (typeof val === 'string' && val.trim() !== '') return true;
   return false;
+};
+
+const resolveStatusValue = (orderStatusId: unknown, statusLookup: Record<string, string>) => {
+  const rawStatusId = String(orderStatusId ?? '').trim();
+  const normalized = rawStatusId.toLowerCase();
+  if (!normalized) return 'Pending';
+  if (normalized === CONFIRMATION_STATUS_ID) return 'Approved';
+  if (normalized === CANCELLATION_STATUS_ID) return 'Cancelled';
+  return statusLookup[rawStatusId] || statusLookup[normalized] || 'Pending';
 };
 
 const parseShowDaysEntriesRaw = (showDays: unknown): ShowDayEntry[] => {
@@ -236,8 +248,8 @@ const EmailDigestCenter = () => {
     const bucket = new Map<string, { showName: string; rows: Array<{ dealNo: string; customerName: string; salesperson: string; thisRoundDays: number }> }>();
     for (const digest of digests) {
       for (const order of digest.orders) {
-        const key = order.showName || order.showId;
-        const section = bucket.get(key) ?? { showName: key, rows: [] };
+        const key = order.showName || `show-${order.showId}`;
+        const section = bucket.get(key) ?? { showName: order.showName || 'Unknown show', rows: [] };
         const thisRoundDays = digest.workDays
           .filter((entry) => entry.showId === order.showId)
           .reduce((sum, entry) => sum + entry.addedDays, 0);
@@ -365,79 +377,83 @@ const EmailDigestCenter = () => {
 
   const markAsSentWithoutEmail = async () => {
     setSending(true);
-    setMessage('Marking records as sent (without email)...');
+    setMessage('Marking selected confirmed orders as sent (without email)...');
 
     try {
-      const [ordersSnap, teamSnap] = await Promise.all([get(ref(database, SHOW_ORDERS_PATH)), get(ref(database, TEAM_MEMBERS_PATH))]);
+      const ordersSnap = await get(ref(database, SHOW_ORDERS_PATH));
       const orders = (ordersSnap.val() ?? {}) as Record<string, ShowOrder>;
-      const team = (teamSnap.val() ?? {}) as Record<string, TeamMember>;
 
       const updates: Record<string, unknown> = {};
-
       const skipDigestId = makeConfirmationId('SKIP-MANUAL');
       const skipTs = nowIso();
+      let touchedOrders = 0;
+
       for (const [orderKey, order] of Object.entries(orders)) {
-        if (order.status !== 'Approved') continue;
         if (!order.showId || !SKIP_SHOW_IDS.has(order.showId)) continue;
+        if (order.status !== 'Approved') continue;
+        if (order.dealerConfirm !== true) continue;
         if (alreadySent(order.emailconfirmation)) continue;
+
         updates[`${SHOW_ORDERS_PATH}/${orderKey}/emailconfirmation`] = skipDigestId;
         updates[`${SHOW_ORDERS_PATH}/${orderKey}/emailconfirmationAt`] = skipTs;
         updates[`${SHOW_ORDERS_PATH}/${orderKey}/emailconfirmationTo`] = 'SKIPPED_NO_EMAIL_MANUAL';
+        touchedOrders += 1;
       }
 
-      for (const [memberKey, member] of Object.entries(team)) {
-        const entries = parseShowDaysEntriesRaw(member.showDays);
-        const sentMap = member.showDaysSent ?? {};
-        let touched = false;
-        for (const entry of entries) {
-          if (!SKIP_SHOW_IDS.has(entry.showId)) continue;
-          updates[`${TEAM_MEMBERS_PATH}/${memberKey}/showDaysSent/${entry.showId}`] = Math.max(toNum(sentMap[entry.showId] ?? 0), toNum(entry.days));
-          touched = true;
-        }
-        if (touched) updates[`${TEAM_MEMBERS_PATH}/${memberKey}/showDaysSentAt`] = skipTs;
-      }
-
-      let touchedDigestRows = 0;
-      for (const digest of digests) {
-        const parts = digest.orders.length ? chunk(digest.orders, MAX_ORDERS_PER_DIGEST) : [[] as EmailOrder[]];
-
-        for (let partIndex = 0; partIndex < parts.length; partIndex += 1) {
-          const part = parts[partIndex];
-          const includeWorkdays = partIndex === 0;
-          const digestId = makeConfirmationId('MANUAL');
-          const ts = nowIso();
-
-          updates[`${HISTORY_PATH}/${digestId}`] = {
-            digestId,
-            to: digest.member.email,
-            salesperson: digest.member.memberName,
-            sentAt: ts,
-            orderCount: part.length,
-            manual: true,
-          };
-
-          for (const order of part) {
-            updates[`${SHOW_ORDERS_PATH}/${order.orderKey}/emailconfirmation`] = digestId;
-            updates[`${SHOW_ORDERS_PATH}/${order.orderKey}/emailconfirmationAt`] = ts;
-            updates[`${SHOW_ORDERS_PATH}/${order.orderKey}/emailconfirmationTo`] = `${digest.member.email} (manual)`;
-            touchedDigestRows += 1;
-          }
-
-          if (includeWorkdays) {
-            for (const day of digest.workDays) {
-              updates[`${TEAM_MEMBERS_PATH}/${digest.member.key}/showDaysSent/${day.showId}`] = day.totalDays;
-            }
-            updates[`${TEAM_MEMBERS_PATH}/${digest.member.key}/showDaysSentAt`] = ts;
-            updates[`${TEAM_MEMBERS_PATH}/${digest.member.key}/showDaysSentConfirmationId`] = digestId;
-          }
-        }
-      }
-
-      if (Object.keys(updates).length > 0) {
+      if (touchedOrders > 0) {
         await update(ref(database), updates);
       }
-      setMessage(`Manual fill complete. Marked ${touchedDigestRows} order records as sent without email.`);
+
+      setMessage(
+        touchedOrders > 0
+          ? `Manual fill complete. Marked ${touchedOrders} confirmed orders from selected shows as sent.`
+          : 'No eligible confirmed orders found in selected shows.'
+      );
       await loadPreview();
+    } finally {
+      setSending(false);
+    }
+  };
+
+
+  const backfillMissingStatus = async () => {
+    setSending(true);
+    setMessage('Backfilling missing status values...');
+
+    try {
+      const [ordersSnap, statusOptionsSnap] = await Promise.all([
+        get(ref(database, SHOW_ORDERS_PATH)),
+        get(ref(database, 'orderStatusOptions')),
+      ]);
+
+      const orders = (ordersSnap.val() ?? {}) as Record<string, ShowOrder>;
+      const statusOptions = (statusOptionsSnap.val() ?? {}) as Record<string, { label?: string }>;
+      const statusLookup = Object.entries(statusOptions).reduce<Record<string, string>>((acc, [id, option]) => {
+        const key = String(id ?? '').trim();
+        const label = String(option?.label ?? '').trim();
+        if (!key || !label) return acc;
+        acc[key] = label;
+        acc[key.toLowerCase()] = label;
+        return acc;
+      }, {});
+
+      const updates: Record<string, unknown> = {};
+      let patched = 0;
+
+      for (const [orderKey, order] of Object.entries(orders)) {
+        if (typeof order.status === 'string' && order.status.trim() !== '') continue;
+        updates[`${SHOW_ORDERS_PATH}/${orderKey}/status`] = resolveStatusValue(order.orderStatusId, statusLookup);
+        patched += 1;
+      }
+
+      if (patched > 0) {
+        await update(ref(database), updates);
+      }
+
+      setMessage(patched > 0 ? `Backfill complete. Updated ${patched} orders.` : 'No missing status found.');
+      await loadPreview();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Backfill failed.');
     } finally {
       setSending(false);
     }
@@ -590,6 +606,9 @@ const EmailDigestCenter = () => {
           </Button>
           <Button variant="secondary" onClick={markAsSentWithoutEmail} disabled={sending || loading}>
             Mark as Sent (No Email)
+          </Button>
+          <Button variant="outline" onClick={backfillMissingStatus} disabled={sending || loading}>
+            Backfill Missing Status
           </Button>
         </div>
       </div>
