@@ -457,6 +457,18 @@ export default function OrdersAndSales() {
     [orders]
   );
 
+
+  const resolveStatusValue = useCallback(
+    (orderStatusId?: string) => {
+      const normalized = String(orderStatusId ?? '').trim().toLowerCase();
+      if (!normalized) return 'Pending';
+      if (normalized === CONFIRMATION_STATUS_ID) return 'Approved';
+      if (normalized === CANCELLATION_STATUS_ID) return 'Cancelled';
+      return statusLookup[normalized]?.label?.trim() || normalized;
+    },
+    [statusLookup]
+  );
+
   const selectedShow = useMemo(() => shows.find((show) => show.id === newOrder.showId), [newOrder.showId, shows]);
 
   const showTeamMembers = useMemo(() => {
@@ -526,11 +538,11 @@ export default function OrdersAndSales() {
   const handleStatusChange = async (order: ShowOrderWithContract, statusId: string) => {
     if (!order.id) return;
     const nextStatusId = statusId === 'none' ? '' : statusId;
-    const statusLabel = statusOptions.find((option) => option.id === nextStatusId)?.label || '';
+    const statusValue = resolveStatusValue(nextStatusId);
     try {
       await dbUpdate(`showOrders/${order.id}`, {
         orderStatusId: nextStatusId || null,
-        status: statusLabel || null,
+        status: statusValue,
       });
       setOrders((prev) =>
         prev.map((existing) =>
@@ -538,7 +550,7 @@ export default function OrdersAndSales() {
             ? {
                 ...existing,
                 orderStatusId: nextStatusId,
-                status: statusLabel,
+                status: statusValue,
               }
             : existing
         )
@@ -776,7 +788,7 @@ export default function OrdersAndSales() {
         contractValue,
         contractNumber: newOrder.contractNumber?.trim() || '',
         handoverDealer: newOrder.handoverDealer?.trim() || '',
-        status: '',
+        status: resolveStatusValue(newOrder.orderStatusId || ''),
         salespersonOrderComments: newOrder.salespersonOrderComments || '',
         orderAttachments: mergedAttachments,
         dealNumber,
