@@ -126,6 +126,12 @@ const formatDate = (value: string | undefined) => {
   });
 };
 
+const hasCommissionSent = (value: unknown) => {
+  if (value === true) return true;
+  if (typeof value === 'number') return true;
+  return typeof value === 'string' && value.trim().length > 0;
+};
+
 const parseDateValue = (value: string | undefined | null) => {
   if (!value) return null;
   const parsed = new Date(value);
@@ -1522,6 +1528,7 @@ export default function OrdersAndSales() {
                     <TableHead>Handover Dealer</TableHead>
                     <TableHead>Dealer Status</TableHead>
                     <TableHead>Status</TableHead>
+                    <TableHead className="text-center">Commission</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -1633,6 +1640,19 @@ export default function OrdersAndSales() {
                               ))}
                             </SelectContent>
                           </Select>
+                        </TableCell>
+                        <TableCell className="text-center">
+                          <span
+                            className={cn(
+                              'inline-flex h-6 w-6 items-center justify-center rounded-full border text-sm font-semibold',
+                              hasCommissionSent(order.emailconfirmation)
+                                ? 'border-emerald-300 bg-emerald-100 text-emerald-700'
+                                : 'border-slate-200 bg-slate-100 text-slate-400'
+                            )}
+                            title={hasCommissionSent(order.emailconfirmation) ? 'Confirmation email sent' : 'Not sent yet'}
+                          >
+                            {hasCommissionSent(order.emailconfirmation) ? '✓' : '-'}
+                          </span>
                         </TableCell>
                       </TableRow>
                     );
