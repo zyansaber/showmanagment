@@ -352,6 +352,10 @@ export default function OrdersAndSales() {
     };
 
     loadData();
+    const timer = window.setInterval(() => {
+      void loadData();
+    }, 30000);
+    return () => window.clearInterval(timer);
   }, []);
 
   const showLookup = useMemo(
@@ -371,7 +375,10 @@ export default function OrdersAndSales() {
 
   const statusLookup = useMemo(() => {
     return statusOptions.reduce<Record<string, OrderStatusOption>>((acc, option) => {
-      acc[option.id] = option;
+      const key = String(option.id || '').trim();
+      if (!key) return acc;
+      acc[key] = option;
+      acc[key.toLowerCase()] = option;
       return acc;
     }, {});
   }, [statusOptions]);
@@ -466,11 +473,12 @@ export default function OrdersAndSales() {
 
   const resolveStatusValue = useCallback(
     (orderStatusId?: string) => {
-      const normalized = String(orderStatusId ?? '').trim().toLowerCase();
+      const rawStatusId = String(orderStatusId ?? '').trim();
+      const normalized = rawStatusId.toLowerCase();
       if (!normalized) return 'Pending';
       if (normalized === CONFIRMATION_STATUS_ID) return 'Approved';
       if (normalized === CANCELLATION_STATUS_ID) return 'Cancelled';
-      return statusLookup[normalized]?.label?.trim() || normalized;
+      return statusLookup[rawStatusId]?.label?.trim() || statusLookup[normalized]?.label?.trim() || 'Pending';
     },
     [statusLookup]
   );
@@ -634,7 +642,6 @@ export default function OrdersAndSales() {
     try {
       await dbUpdate(`showOrders/${order.id}`, {
         status: 'Approved',
-        dealerConfirm: true,
         approvedBy: 'Orders Dashboard',
         date: order.date,
         orderStatusId: CONFIRMATION_STATUS_ID,
@@ -645,7 +652,6 @@ export default function OrdersAndSales() {
             ? {
                 ...existing,
                 status: 'Approved',
-                dealerConfirm: true,
                 approvedBy: 'Orders Dashboard',
                 orderStatusId: CONFIRMATION_STATUS_ID,
               }
@@ -670,7 +676,6 @@ export default function OrdersAndSales() {
     try {
       await dbUpdate(`showOrders/${order.id}`, {
         status: 'Cancelled',
-        dealerConfirm: false,
         cancelledBy: 'Orders Dashboard',
         orderStatusId: CANCELLATION_STATUS_ID,
       });
@@ -680,7 +685,6 @@ export default function OrdersAndSales() {
             ? {
                 ...existing,
                 status: 'Cancelled',
-                dealerConfirm: false,
                 cancelledBy: 'Orders Dashboard',
                 orderStatusId: CANCELLATION_STATUS_ID,
               }
