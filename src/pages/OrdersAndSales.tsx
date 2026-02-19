@@ -371,10 +371,7 @@ export default function OrdersAndSales() {
 
   const statusLookup = useMemo(() => {
     return statusOptions.reduce<Record<string, OrderStatusOption>>((acc, option) => {
-      const key = String(option.id || '').trim();
-      if (!key) return acc;
-      acc[key] = option;
-      acc[key.toLowerCase()] = option;
+      acc[option.id] = option;
       return acc;
     }, {});
   }, [statusOptions]);
@@ -469,12 +466,11 @@ export default function OrdersAndSales() {
 
   const resolveStatusValue = useCallback(
     (orderStatusId?: string) => {
-      const rawStatusId = String(orderStatusId ?? '').trim();
-      const normalized = rawStatusId.toLowerCase();
+      const normalized = String(orderStatusId ?? '').trim().toLowerCase();
       if (!normalized) return 'Pending';
       if (normalized === CONFIRMATION_STATUS_ID) return 'Approved';
       if (normalized === CANCELLATION_STATUS_ID) return 'Cancelled';
-      return statusLookup[rawStatusId]?.label?.trim() || statusLookup[normalized]?.label?.trim() || 'Pending';
+      return statusLookup[normalized]?.label?.trim() || normalized;
     },
     [statusLookup]
   );
@@ -638,6 +634,7 @@ export default function OrdersAndSales() {
     try {
       await dbUpdate(`showOrders/${order.id}`, {
         status: 'Approved',
+        dealerConfirm: true,
         approvedBy: 'Orders Dashboard',
         date: order.date,
         orderStatusId: CONFIRMATION_STATUS_ID,
@@ -648,6 +645,7 @@ export default function OrdersAndSales() {
             ? {
                 ...existing,
                 status: 'Approved',
+                dealerConfirm: true,
                 approvedBy: 'Orders Dashboard',
                 orderStatusId: CONFIRMATION_STATUS_ID,
               }
@@ -672,6 +670,7 @@ export default function OrdersAndSales() {
     try {
       await dbUpdate(`showOrders/${order.id}`, {
         status: 'Cancelled',
+        dealerConfirm: false,
         cancelledBy: 'Orders Dashboard',
         orderStatusId: CANCELLATION_STATUS_ID,
       });
@@ -681,6 +680,7 @@ export default function OrdersAndSales() {
             ? {
                 ...existing,
                 status: 'Cancelled',
+                dealerConfirm: false,
                 cancelledBy: 'Orders Dashboard',
                 orderStatusId: CANCELLATION_STATUS_ID,
               }

@@ -133,27 +133,10 @@ export default function ShowTeamAssignments() {
   }, []);
 
   const sortedShows = useMemo(() => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const rank = (show: Show) => {
-      const start = parseDate(show.startDate);
-      const end = parseDate(show.finishDate);
-      if (start && end && start <= today && end >= today) return 0; // in progress
-      if (end && end < today) return 1; // finished (recent first)
-      return 2; // upcoming
-    };
     return [...shows].sort((a, b) => {
-      const r = rank(a) - rank(b);
-      if (r !== 0) return r;
-      const aStart = parseDate(a.startDate)?.getTime() ?? Number.POSITIVE_INFINITY;
-      const bStart = parseDate(b.startDate)?.getTime() ?? Number.POSITIVE_INFINITY;
-      const aEnd = parseDate(a.finishDate)?.getTime() ?? Number.NEGATIVE_INFINITY;
-      const bEnd = parseDate(b.finishDate)?.getTime() ?? Number.NEGATIVE_INFINITY;
-      if (rank(a) === 1) {
-        if (aEnd !== bEnd) return bEnd - aEnd;
-      } else if (aStart !== bStart) {
-        return aStart - bStart;
-      }
+      const aTime = getShowTimestamp(a);
+      const bTime = getShowTimestamp(b);
+      if (aTime !== bTime) return aTime - bTime;
       return (a.name || '').localeCompare(b.name || '');
     });
   }, [shows]);
