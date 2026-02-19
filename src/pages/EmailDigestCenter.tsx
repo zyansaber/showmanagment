@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { get, ref, update } from 'firebase/database';
-import { Mail, History, RefreshCw, Send } from 'lucide-react';
+import { Mail, History, RefreshCw, Send, Eye } from 'lucide-react';
 import { database } from '@/lib/firebase';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -13,6 +13,7 @@ type ShowOrder = {
   customerName?: string;
   model?: string;
   status?: string;
+  orderStatusId?: string;
   dealerConfirm?: boolean;
   emailconfirmation?: string | boolean;
 };
@@ -51,6 +52,8 @@ type HistoryItem = {
   sentAt: string;
   orderCount: number;
   salesperson: string;
+  daysSentTotal?: number;
+  daysSentSummary?: string;
 };
 
 const SHOW_ORDERS_PATH = 'showOrders';
@@ -58,6 +61,8 @@ const TEAM_MEMBERS_PATH = 'teamMembers';
 const SHOWS_PATH = 'shows';
 const HISTORY_PATH = 'emailDigestHistory';
 const MAX_ORDERS_PER_DIGEST = 15;
+const CONFIRMATION_STATUS_ID = 'confirmation';
+const CANCELLATION_STATUS_ID = 'cancellation';
 
 const SKIP_SHOW_IDS = new Set([
   '3aef2717-28d3-4df3-83e1-4174bf8f7cbe',
@@ -67,6 +72,7 @@ const SKIP_SHOW_IDS = new Set([
   'SHOW-1762752016867',
   'SHOW-1762752016870',
   '7a224798-7f6a-4cb8-888b-3e418fcb4dce',
+  'SHOW-1762752016929',
 ]);
 
 const EMAILJS_SEND_URL = 'https://api.emailjs.com/api/v1.0/email/send';
@@ -88,6 +94,21 @@ const alreadySent = (val: unknown) => {
   if (typeof val === 'number') return true;
   if (typeof val === 'string' && val.trim() !== '') return true;
   return false;
+};
+
+const isConfirmedOrder = (order: ShowOrder) => {
+  const normalizedStatus = String(order.status ?? '').trim().toLowerCase();
+  const normalizedStatusId = String(order.orderStatusId ?? '').trim().toLowerCase();
+  return normalizedStatusId === CONFIRMATION_STATUS_ID || normalizedStatus === 'approved';
+};
+
+const resolveStatusValue = (orderStatusId: unknown, statusLookup: Record<string, string>) => {
+  const rawStatusId = String(orderStatusId ?? '').trim();
+  const normalized = rawStatusId.toLowerCase();
+  if (!normalized) return 'Pending';
+  if (normalized === CONFIRMATION_STATUS_ID) return 'Approved';
+  if (normalized === CANCELLATION_STATUS_ID) return 'Cancelled';
+  return statusLookup[rawStatusId] || statusLookup[normalized] || 'Pending';
 };
 
 const parseShowDaysEntriesRaw = (showDays: unknown): ShowDayEntry[] => {
@@ -134,7 +155,24 @@ const chunk = <T,>(list: T[], size: number): T[][] => {
 
 const escapePdf = (text: string) => text.replace(/\\/g, '\\\\').replace(/\(/g, '\\(').replace(/\)/g, '\\)');
 
-const buildDigestPdfDataUri = (args: {
+const makePseudoCode39Bars = (value: string, x: number, y: number, height: number, moduleW = 1.6) => {
+  const src = `*${value.toUpperCase()}*`;
+  const bars: Array<{ x: number; y: number; w: number; h: number }> = [];
+  let cursor = x;
+  for (const ch of src) {
+    const seed = ch.charCodeAt(0);
+    for (let i = 0; i < 9; i += 1) {
+      const wide = ((seed >> (i % 6)) & 1) === 1;
+      const w = moduleW * (wide ? 2.2 : 1);
+      if (i % 2 === 0) bars.push({ x: cursor, y, w, h: height });
+      cursor += w;
+    }
+    cursor += moduleW * 2.2;
+  }
+  return { bars, width: cursor - x };
+};
+
+const buildDigestPdfDataUri = async (args: {
   salesperson: string;
   recipientEmail: string;
   digestId: string;
@@ -144,44 +182,87 @@ const buildDigestPdfDataUri = (args: {
   const generatedAt = new Date().toLocaleString('en-AU', { timeZone: 'Australia/Melbourne' });
   const totalNewDays = args.workDays.reduce((s, d) => s + toNum(d.addedDays), 0);
 
-  const lines: string[] = [
-    `CNF: ${args.digestId}`,
-    '',
-    'Show Orders Confirmation',
-    `TOTAL VANS: ${args.orders.length}`,
-    ...(totalNewDays > 0 ? [`NEW WORK DAYS: ${totalNewDays}`] : []),
-    `Salesperson: ${args.salesperson}`,
-    `Email: ${args.recipientEmail}`,
-    `Generated: ${generatedAt}`,
-    '',
-    `Orders (${args.orders.length})`,
-    'Deal # | Customer Name | Show | Model',
-    ...args.orders.map((order) => `${order.dealNo || '-'} | ${order.customerName || '-'} | ${order.showName || '-'} | ${order.model || '-'}`),
+  const pageW = 595;
+  const pageH = 842;
+  const left = 48;
+  const right = 547;
+  const contentW = right - left;
+  const topReserved = Math.round(pageH / 7);
+  const lineGap = 14;
+
+  const textLines: Array<{ size: number; text: string; bold?: boolean }> = [
+    { size: 14, bold: true, text: 'Show Orders Confirmation' },
+    { size: 12, bold: true, text: `TOTAL VANS: ${args.orders.length}` },
+    ...(totalNewDays > 0 ? [{ size: 11, bold: true, text: `NEW WORK DAYS: ${totalNewDays}` }] : []),
+    { size: 10, text: `Salesperson: ${args.salesperson}` },
+    { size: 10, text: `Email: ${args.recipientEmail}` },
+    { size: 10, text: `Generated: ${generatedAt}` },
+    { size: 10, text: '' },
+    { size: 11, bold: true, text: `Orders (${args.orders.length})` },
+    ...args.orders.map((o, idx) => ({ size: 9, text: `${idx + 1}. Deal #${o.dealNo || '-'} | ${o.showName || '-'} | ${o.customerName || '-'} | ${o.model || '-'}` })),
+    { size: 10, text: '' },
+    { size: 11, bold: true, text: `Work Days (Added: ${totalNewDays})` },
+    ...args.workDays.map((d, idx) => ({ size: 9, text: `${idx + 1}. ${d.showName || d.showId} | +${d.addedDays}` })),
+    { size: 10, text: '' },
+    { size: 10, bold: true, text: 'Commission / Concur' },
+    { size: 9, text: '- Attach this PDF in Concur claim.' },
+    { size: 9, text: '- Use CNF on top-right as reference.' },
   ];
 
-  if (args.workDays.length > 0) {
-    lines.push('', `Work Days (New: ${totalNewDays})`, 'Show | Added Days | Total');
-    lines.push(...args.workDays.map((d) => `${d.showName || d.showId} | ${d.addedDays} | ${d.totalDays}`));
+  const barcode = makePseudoCode39Bars(args.digestId, 0, 0, 24, 1.55);
+  const barcodeX = right - Math.min(220, barcode.width);
+  const barcodeY = pageH - 68;
+
+  const contentParts: string[] = [];
+  contentParts.push('q 0.90 0.92 0.97 rg 0.90 0.92 0.97 RG');
+  contentParts.push(`${left} ${(pageH - topReserved - 56).toFixed(2)} ${contentW} 70 re f`);
+  contentParts.push('Q');
+  contentParts.push('q 0.88 0.90 0.94 RG 1 w');
+  contentParts.push(`${left} ${(pageH - topReserved).toFixed(2)} m ${right} ${(pageH - topReserved).toFixed(2)} l S Q`);
+
+  const pillText = `CNF: ${args.digestId}`;
+  const pillW = Math.min(240, 18 + pillText.length * 5.1);
+  const pillH = 22;
+  const pillX = right - pillW;
+  const pillY = pageH - 40;
+  contentParts.push('q 1 1 1 rg 0.85 0.87 0.90 RG');
+  contentParts.push(`${pillX.toFixed(2)} ${pillY.toFixed(2)} ${pillW.toFixed(2)} ${pillH} re B Q`);
+
+  contentParts.push('q 0 0 0 rg');
+  for (const bar of barcode.bars) {
+    contentParts.push(`${(bar.x + barcodeX).toFixed(2)} ${(bar.y + barcodeY).toFixed(2)} ${bar.w.toFixed(2)} ${bar.h.toFixed(2)} re f`);
+  }
+  contentParts.push('Q');
+
+  let y = pageH - topReserved - 30;
+  for (const line of textLines) {
+    if (y < 52) break;
+    const font = line.bold ? '/F2' : '/F1';
+    contentParts.push('BT');
+    contentParts.push(`${font} ${line.size} Tf`);
+    contentParts.push(`${left} ${y.toFixed(2)} Td`);
+    contentParts.push(`(${escapePdf(line.text)}) Tj`);
+    contentParts.push('ET');
+    y -= lineGap;
   }
 
-  lines.push(
-    '',
-    'Next step (Commission / Concur)',
-    '• Please attach this Show Orders Confirmation PDF to your Concur claim as supporting evidence for commission.',
-    '• Use the CNF number as the reference in Concur (recommended).',
-    '• Submit according to internal policy.',
-    '',
-    'Page 1 of 1',
-  );
+  contentParts.push('BT /F2 10 Tf');
+  contentParts.push(`${(pillX + 9).toFixed(2)} ${(pillY + 8).toFixed(2)} Td`);
+  contentParts.push(`(${escapePdf(pillText)}) Tj ET`);
 
-  const contentStream = ['BT', '/F1 10 Tf', '48 800 Td', '14 TL', ...lines.map((line, i) => `${i === 0 ? '' : 'T* '}(${escapePdf(line)}) Tj`.trim()), 'ET'].join('\n');
+  contentParts.push('BT /F1 9 Tf');
+  contentParts.push(`${left} 26 Td (Page 1 of 1) Tj ET`);
+
+  const contentStream = contentParts.join('\n');
+  const contentLength = new TextEncoder().encode(contentStream).length;
 
   const objects: string[] = [
     '1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj',
     '2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj',
-    '3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >> endobj',
+    '3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R /F2 5 0 R >> >> /Contents 6 0 R >> endobj',
     '4 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj',
-    `5 0 obj << /Length ${contentStream.length} >> stream\n${contentStream}\nendstream endobj`,
+    '5 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >> endobj',
+    `6 0 obj << /Length ${contentLength} >> stream\n${contentStream}\nendstream endobj`,
   ];
 
   let pdf = '%PDF-1.4\n';
@@ -197,8 +278,10 @@ const buildDigestPdfDataUri = (args: {
   }
   pdf += `trailer << /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefStart}\n%%EOF`;
 
-  return `data:application/pdf;base64,${btoa(unescape(encodeURIComponent(pdf)))}`;
+  const binary = new TextEncoder().encode(pdf).reduce((acc, byte) => acc + String.fromCharCode(byte), '');
+  return `data:application/pdf;base64,${btoa(binary)}`;
 };
+
 
 async function sendEmailJs(toEmail: string, toName: string, templateParams: Record<string, unknown>) {
   const body: Record<string, unknown> = {
@@ -231,27 +314,49 @@ const EmailDigestCenter = () => {
   const [sending, setSending] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [message, setMessage] = useState('');
+  const [showNameMap, setShowNameMap] = useState<Record<string, string>>({});
 
-  const showSections = useMemo(() => {
-    const bucket = new Map<string, { showName: string; rows: Array<{ dealNo: string; customerName: string; salesperson: string; thisRoundDays: number }> }>();
-    for (const digest of digests) {
-      for (const order of digest.orders) {
-        const key = order.showName || order.showId;
-        const section = bucket.get(key) ?? { showName: key, rows: [] };
-        const thisRoundDays = digest.workDays
-          .filter((entry) => entry.showId === order.showId)
-          .reduce((sum, entry) => sum + entry.addedDays, 0);
-        section.rows.push({
-          dealNo: order.dealNo,
-          customerName: order.customerName || '-',
-          salesperson: digest.member.memberName,
-          thisRoundDays,
-        });
-        bucket.set(key, section);
-      }
-    }
-    return Array.from(bucket.values()).sort((a, b) => a.showName.localeCompare(b.showName));
-  }, [digests]);
+  const sortedDigests = useMemo(
+    () => [...digests].sort((a, b) => a.member.memberName.localeCompare(b.member.memberName)),
+    [digests]
+  );
+
+  const resolveShowName = (showIdOrName: string) => {
+    if (!showIdOrName) return 'Unknown show';
+    return showNameMap[showIdOrName] || showIdOrName;
+  };
+
+  const prettifyDaysSummary = (summary?: string) => {
+    if (!summary) return '';
+    return summary
+      .split(' | ')
+      .map((chunkPart) => {
+        const [who, rest] = chunkPart.split(' => ');
+        if (!rest) return chunkPart;
+        const prettyRest = rest
+          .split(', ')
+          .map((pair) => {
+            const [showId, days] = pair.split(':');
+            return `${resolveShowName(showId)}:${days ?? ''}`;
+          })
+          .join(', ');
+        return `${who} => ${prettyRest}`;
+      })
+      .join(' | ');
+  };
+
+  const extractPeopleFromDaysSummary = (summary?: string) => {
+    if (!summary) return '';
+    const names = summary
+      .split(' | ')
+      .map((chunkPart) => chunkPart.split(' => ')[0]?.trim())
+      .filter(Boolean);
+    return Array.from(new Set(names)).join(', ');
+  };
+
+  const isCommissionDoneHistory = (item: HistoryItem) =>
+    item.to === 'SKIPPED_NO_EMAIL' || item.salesperson === 'SKIPPED_SHOWS_BATCH';
+
 
   const totalOrders = useMemo(() => digests.reduce((sum, d) => sum + d.orders.length, 0), [digests]);
   const totalWorkDays = useMemo(() => digests.reduce((sum, d) => sum + d.workDays.reduce((acc, item) => acc + item.addedDays, 0), 0), [digests]);
@@ -277,11 +382,12 @@ const EmailDigestCenter = () => {
         if (showId && showName) showMap[showId] = showName;
       }
 
+      setShowNameMap(showMap);
+
       const ordersByName: Record<string, EmailOrder[]> = {};
       for (const [orderKey, order] of Object.entries(orders)) {
-        if (order.status !== 'Approved') continue;
-        if (order.dealerConfirm !== true) continue;
-        if (!order.showId || SKIP_SHOW_IDS.has(order.showId)) continue;
+        if (!isConfirmedOrder(order)) continue;
+        if (!order.showId) continue;
         if (alreadySent(order.emailconfirmation)) continue;
         const nameKey = norm(order.salesperson);
         if (!nameKey) continue;
@@ -291,7 +397,7 @@ const EmailDigestCenter = () => {
           orderKey,
           dealNo: String(order.dealNumber ?? order.id ?? orderKey),
           showId: String(order.showId),
-          showName: showMap[String(order.showId)] ?? String(order.showId),
+          showName: showMap[String(order.showId)] ?? 'Unknown show',
           customerName: String(order.customerName ?? ''),
           model: String(order.model ?? ''),
           salesperson: String(order.salesperson ?? ''),
@@ -303,7 +409,7 @@ const EmailDigestCenter = () => {
         const memberName = String(member.memberName ?? '');
         const email = String(member.email ?? '');
         const nameKey = norm(memberName);
-        if (!nameKey || !email) continue;
+        if (!nameKey) continue;
         if (member.activeFlag !== undefined && Number(member.activeFlag) !== 1) continue;
 
         const ordersForMember = ordersByName[nameKey] ?? [];
@@ -316,7 +422,7 @@ const EmailDigestCenter = () => {
             const totalDays = toNum(entry.days);
             return {
               showId: entry.showId,
-              showName: entry.showName ?? showMap[entry.showId] ?? entry.showId,
+              showName: entry.showName ?? showMap[entry.showId] ?? 'Unknown show',
               sentBefore,
               totalDays,
               addedDays: totalDays - sentBefore,
@@ -346,8 +452,17 @@ const EmailDigestCenter = () => {
     setLoading(true);
     setMessage('');
     try {
-      const snapshot = await get(ref(database, HISTORY_PATH));
-      const rows = (snapshot.val() ?? {}) as Record<string, HistoryItem>;
+      const [historySnap, showsSnap] = await Promise.all([get(ref(database, HISTORY_PATH)), get(ref(database, SHOWS_PATH))]);
+      const rows = (historySnap.val() ?? {}) as Record<string, HistoryItem>;
+      const shows = (showsSnap.val() ?? {}) as Record<string, { id?: string; showId?: string; name?: string; showName?: string }>;
+      const map: Record<string, string> = {};
+      for (const [key, value] of Object.entries(shows)) {
+        const showId = String(value?.id ?? value?.showId ?? key ?? '').trim();
+        const showName = String(value?.name ?? value?.showName ?? '').trim();
+        if (showId && showName) map[showId] = showName;
+      }
+      setShowNameMap((prev) => ({ ...prev, ...map }));
+
       const list = Object.values(rows).sort((a, b) => (a.sentAt < b.sentAt ? 1 : -1)).slice(0, 100);
       setHistory(list);
       setShowHistory(true);
@@ -363,9 +478,9 @@ const EmailDigestCenter = () => {
     void loadPreview();
   }, []);
 
-  const markAsSentWithoutEmail = async () => {
+  const markConfirmedSkippedShowsAsSent = async () => {
     setSending(true);
-    setMessage('Marking records as sent (without email)...');
+    setMessage('Marking confirmed skipped-show orders as sent (without email)...');
 
     try {
       const [ordersSnap, teamSnap] = await Promise.all([get(ref(database, SHOW_ORDERS_PATH)), get(ref(database, TEAM_MEMBERS_PATH))]);
@@ -373,54 +488,207 @@ const EmailDigestCenter = () => {
       const team = (teamSnap.val() ?? {}) as Record<string, TeamMember>;
 
       const updates: Record<string, unknown> = {};
-
-      const skipDigestId = makeConfirmationId('SKIP-MANUAL');
+      const skipDigestId = makeConfirmationId('SKIP');
       const skipTs = nowIso();
+      let touchedOrders = 0;
+
       for (const [orderKey, order] of Object.entries(orders)) {
-        if (order.status !== 'Approved') continue;
         if (!order.showId || !SKIP_SHOW_IDS.has(order.showId)) continue;
+        if (!isConfirmedOrder(order)) continue;
         if (alreadySent(order.emailconfirmation)) continue;
+
         updates[`${SHOW_ORDERS_PATH}/${orderKey}/emailconfirmation`] = skipDigestId;
         updates[`${SHOW_ORDERS_PATH}/${orderKey}/emailconfirmationAt`] = skipTs;
-        updates[`${SHOW_ORDERS_PATH}/${orderKey}/emailconfirmationTo`] = 'SKIPPED_NO_EMAIL_MANUAL';
+        updates[`${SHOW_ORDERS_PATH}/${orderKey}/emailconfirmationTo`] = 'SKIPPED_NO_EMAIL';
+        updates[`${SHOW_ORDERS_PATH}/${orderKey}/emailconfirmationNote`] = 'Auto-marked as sent for skipped showId (no email required)';
+        touchedOrders += 1;
       }
 
+      let totalDaysSent = 0;
+      const daySummaries: string[] = [];
       for (const [memberKey, member] of Object.entries(team)) {
-        const entries = parseShowDaysEntriesRaw(member.showDays);
-        const sentMap = member.showDaysSent ?? {};
-        let touched = false;
+        const entries = parseShowDaysEntriesRaw(member.showDays).filter((entry) => SKIP_SHOW_IDS.has(entry.showId));
+        if (!entries.length) continue;
+
+        const sentMap = (member.showDaysSent ?? {}) as Record<string, number>;
+        const applied: string[] = [];
         for (const entry of entries) {
-          if (!SKIP_SHOW_IDS.has(entry.showId)) continue;
-          updates[`${TEAM_MEMBERS_PATH}/${memberKey}/showDaysSent/${entry.showId}`] = Math.max(toNum(sentMap[entry.showId] ?? 0), toNum(entry.days));
-          touched = true;
+          const totalDays = toNum(entry.days);
+          const sentBefore = toNum(sentMap[entry.showId] ?? 0);
+          const nextSent = Math.max(sentBefore, totalDays);
+          updates[`${TEAM_MEMBERS_PATH}/${memberKey}/showDaysSent/${entry.showId}`] = nextSent;
+          updates[`${TEAM_MEMBERS_PATH}/${memberKey}/showDaysSentAt`] = skipTs;
+          updates[`${TEAM_MEMBERS_PATH}/${memberKey}/showDaysSentConfirmationId`] = skipDigestId;
+          totalDaysSent += Math.max(0, nextSent - sentBefore);
+          applied.push(`${entry.showId}:${nextSent}`);
         }
-        if (touched) updates[`${TEAM_MEMBERS_PATH}/${memberKey}/showDaysSentAt`] = skipTs;
+        if (applied.length) daySummaries.push(`${member.memberName || memberKey} => ${applied.join(', ')}`);
       }
 
-      let touchedDigestRows = 0;
-      for (const digest of digests) {
-        const parts = digest.orders.length ? chunk(digest.orders, MAX_ORDERS_PER_DIGEST) : [[] as EmailOrder[]];
+      updates[`${HISTORY_PATH}/${skipDigestId}`] = {
+        digestId: skipDigestId,
+        to: 'SKIPPED_NO_EMAIL',
+        salesperson: 'SKIPPED_SHOWS_BATCH',
+        sentAt: skipTs,
+        orderCount: touchedOrders,
+        daysSentTotal: totalDaysSent,
+        daysSentSummary: daySummaries.join(' | '),
+        manual: true,
+      };
 
-        for (let partIndex = 0; partIndex < parts.length; partIndex += 1) {
-          const part = parts[partIndex];
-          const includeWorkdays = partIndex === 0;
-          const digestId = makeConfirmationId('MANUAL');
-          const ts = nowIso();
+      if (Object.keys(updates).length > 0) {
+        await update(ref(database), updates);
+      }
 
-          updates[`${HISTORY_PATH}/${digestId}`] = {
-            digestId,
-            to: digest.member.email,
-            salesperson: digest.member.memberName,
-            sentAt: ts,
-            orderCount: part.length,
-            manual: true,
+      setMessage(
+        `Done. Marked ${touchedOrders} confirmed skip-show orders as sent (no email). Days confirmed delta: ${totalDaysSent}.`
+      );
+      await loadPreview();
+      await loadHistory();
+    } finally {
+      setSending(false);
+    }
+  };
+
+
+  const backfillMissingStatus = async () => {
+    setSending(true);
+    setMessage('Backfilling missing status values...');
+
+    try {
+      const [ordersSnap, statusOptionsSnap] = await Promise.all([
+        get(ref(database, SHOW_ORDERS_PATH)),
+        get(ref(database, 'orderStatusOptions')),
+      ]);
+
+      const orders = (ordersSnap.val() ?? {}) as Record<string, ShowOrder>;
+      const statusOptions = (statusOptionsSnap.val() ?? {}) as Record<string, { label?: string }>;
+      const statusLookup = Object.entries(statusOptions).reduce<Record<string, string>>((acc, [id, option]) => {
+        const key = String(id ?? '').trim();
+        const label = String(option?.label ?? '').trim();
+        if (!key || !label) return acc;
+        acc[key] = label;
+        acc[key.toLowerCase()] = label;
+        return acc;
+      }, {});
+
+      const updates: Record<string, unknown> = {};
+      let patched = 0;
+
+      for (const [orderKey, order] of Object.entries(orders)) {
+        if (typeof order.status === 'string' && order.status.trim() !== '') continue;
+        updates[`${SHOW_ORDERS_PATH}/${orderKey}/status`] = resolveStatusValue(order.orderStatusId, statusLookup);
+        patched += 1;
+      }
+
+      if (patched > 0) {
+        await update(ref(database), updates);
+      }
+
+      setMessage(patched > 0 ? `Backfill complete. Updated ${patched} orders.` : 'No missing status found.');
+      await loadPreview();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Backfill failed.');
+    } finally {
+      setSending(false);
+    }
+  };
+
+
+  const downloadPdfTemplate = async () => {
+    const first = sortedDigests[0];
+    const digestId = makeConfirmationId('CNF-PREVIEW');
+    const dataUri = await buildDigestPdfDataUri({
+      salesperson: first?.member.memberName || 'Preview User',
+      recipientEmail: first?.member.email || 'preview@example.com',
+      digestId,
+      orders: (first?.orders || []).slice(0, 12).map((order) => ({
+        dealNo: order.dealNo,
+        showName: order.showName,
+        customerName: order.customerName,
+        model: order.model,
+      })),
+      workDays: first?.workDays || [],
+    });
+    const a = document.createElement('a');
+    a.href = dataUri;
+    a.download = `confirmation-template-${digestId}.pdf`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  };
+
+  const sendDigest = async (digest: DigestPreview) => {
+    setSending(true);
+    setMessage(`Sending ${digest.member.memberName}...`);
+
+    try {
+      if (!digest.member.email) {
+        setMessage(`Skipped ${digest.member.memberName}: no email set.`);
+        return;
+      }
+      const parts = digest.orders.length ? chunk(digest.orders, MAX_ORDERS_PER_DIGEST) : [[] as EmailOrder[]];
+      let success = 0;
+      let failed = 0;
+
+      for (let partIndex = 0; partIndex < parts.length; partIndex += 1) {
+        const part = parts[partIndex];
+        const includeWorkdays = partIndex === 0;
+        const digestId = makeConfirmationId('CNF');
+        const ts = nowIso();
+
+        const ordersForTemplate = part.map((order) => ({
+          order_id: order.dealNo,
+          show_name: order.showName,
+          customerName: order.customerName,
+          model: order.model,
+        }));
+
+        const pdfDataUri = await buildDigestPdfDataUri({
+          salesperson: digest.member.memberName,
+          recipientEmail: digest.member.email,
+          digestId,
+          orders: part.map((order) => ({
+            dealNo: order.dealNo,
+            showName: order.showName,
+            customerName: order.customerName,
+            model: order.model,
+          })),
+          workDays: includeWorkdays ? digest.workDays : [],
+        });
+
+        const workDaysNew = includeWorkdays ? digest.workDays.reduce((sum, item) => sum + item.addedDays, 0) : 0;
+
+        const templateParams = {
+          salesperson: digest.member.memberName,
+          digest_id: digestId,
+          has_orders: ordersForTemplate.length ? 1 : 0,
+          has_workdays: includeWorkdays && digest.workDays.length ? 1 : 0,
+          order_count: ordersForTemplate.length,
+          work_days_new: Number.isInteger(workDaysNew) ? workDaysNew : Number(workDaysNew.toFixed(2)),
+          orders: ordersForTemplate,
+          [EMAILJS_ATTACHMENT_PARAM]: pdfDataUri,
+        };
+
+        try {
+          await sendEmailJs(digest.member.email, digest.member.memberName, templateParams);
+
+          const updates: Record<string, unknown> = {
+            [`${HISTORY_PATH}/${digestId}`]: {
+              digestId,
+              to: digest.member.email,
+              salesperson: digest.member.memberName,
+              sentAt: ts,
+              orderCount: part.length,
+              daysSentTotal: includeWorkdays ? digest.workDays.reduce((sum, day) => sum + toNum(day.addedDays), 0) : 0,
+              daysSentSummary: includeWorkdays ? digest.workDays.map((day) => `${day.showId}:+${day.addedDays}`).join(', ') : '',
+            },
           };
 
           for (const order of part) {
             updates[`${SHOW_ORDERS_PATH}/${order.orderKey}/emailconfirmation`] = digestId;
             updates[`${SHOW_ORDERS_PATH}/${order.orderKey}/emailconfirmationAt`] = ts;
-            updates[`${SHOW_ORDERS_PATH}/${order.orderKey}/emailconfirmationTo`] = `${digest.member.email} (manual)`;
-            touchedDigestRows += 1;
+            updates[`${SHOW_ORDERS_PATH}/${order.orderKey}/emailconfirmationTo`] = digest.member.email;
           }
 
           if (includeWorkdays) {
@@ -430,13 +698,16 @@ const EmailDigestCenter = () => {
             updates[`${TEAM_MEMBERS_PATH}/${digest.member.key}/showDaysSentAt`] = ts;
             updates[`${TEAM_MEMBERS_PATH}/${digest.member.key}/showDaysSentConfirmationId`] = digestId;
           }
+
+          await update(ref(database), updates);
+          success += 1;
+        } catch (error) {
+          failed += 1;
+          console.error(error);
         }
       }
 
-      if (Object.keys(updates).length > 0) {
-        await update(ref(database), updates);
-      }
-      setMessage(`Manual fill complete. Marked ${touchedDigestRows} order records as sent without email.`);
+      setMessage(`Done for ${digest.member.memberName}. sent=${success}, failed=${failed}`);
       await loadPreview();
     } finally {
       setSending(false);
@@ -453,40 +724,14 @@ const EmailDigestCenter = () => {
     setMessage('Sending...');
 
     try {
-      const [ordersSnap, teamSnap] = await Promise.all([get(ref(database, SHOW_ORDERS_PATH)), get(ref(database, TEAM_MEMBERS_PATH))]);
-      const orders = (ordersSnap.val() ?? {}) as Record<string, ShowOrder>;
-      const team = (teamSnap.val() ?? {}) as Record<string, TeamMember>;
-
-      const skipUpdates: Record<string, unknown> = {};
-      const skipDigestId = makeConfirmationId('SKIP');
-      const skipTs = nowIso();
-      for (const [orderKey, order] of Object.entries(orders)) {
-        if (order.status !== 'Approved') continue;
-        if (!order.showId || !SKIP_SHOW_IDS.has(order.showId)) continue;
-        if (alreadySent(order.emailconfirmation)) continue;
-        skipUpdates[`${SHOW_ORDERS_PATH}/${orderKey}/emailconfirmation`] = skipDigestId;
-        skipUpdates[`${SHOW_ORDERS_PATH}/${orderKey}/emailconfirmationAt`] = skipTs;
-        skipUpdates[`${SHOW_ORDERS_PATH}/${orderKey}/emailconfirmationTo`] = 'SKIPPED_NO_EMAIL';
-      }
-
-      for (const [memberKey, member] of Object.entries(team)) {
-        const entries = parseShowDaysEntriesRaw(member.showDays);
-        const sentMap = member.showDaysSent ?? {};
-        let touched = false;
-        for (const entry of entries) {
-          if (!SKIP_SHOW_IDS.has(entry.showId)) continue;
-          skipUpdates[`${TEAM_MEMBERS_PATH}/${memberKey}/showDaysSent/${entry.showId}`] = Math.max(toNum(sentMap[entry.showId] ?? 0), toNum(entry.days));
-          touched = true;
-        }
-        if (touched) skipUpdates[`${TEAM_MEMBERS_PATH}/${memberKey}/showDaysSentAt`] = skipTs;
-      }
-
-      if (Object.keys(skipUpdates).length > 0) await update(ref(database), skipUpdates);
-
       let success = 0;
       let failed = 0;
 
       for (const digest of digests) {
+        if (!digest.member.email) {
+          failed += 1;
+          continue;
+        }
         const parts = digest.orders.length ? chunk(digest.orders, MAX_ORDERS_PER_DIGEST) : [[] as EmailOrder[]];
 
         for (let partIndex = 0; partIndex < parts.length; partIndex += 1) {
@@ -502,7 +747,7 @@ const EmailDigestCenter = () => {
             model: order.model,
           }));
 
-          const pdfDataUri = buildDigestPdfDataUri({
+          const pdfDataUri = await buildDigestPdfDataUri({
             salesperson: digest.member.memberName,
             recipientEmail: digest.member.email,
             digestId,
@@ -538,6 +783,8 @@ const EmailDigestCenter = () => {
                 salesperson: digest.member.memberName,
                 sentAt: ts,
                 orderCount: part.length,
+                daysSentTotal: includeWorkdays ? digest.workDays.reduce((sum, day) => sum + toNum(day.addedDays), 0) : 0,
+                daysSentSummary: includeWorkdays ? digest.workDays.map((day) => `${day.showId}:+${day.addedDays}`).join(', ') : '',
               },
             };
 
@@ -585,11 +832,17 @@ const EmailDigestCenter = () => {
           <Button variant="outline" onClick={loadHistory} disabled={loading || sending}>
             <History className="mr-2 h-4 w-4" /> View History
           </Button>
+          <Button variant="outline" onClick={downloadPdfTemplate} disabled={loading || sending}>
+            <Eye className="mr-2 h-4 w-4" /> Download PDF Template
+          </Button>
           <Button onClick={sendAll} disabled={sending || loading || digests.length === 0}>
             <Send className="mr-2 h-4 w-4" /> Send Emails
           </Button>
-          <Button variant="secondary" onClick={markAsSentWithoutEmail} disabled={sending || loading}>
-            Mark as Sent (No Email)
+          <Button variant="secondary" onClick={markConfirmedSkippedShowsAsSent} disabled={sending || loading}>
+            Mark Confirmed Skipped Shows as Sent (No Email)
+          </Button>
+          <Button variant="outline" onClick={backfillMissingStatus} disabled={sending || loading}>
+            Backfill Missing Status
           </Button>
         </div>
       </div>
@@ -604,36 +857,66 @@ const EmailDigestCenter = () => {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          {showSections.length === 0 ? (
+          {sortedDigests.length === 0 ? (
             <p className="text-sm text-slate-500">No eligible data.</p>
           ) : (
-            showSections.map((section) => (
-              <div key={section.showName} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-                <div className="mb-2 flex items-center justify-between">
-                  <p className="font-semibold text-slate-900">{section.showName}</p>
-                  <Mail className="h-4 w-4 text-slate-400" />
+            sortedDigests.map((digest) => (
+              <div key={digest.member.key} className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+                <div className="mb-2 flex items-start justify-between">
+                  <div>
+                    <p className="text-base font-semibold text-slate-900">{digest.member.memberName}</p>
+                    <p className="text-xs text-slate-500">{digest.member.email || 'No email set'}</p>
+                  </div>
+                  <Button
+                    size="icon"
+                    variant="outline"
+                    onClick={() => sendDigest(digest)}
+                    disabled={sending || loading}
+                    title={`Send email to ${digest.member.memberName}`}
+                  >
+                    <Mail className="h-4 w-4" />
+                  </Button>
                 </div>
-                <div className="overflow-x-auto">
-                  <table className="w-full overflow-hidden rounded-lg text-sm">
-                    <thead>
-                      <tr className="text-left text-xs uppercase tracking-wide text-slate-500">
-                        <th className="bg-slate-50 px-3 py-2">Deal #</th>
-                        <th className="bg-slate-50 px-3 py-2">Customer Name</th>
-                        <th className="bg-slate-50 px-3 py-2">Salesperson</th>
-                        <th className="bg-slate-50 px-3 py-2 text-right">This Round Days</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {section.rows.map((row, idx) => (
-                        <tr key={`${row.dealNo}-${idx}`} className="border-t border-slate-100 odd:bg-white even:bg-slate-50/40">
-                          <td className="px-3 py-2 font-semibold text-slate-900">{row.dealNo}</td>
-                          <td className="px-3 py-2">{row.customerName}</td>
-                          <td className="px-3 py-2">{row.salesperson}</td>
-                          <td className="px-3 py-2 text-right font-medium">{row.thisRoundDays}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+
+                <div className="grid gap-2 md:grid-cols-2">
+                  <div className="rounded-md border border-slate-200 overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <tbody>
+                        {digest.orders.length ? (
+                          digest.orders.map((order, idx) => (
+                            <tr key={`${order.orderKey}-${idx}`} className="border-t first:border-t-0 border-slate-100 odd:bg-white even:bg-slate-50/40">
+                              <td className="px-2 py-1 font-semibold text-slate-900 whitespace-nowrap">#{order.dealNo}</td>
+                              <td className="px-2 py-1 whitespace-nowrap">{order.showName || 'Unknown show'}</td>
+                              <td className="px-2 py-1">{order.customerName || '-'}</td>
+                            </tr>
+                          ))
+                        ) : (
+                          <tr>
+                            <td className="px-2 py-2 text-xs text-slate-500" colSpan={3}>No pending orders</td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div className="rounded-md border border-slate-200 overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <tbody>
+                        {digest.workDays.length ? (
+                          digest.workDays.map((day, idx) => (
+                            <tr key={`${day.showId}-${idx}`} className="border-t first:border-t-0 border-slate-100 odd:bg-white even:bg-slate-50/40">
+                              <td className="px-2 py-1">{day.showName || 'Unknown show'}</td>
+                              <td className="px-2 py-1 text-right font-medium whitespace-nowrap">+{day.addedDays}</td>
+                            </tr>
+                          ))
+                        ) : (
+                          <tr>
+                            <td className="px-2 py-2 text-xs text-slate-500" colSpan={2}>No new days</td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               </div>
             ))
@@ -652,11 +935,15 @@ const EmailDigestCenter = () => {
               {history.map((item) => (
                 <li key={`${item.digestId}-${item.sentAt}`} className="rounded border border-slate-200 px-3 py-2">
                   <p className="font-medium">
-                    {item.salesperson} ({item.to})
+                    {isCommissionDoneHistory(item) ? 'Commission Done' : item.salesperson}
                   </p>
                   <p className="text-xs text-slate-500">
-                    Digest: {item.digestId} · Orders: {item.orderCount} · Sent: {new Date(item.sentAt).toLocaleString()}
+                    People: {isCommissionDoneHistory(item) ? extractPeopleFromDaysSummary(prettifyDaysSummary(item.daysSentSummary)) || '—' : `${item.salesperson} (${item.to})`}
                   </p>
+                  <p className="text-xs text-slate-500">
+                    Orders: {item.orderCount} · Days Added: {toNum(item.daysSentTotal)} · Sent: {new Date(item.sentAt).toLocaleString()}
+                  </p>
+                  {item.daysSentSummary ? <p className="text-xs text-slate-500">Days: {prettifyDaysSummary(item.daysSentSummary)}</p> : null}
                 </li>
               ))}
             </ul>
