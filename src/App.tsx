@@ -58,6 +58,7 @@ function Sidebar({ isOpen, setIsOpen }: { isOpen: boolean; setIsOpen: (open: boo
         { icon: Briefcase, label: 'Show Management', path: '/shows' },
         { icon: FileSpreadsheet, label: 'Orders & Sales', path: '/orders' },
         { icon: Users, label: 'Show Team', path: '/show-team' },
+        { icon: Mail, label: 'Confirmation Email', path: '/order-digest-mail', adminOnly: true },
       ],
     },
     {
@@ -75,7 +76,6 @@ function Sidebar({ isOpen, setIsOpen }: { isOpen: boolean; setIsOpen: (open: boo
         { icon: ClipboardList, label: 'Process Templates', path: '/process-templates' },
         { icon: Users, label: 'Team Management', path: '/team' },
         { icon: Users, label: 'Admin Settings', path: '/admin', adminOnly: true },
-        { icon: Mail, label: 'Confirmation Email', path: '/order-digest-mail', adminOnly: true },
       ],
     },
   ];
