@@ -638,7 +638,6 @@ export default function OrdersAndSales() {
     try {
       await dbUpdate(`showOrders/${order.id}`, {
         status: 'Approved',
-        dealerConfirm: true,
         approvedBy: 'Orders Dashboard',
         date: order.date,
         orderStatusId: CONFIRMATION_STATUS_ID,
@@ -649,7 +648,6 @@ export default function OrdersAndSales() {
             ? {
                 ...existing,
                 status: 'Approved',
-                dealerConfirm: true,
                 approvedBy: 'Orders Dashboard',
                 orderStatusId: CONFIRMATION_STATUS_ID,
               }
@@ -674,7 +672,6 @@ export default function OrdersAndSales() {
     try {
       await dbUpdate(`showOrders/${order.id}`, {
         status: 'Cancelled',
-        dealerConfirm: false,
         cancelledBy: 'Orders Dashboard',
         orderStatusId: CANCELLATION_STATUS_ID,
       });
@@ -684,7 +681,6 @@ export default function OrdersAndSales() {
             ? {
                 ...existing,
                 status: 'Cancelled',
-                dealerConfirm: false,
                 cancelledBy: 'Orders Dashboard',
                 orderStatusId: CANCELLATION_STATUS_ID,
               }
