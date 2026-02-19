@@ -713,12 +713,13 @@ export default function TeamManagement() {
                           {selectedInsight.memberOrders.map((order) => {
                             const show = shows.find((s) => s.id === order.showId);
                             const dealNumber = Number((order as { dealNumber?: number | string }).dealNumber);
-                            const showKey = order.showId || show?.id || show?.name || '';
+                            const showKey = show?.id || order.showId || '';
+                            const showLabel = show?.name || 'Unknown show';
                             return (
                               <TableRow key={order.orderId}>
                                 <TableCell className="font-medium">{order.orderId}</TableCell>
                                 <TableCell>{Number.isFinite(dealNumber) && dealNumber > 0 ? `#${dealNumber}` : '-'}</TableCell>
-                                <TableCell>{show?.name || order.showId || 'Unknown show'}</TableCell>
+                                <TableCell>{showLabel}</TableCell>
                                 <TableCell>{order.date || '-'}</TableCell>
                                 <TableCell>{selectedInsight.entryDaysByShow[showKey] || 0}</TableCell>
                                 <TableCell>{order.model || '-'}</TableCell>
