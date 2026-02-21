@@ -13,7 +13,7 @@ import OrderCommentsEditor from '@/components/OrderCommentsEditor';
 import { dbGet, dbSet, dbUpdate, schedulingDbGet, uploadStorageFile } from '@/lib/firebase';
 import type { ScheduleOrder, Show, ShowOrder, TeamMember } from '@/types';
 import { toast } from 'sonner';
-import { Check, Loader2, Plus, Search, Sparkles } from 'lucide-react';
+import { CalendarDays, Check, Loader2, Plus, Search, Sparkles, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 const CONFIRMATION_STATUS_ID = 'confirmation';
@@ -263,6 +263,7 @@ export default function OrdersAndSales() {
   });
   const [statusFilter, setStatusFilter] = useState<'all' | 'unassigned' | string>('all');
   const [showFilter, setShowFilter] = useState('all');
+  const [orderingDateFilter, setOrderingDateFilter] = useState('');
   const [inlineEdits, setInlineEdits] = useState<Record<string, { conditions?: string; topUpDate?: string }>>({});
 
 
@@ -409,6 +410,7 @@ export default function OrdersAndSales() {
 
   const decoratedOrders: DecoratedOrder[] = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
+    const selectedDate = orderingDateFilter.trim();
     return orders
       .slice()
       .sort((a, b) => {
@@ -422,6 +424,7 @@ export default function OrdersAndSales() {
           return false;
         }
         if (showFilter !== 'all' && order.showId !== showFilter) return false;
+        if (selectedDate && String(order.date || '').slice(0, 10) !== selectedDate) return false;
         if (!term) return true;
         const matchedShow = showLookup[order.showId];
         const haystack = [
@@ -454,7 +457,20 @@ export default function OrdersAndSales() {
         handoverDealer: order.handoverDealer || showLookup[order.showId]?.handoverDealer || 'Not set',
         dealerStatus: deriveDealerStatus(order),
     }));
-  }, [deriveDealerStatus, orders, searchTerm, showFilter, showLookup, statusFilter, statusLookup]);
+  }, [deriveDealerStatus, orderingDateFilter, orders, searchTerm, showFilter, showLookup, statusFilter, statusLookup]);
+
+  const orderingDateCount = useMemo(() => {
+    const selectedDate = orderingDateFilter.trim();
+    return orders.filter((order) => {
+      if (statusFilter === 'unassigned' && order.orderStatusId) return false;
+      if (statusFilter !== 'all' && statusFilter !== 'unassigned' && order.orderStatusId !== statusFilter) {
+        return false;
+      }
+      if (showFilter !== 'all' && order.showId !== showFilter) return false;
+      if (!selectedDate) return true;
+      return String(order.date || '').slice(0, 10) === selectedDate;
+    }).length;
+  }, [orderingDateFilter, orders, showFilter, statusFilter]);
 
   const statusCounts = useMemo(
     () =>
@@ -1015,6 +1031,47 @@ export default function OrdersAndSales() {
               </button>
             );
           })}
+          <Popover>
+            <PopoverTrigger asChild>
+              <button
+                type="button"
+                className={cn(
+                  'inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors',
+                  orderingDateFilter
+                    ? 'border-indigo-600 bg-indigo-600 text-white shadow-sm'
+                    : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50'
+                )}
+              >
+                <CalendarDays className="h-3.5 w-3.5" />
+                <span>{orderingDateFilter ? `Ordering Date: ${orderingDateFilter}` : 'Ordering Date'}</span>
+                <span
+                  className={cn(
+                    'rounded-full px-1.5 py-0.5 text-[10px]',
+                    orderingDateFilter ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-600'
+                  )}
+                >
+                  {orderingDateCount}
+                </span>
+              </button>
+            </PopoverTrigger>
+            <PopoverContent className="w-72 space-y-3" align="start">
+              <div>
+                <p className="text-sm font-medium text-slate-900">Ordering Date</p>
+                <p className="text-xs text-slate-500">Filter orders by order date.</p>
+              </div>
+              <Input
+                type="date"
+                value={orderingDateFilter}
+                onChange={(event) => setOrderingDateFilter(event.target.value)}
+              />
+              {orderingDateFilter && (
+                <Button type="button" variant="ghost" size="sm" onClick={() => setOrderingDateFilter('')}>
+                  <X className="mr-1 h-3.5 w-3.5" />
+                  Clear date
+                </Button>
+              )}
+            </PopoverContent>
+          </Popover>
         </div>
       </div>
 
