@@ -459,6 +459,43 @@ export default function OrdersAndSales() {
     }));
   }, [deriveDealerStatus, orderingDateFilter, orders, searchTerm, showFilter, showLookup, statusFilter, statusLookup]);
 
+  const ordersMatchingLowerFilters = useMemo(() => {
+    const term = searchTerm.trim().toLowerCase();
+    const selectedDate = orderingDateFilter.trim();
+
+    return orders.filter((order) => {
+      if (showFilter !== 'all' && order.showId !== showFilter) return false;
+      if (selectedDate && String(order.date || '').slice(0, 10) !== selectedDate) return false;
+      if (!term) return true;
+
+      const matchedShow = showLookup[order.showId];
+      const haystack = [
+        order.chassisNumber,
+        order.orderType,
+        order.customerName,
+        order.salesperson,
+        order.model,
+        order.contractNumber,
+        order.dealNumber ? `deal-${order.dealNumber}` : '',
+        order.conditions,
+        order.topUpDate,
+        order.paymentMethod,
+        order.tradeIn ? 'trade-in' : '',
+        order.tradeInAllowance ? `${order.tradeInAllowance}` : '',
+        order.depositReceived ? `${order.depositReceived}` : '',
+        order.expectedHandoverDate,
+        statusLookup[order.orderStatusId || '']?.label,
+        matchedShow?.name,
+        matchedShow?.handoverDealer,
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
+
+      return haystack.includes(term);
+    });
+  }, [orderingDateFilter, orders, searchTerm, showFilter, showLookup, statusLookup]);
+
   const orderingDateCount = useMemo(() => {
     const selectedDate = orderingDateFilter.trim();
     return orders.filter((order) => {
@@ -475,15 +512,10 @@ export default function OrdersAndSales() {
   const statusCounts = useMemo(
     () =>
       statusOptions.reduce<Record<string, number>>((acc, option) => {
-        acc[option.id] = orders.filter((order) => order.orderStatusId === option.id).length;
+        acc[option.id] = ordersMatchingLowerFilters.filter((order) => order.orderStatusId === option.id).length;
         return acc;
       }, {}),
-    [orders, statusOptions]
-  );
-
-  const unassignedCount = useMemo(
-    () => orders.filter((order) => !order.orderStatusId).length,
-    [orders]
+    [ordersMatchingLowerFilters, statusOptions]
   );
 
 
@@ -948,7 +980,7 @@ export default function OrdersAndSales() {
         >
           <CardHeader className="pb-2">
             <CardDescription>All Statuses</CardDescription>
-            <CardTitle className="text-3xl">{orders.length}</CardTitle>
+            <CardTitle className="text-3xl">{ordersMatchingLowerFilters.length}</CardTitle>
           </CardHeader>
         </Card>
         {statusOptions.map((status) => (
@@ -971,21 +1003,6 @@ export default function OrdersAndSales() {
             </CardHeader>
           </Card>
         ))}
-        <Card
-          role="button"
-          tabIndex={0}
-          onClick={() => setStatusFilter('unassigned')}
-          onKeyDown={(event) => event.key === 'Enter' && setStatusFilter('unassigned')}
-          className={cn(
-            'min-w-[220px] cursor-pointer transition shadow-sm',
-            statusFilter === 'unassigned' ? 'ring-2 ring-slate-400' : ''
-          )}
-        >
-          <CardHeader className="pb-2">
-            <CardDescription>Unassigned Status</CardDescription>
-            <CardTitle className="text-3xl">{unassignedCount}</CardTitle>
-          </CardHeader>
-        </Card>
       </div>
 
       <div className="space-y-3">
