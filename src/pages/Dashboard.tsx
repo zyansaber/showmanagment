@@ -272,33 +272,27 @@ export default function Dashboard() {
       .map((member) => member.memberName)
       .filter((name): name is string => !!name && name.trim().length > 0);
 
-    const withSales = Object.entries(orderStats)
-      .map(([name, data]) => ({
+    const allNames = new Set([...teamNames, ...Object.keys(orderStats)]);
+
+    return Array.from(allNames).map((name) => {
+      const sales = orderStats[name]?.sales || 0;
+      return {
         name,
-        sales: data.sales,
-        avgDaily:
-          teamMemberDaysMap[name] > 0
-            ? Number((data.sales / teamMemberDaysMap[name]).toFixed(2))
-            : 0,
-      }))
-      .sort((a, b) => b.sales - a.sales);
-
-    if (withSales.length >= 10) {
-      return withSales.slice(0, 10);
-    }
-
-    const needed = 10 - withSales.length;
-    const withSalesNames = new Set(withSales.map((entry) => entry.name));
-    const fillNames = teamNames
-      .filter((name) => !withSalesNames.has(name))
-      .sort((a, b) => a.localeCompare(b))
-      .slice(0, needed);
-
-    return [
-      ...withSales,
-      ...fillNames.map((name) => ({ name, sales: 0, avgDaily: 0 })),
-    ];
+        sales,
+        avgDaily: teamMemberDaysMap[name] > 0 ? Number((sales / teamMemberDaysMap[name]).toFixed(2)) : 0,
+      };
+    });
   }, [orders, teamMembers, teamMemberDaysMap]);
+
+  const salespersonStatsByAvgDaily = useMemo(
+    () => [...salespersonStats].sort((a, b) => b.avgDaily - a.avgDaily || b.sales - a.sales || a.name.localeCompare(b.name)),
+    [salespersonStats]
+  );
+
+  const salespersonStatsBySales = useMemo(
+    () => [...salespersonStats].sort((a, b) => b.sales - a.sales || b.avgDaily - a.avgDaily || a.name.localeCompare(b.name)),
+    [salespersonStats]
+  );
 
   // Calculate vehicle type distribution
   const vehicleTypes = orders.reduce((acc, order) => {
@@ -826,16 +820,16 @@ export default function Dashboard() {
 
         {/* Employee Performance Tab */}
         <TabsContent value="employees" className="space-y-6">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 gap-6">
             <Card>
               <CardHeader>
                 <CardTitle>Average Day Performance</CardTitle>
-                <CardDescription>Average sales per active day (Top 10)</CardDescription>
+                <CardDescription>Average sales per active day (all salespeople)</CardDescription>
               </CardHeader>
               <CardContent>
-                {salespersonStats.length > 0 ? (
+                {salespersonStatsByAvgDaily.length > 0 ? (
                   <ResponsiveContainer width="100%" height={350}>
-                    <BarChart data={salespersonStats}>
+                    <BarChart data={salespersonStatsByAvgDaily}>
                       <CartesianGrid strokeDasharray="3 3" />
                     <XAxis dataKey="name" interval={0} angle={-30} textAnchor="end" height={70} />
                       <YAxis />
@@ -852,12 +846,12 @@ export default function Dashboard() {
             <Card>
               <CardHeader>
                 <CardTitle>Total Sales Performance</CardTitle>
-                <CardDescription>Total sales counts by salesperson (Top 10)</CardDescription>
+                <CardDescription>Total sales counts by salesperson (all salespeople)</CardDescription>
               </CardHeader>
               <CardContent>
-                {salespersonStats.length > 0 ? (
+                {salespersonStatsBySales.length > 0 ? (
                   <ResponsiveContainer width="100%" height={350}>
-                    <BarChart data={salespersonStats}>
+                    <BarChart data={salespersonStatsBySales}>
                       <CartesianGrid strokeDasharray="3 3" />
                     <XAxis dataKey="name" interval={0} angle={-30} textAnchor="end" height={70} />
                       <YAxis />
