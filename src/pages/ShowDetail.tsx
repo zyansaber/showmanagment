@@ -627,7 +627,6 @@ export default function ShowDetail() {
       if (
         !newOrder.salesperson ||
         !newOrder.customerName?.trim() ||
-        !newOrder.contractNumber?.trim() ||
         !contractValue ||
         !newOrder.handoverDealer?.trim()
       ) {
@@ -2195,7 +2194,7 @@ export default function ShowDetail() {
                           )}
                         </div>
                         <div>
-                          <Label>Contract Number *</Label>
+                          <Label>Contract Number</Label>
                           <Input
                             placeholder="Enter contract number"
                             value={newOrder.contractNumber || ''}

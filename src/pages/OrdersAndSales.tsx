@@ -814,7 +814,6 @@ export default function OrdersAndSales() {
       !newOrder.showId ||
       !newOrder.date ||
       !newOrder.customerName?.trim() ||
-      !newOrder.contractNumber?.trim() ||
       !contractValue ||
       !newOrder.handoverDealer?.trim()
     ) {
@@ -1279,7 +1278,7 @@ export default function OrdersAndSales() {
                         </div>
 
                         <div className="space-y-2">
-                          <Label>Contract Number *</Label>
+                          <Label>Contract Number</Label>
                           <Input
                             placeholder="Enter contract number"
                             value={newOrder.contractNumber || ''}
