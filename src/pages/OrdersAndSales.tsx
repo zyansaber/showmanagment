@@ -233,6 +233,7 @@ export default function OrdersAndSales() {
   const [editingOrder, setEditingOrder] = useState<ShowOrderWithContract | null>(null);
   const [isSalespersonPickerOpen, setIsSalespersonPickerOpen] = useState(false);
   const [isModelPickerOpen, setIsModelPickerOpen] = useState(false);
+  const [isHandoverDealerPickerOpen, setIsHandoverDealerPickerOpen] = useState(false);
   const [addingTeamMemberId, setAddingTeamMemberId] = useState<string | null>(null);
   const [attachmentFiles, setAttachmentFiles] = useState<File[]>([]);
   const [existingAttachments, setExistingAttachments] = useState<OrderAttachment[]>([]);
@@ -250,6 +251,7 @@ export default function OrdersAndSales() {
     date: new Date().toISOString().split('T')[0],
     contractValue: 0,
     contractNumber: '',
+    dealNumber: undefined,
     handoverDealer: '',
     salespersonOrderComments: '',
     conditions: '',
@@ -264,7 +266,7 @@ export default function OrdersAndSales() {
   const [statusFilter, setStatusFilter] = useState<'all' | 'unassigned' | string>('all');
   const [showFilter, setShowFilter] = useState('all');
   const [orderingDateFilter, setOrderingDateFilter] = useState('');
-  const [inlineEdits, setInlineEdits] = useState<Record<string, { conditions?: string; topUpDate?: string }>>({});
+  const [inlineEdits, setInlineEdits] = useState<Record<string, { dealNumber?: string; conditions?: string; topUpDate?: string }>>({});
 
 
   useEffect(() => {
@@ -575,20 +577,27 @@ export default function OrdersAndSales() {
     return modelOptions.some((option) => option.toLowerCase() === value.trim().toLowerCase());
   };
 
+  const handoverDealerChoices = useMemo(() => {
+    const dealershipDefaults = parseHandoverDealers(selectedShow?.dealership);
+    const handoverDefaults = parseHandoverDealers(selectedShow?.handoverDealer);
+    const all = new Set([...dealershipDefaults, ...handoverDefaults, ...dealerOptions]);
+    return Array.from(all).sort((a, b) => a.localeCompare(b));
+  }, [dealerOptions, selectedShow]);
+
   useEffect(() => {
     if (!selectedShow) {
       setNewOrder((prev) => ({ ...prev, handoverDealer: '' }));
       return;
     }
-    const defaults = parseHandoverDealers(selectedShow.handoverDealer);
-    setNewOrder((prev) => ({ ...prev, handoverDealer: defaults[0] || '' }));
-  }, [selectedShow]);
-
-  const handoverDealerChoices = useMemo(() => {
-    const defaults = parseHandoverDealers(selectedShow?.handoverDealer);
-    const all = new Set([...defaults, ...dealerOptions]);
-    return Array.from(all).sort((a, b) => a.localeCompare(b));
-  }, [dealerOptions, selectedShow]);
+    setNewOrder((prev) => {
+      if (editingOrder) return prev;
+      const dealershipDefaults = parseHandoverDealers(selectedShow.dealership);
+      const handoverDefaults = parseHandoverDealers(selectedShow.handoverDealer);
+      const defaultDealer = dealershipDefaults[0] || handoverDefaults[0] || '';
+      if (prev.handoverDealer === defaultDealer) return prev;
+      return { ...prev, handoverDealer: defaultDealer };
+    });
+  }, [editingOrder, selectedShow]);
 
   const getNextDealNumber = (showId: string) => {
     const maxExisting = orders
@@ -642,12 +651,17 @@ export default function OrdersAndSales() {
 
   const getInlineValue = (
     order: ShowOrderWithContract,
-    field: 'conditions' | 'topUpDate'
-  ) => inlineEdits[order.id || '']?.[field] ?? order[field] ?? '';
+    field: 'dealNumber' | 'conditions' | 'topUpDate'
+  ) => {
+    const draft = inlineEdits[order.id || '']?.[field];
+    if (draft !== undefined) return draft;
+    if (field === 'dealNumber') return order.dealNumber ? String(order.dealNumber) : '';
+    return order[field] ?? '';
+  };
 
   const updateInlineDraft = (
     orderId: string | undefined,
-    field: 'conditions' | 'topUpDate',
+    field: 'dealNumber' | 'conditions' | 'topUpDate',
     value: string
   ) => {
     if (!orderId) return;
@@ -662,17 +676,42 @@ export default function OrdersAndSales() {
 
   const saveInlineField = async (
     order: ShowOrderWithContract,
-    field: 'conditions' | 'topUpDate'
+    field: 'dealNumber' | 'conditions' | 'topUpDate'
   ) => {
     if (!order.id) return;
-    const value = (inlineEdits[order.id]?.[field] ?? order[field] ?? '').trim();
-    if ((order[field] ?? '') === value) return;
+    const rawValue = inlineEdits[order.id]?.[field];
+    const currentValue = field === 'dealNumber' ? (order.dealNumber ? String(order.dealNumber) : '') : (order[field] ?? '');
+    const value = (rawValue ?? currentValue).trim();
+    if (currentValue === value) return;
+
+    const payload: Record<string, unknown> = {};
+    let nextValue: string | number = value;
+
+    if (field === 'dealNumber') {
+      if (!value) {
+        payload.dealNumber = null;
+        nextValue = '';
+      } else {
+        const parsed = Number(value);
+        if (!Number.isFinite(parsed) || parsed < 0) {
+          toast.error('Deal # must be a valid number');
+          return;
+        }
+        payload.dealNumber = parsed;
+        nextValue = parsed;
+      }
+    } else {
+      payload[field] = value;
+    }
+
     try {
-      await dbUpdate(`showOrders/${order.id}`, {
-        [field]: value,
-      } as unknown as Record<string, unknown>);
+      await dbUpdate(`showOrders/${order.id}`, payload);
       setOrders((prev) =>
-        prev.map((existing) => (existing.id === order.id ? { ...existing, [field]: value } : existing))
+        prev.map((existing) =>
+          existing.id === order.id
+            ? { ...existing, ...(field === 'dealNumber' ? { dealNumber: nextValue === '' ? undefined : nextValue as number } : { [field]: nextValue }) }
+            : existing
+        )
       );
       toast.success('Order updated');
     } catch (err) {
@@ -783,6 +822,7 @@ export default function OrdersAndSales() {
       model: '',
       contractValue: 0,
       contractNumber: '',
+      dealNumber: undefined,
       handoverDealer: '',
       salespersonOrderComments: '',
       conditions: '',
@@ -832,7 +872,14 @@ export default function OrdersAndSales() {
       const uploadedAttachments = await uploadAttachments(orderId, attachmentFiles);
       const mergedAttachments = [...existingAttachments, ...uploadedAttachments];
 
-      const dealNumber = editingOrder?.dealNumber ?? getNextDealNumber(newOrder.showId);
+      const enteredDealNumber = String(newOrder.dealNumber ?? '').trim();
+      const parsedDealNumber = enteredDealNumber ? Number(enteredDealNumber) : NaN;
+      if (enteredDealNumber && (!Number.isFinite(parsedDealNumber) || parsedDealNumber < 0)) {
+        toast.error('Deal # must be a valid number');
+        return;
+      }
+
+      const dealNumber = enteredDealNumber ? parsedDealNumber : editingOrder?.dealNumber ?? getNextDealNumber(newOrder.showId);
       const order: ShowOrderWithContract = {
         id: orderId,
         showId: newOrder.showId,
@@ -928,6 +975,7 @@ export default function OrdersAndSales() {
       date: order.date,
       contractValue: order.contractValue || 0,
       contractNumber: order.contractNumber || '',
+      dealNumber: order.dealNumber,
       handoverDealer: order.handoverDealer || '',
       salespersonOrderComments: order.salespersonOrderComments || '',
       conditions: order.conditions || '',
@@ -1193,22 +1241,57 @@ export default function OrdersAndSales() {
 
                         <div className="space-y-2">
                           <Label>Handover Dealer *</Label>
-                          <Select
-                            value={newOrder.handoverDealer || ''}
-                            onValueChange={(value) => setNewOrder({ ...newOrder, handoverDealer: value })}
-                            disabled={handoverDealerChoices.length === 0}
-                          >
-                            <SelectTrigger>
-                              <SelectValue placeholder="Select handover dealer" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {handoverDealerChoices.map((dealer) => (
-                                <SelectItem key={dealer} value={dealer}>
-                                  {dealer}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
+                          <Popover open={isHandoverDealerPickerOpen} onOpenChange={setIsHandoverDealerPickerOpen}>
+                            <PopoverTrigger asChild>
+                              <Button
+                                variant="outline"
+                                role="combobox"
+                                aria-expanded={isHandoverDealerPickerOpen}
+                                className="w-full justify-between"
+                                disabled={handoverDealerChoices.length === 0}
+                              >
+                                {newOrder.handoverDealer || 'Select handover dealer'}
+                              </Button>
+                            </PopoverTrigger>
+                            <PopoverContent className="w-[320px] p-0">
+                              <Command>
+                                <CommandInput placeholder="Search handover dealer..." />
+                                <CommandList>
+                                  <CommandEmpty>No dealer found.</CommandEmpty>
+                                  <CommandGroup heading="Available dealers">
+                                    {handoverDealerChoices.map((dealer) => (
+                                      <CommandItem
+                                        key={dealer}
+                                        value={dealer}
+                                        onSelect={(value) => {
+                                          setNewOrder({ ...newOrder, handoverDealer: value });
+                                          setIsHandoverDealerPickerOpen(false);
+                                        }}
+                                      >
+                                        <Check
+                                          className={cn(
+                                            'mr-2 h-4 w-4',
+                                            newOrder.handoverDealer === dealer ? 'opacity-100' : 'opacity-0'
+                                          )}
+                                        />
+                                        {dealer}
+                                      </CommandItem>
+                                    ))}
+                                  </CommandGroup>
+                                </CommandList>
+                              </Command>
+                            </PopoverContent>
+                          </Popover>
+                          {newOrder.handoverDealer && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="mt-2"
+                              onClick={() => setNewOrder({ ...newOrder, handoverDealer: '' })}
+                            >
+                              Clear selection
+                            </Button>
+                          )}
                           {handoverDealerChoices.length === 0 && (
                             <p className="text-xs text-muted-foreground">
                               Dealer list unavailable. Please try again after schedule sync.
@@ -1283,6 +1366,17 @@ export default function OrdersAndSales() {
                             placeholder="Enter contract number"
                             value={newOrder.contractNumber || ''}
                             onChange={(event) => setNewOrder({ ...newOrder, contractNumber: event.target.value })}
+                          />
+                        </div>
+
+                        <div className="space-y-2">
+                          <Label>Deal #</Label>
+                          <Input
+                            type="number"
+                            min={0}
+                            placeholder="Enter deal number"
+                            value={newOrder.dealNumber ?? ''}
+                            onChange={(event) => setNewOrder({ ...newOrder, dealNumber: event.target.value })}
                           />
                         </div>
 
@@ -1666,7 +1760,16 @@ export default function OrdersAndSales() {
                           </div>
                         </TableCell>
                         <TableCell>{formatDate(order.date)}</TableCell>
-                        <TableCell className="font-semibold">#{order.dealNumber ?? '-'}</TableCell>
+                        <TableCell className="max-w-[120px]">
+                          <Input
+                            value={getInlineValue(order, 'dealNumber')}
+                            onChange={(event) => updateInlineDraft(order.id, 'dealNumber', event.target.value)}
+                            onBlur={() => saveInlineField(order, 'dealNumber')}
+                            placeholder="Deal #"
+                            inputMode="numeric"
+                            className="min-w-[90px] font-semibold"
+                          />
+                        </TableCell>
                         <TableCell>{order.customerName || 'Not set'}</TableCell>
                         <TableCell>{order.model || 'Not set'}</TableCell>
                         <TableCell>{order.contractNumber || 'Not set'}</TableCell>
