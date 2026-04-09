@@ -1,6 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   BarChart,
@@ -46,7 +45,6 @@ export default function Dashboard() {
   const [budgets, setBudgets] = useState<Record<string, Record<string, unknown>>>({});
   const [financeActuals, setFinanceActuals] = useState<Record<string, { dealer: number; factory: number }>>({});
   const [loading, setLoading] = useState(true);
-  const [showQ1Results, setShowQ1Results] = useState(false);
 
   useEffect(() => {
     loadData();
@@ -419,112 +417,6 @@ export default function Dashboard() {
     ? Math.round((completedShowOrders.length / completedShowTarget2026) * 100)
     : 0;
   const overallAchievement = target2026 > 0 ? Math.round((totalSales2026 / target2026) * 100) : 0;
-  const currentYear = new Date().getFullYear();
-  const previousYear = currentYear - 1;
-
-  const isQ1Date = (value?: string) => {
-    if (!value) return false;
-    const parsed = new Date(value);
-    if (Number.isNaN(parsed.getTime())) return false;
-    const month = parsed.getMonth();
-    return month >= 0 && month <= 2;
-  };
-
-  const getCompletedShowYear = (show: Show) => {
-    const completedDate = show.finishDate || show.startDate;
-    if (!completedDate) return null;
-    const parsed = new Date(completedDate);
-    if (Number.isNaN(parsed.getTime())) return null;
-    return parsed.getFullYear();
-  };
-
-  const isAcceptedOrder = (order: ShowOrder) => {
-    const status = typeof order.status === 'string' ? order.status.trim().toLowerCase() : '';
-    const orderStatusId =
-      typeof (order as ShowOrder & { orderStatusId?: string }).orderStatusId === 'string'
-        ? (order as ShowOrder & { orderStatusId?: string }).orderStatusId?.trim().toLowerCase()
-        : '';
-    if (orderStatusId === 'confirmation') return true;
-    if (status === 'approved' || status === 'accepted' || status === 'confirmed') return true;
-    return Boolean((order as ShowOrder & { dealerConfirm?: boolean }).dealerConfirm);
-  };
-
-  const allOrdersByShow = orders.reduce<Record<string, number>>((acc, order) => {
-    if (!order.showId) return acc;
-    acc[order.showId] = (acc[order.showId] || 0) + 1;
-    return acc;
-  }, {});
-
-  const acceptedOrdersByShow = orders.reduce<Record<string, number>>((acc, order) => {
-    if (!order.showId || !isAcceptedOrder(order)) return acc;
-    acc[order.showId] = (acc[order.showId] || 0) + 1;
-    return acc;
-  }, {});
-
-  const readBudgetOrderValue = (showId: string, year: number) => {
-    const budget = (budgets?.[showId] as Record<string, unknown>) || {};
-    const yearCandidates = [
-      `orders${year}`,
-      `order${year}`,
-      `acceptedOrders${year}`,
-      `totalSales${year}`,
-      `sales${year}`,
-    ];
-    const genericCandidates = ['orders', 'order', 'acceptedOrders', 'totalOrders', 'totalSales', 'sales', 'showSales'];
-    const values = [...yearCandidates, ...genericCandidates]
-      .map((key) => parseNumber(budget[key]))
-      .filter((value) => value > 0);
-    return values[0] || 0;
-  };
-
-  const showSalesFallbackByYear = (show: Show, year: number) => {
-    if (year === 2025) return parseNumber(show.sales2025);
-    if (year === 2024) return parseNumber(show.sales2024);
-    return 0;
-  };
-
-  const resolveShowOrderCount = (show: Show, year: number) => {
-    const accepted = acceptedOrdersByShow[show.id] || 0;
-    if (accepted > 0) return accepted;
-    const allOrders = allOrdersByShow[show.id] || 0;
-    if (allOrders > 0) return allOrders;
-    const budgetOrders = readBudgetOrderValue(show.id, year);
-    if (budgetOrders > 0) return budgetOrders;
-    return showSalesFallbackByYear(show, year);
-  };
-
-  const isShowCompleted = (show: Show) => {
-    const status = String(show.status || '').trim().toLowerCase();
-    if (status === 'completed' || status === 'finished') return true;
-    const completedDate = show.finishDate || show.startDate;
-    if (!completedDate) return false;
-    const parsed = new Date(completedDate);
-    if (Number.isNaN(parsed.getTime())) return false;
-    return parsed.getTime() <= Date.now();
-  };
-
-  const getQ1CompletedShows = (year: number) =>
-    shows.filter((show) => {
-      if (!isShowCompleted(show)) return false;
-      const completedDate = show.finishDate || show.startDate;
-      if (!isQ1Date(completedDate)) return false;
-      return getCompletedShowYear(show) === year;
-    });
-
-  const q1CompletedShowsCurrent = getQ1CompletedShows(currentYear);
-  const q1CompletedShowsPrevious = getQ1CompletedShows(previousYear);
-
-  const q1AcceptedOrdersCurrent = q1CompletedShowsCurrent.reduce(
-    (sum, show) => sum + resolveShowOrderCount(show, currentYear),
-    0
-  );
-  const q1AcceptedOrdersPrevious = q1CompletedShowsPrevious.reduce(
-    (sum, show) => sum + resolveShowOrderCount(show, previousYear),
-    0
-  );
-  const q1YoYGrowth = q1AcceptedOrdersPrevious > 0
-    ? ((q1AcceptedOrdersCurrent - q1AcceptedOrdersPrevious) / q1AcceptedOrdersPrevious) * 100
-    : null;
 
   const stats = [
     {
@@ -917,39 +809,6 @@ export default function Dashboard() {
           ))}
         </div>
       </div>
-
-      <Card className="hover:shadow-lg transition-shadow border-slate-200">
-        <CardHeader className="sm:flex-row sm:items-center sm:justify-between gap-3">
-          <div>
-            <CardTitle>Q1 Show Conversion</CardTitle>
-            <CardDescription>
-              Compare Q1 completed-show order results between {currentYear} and {previousYear}.
-            </CardDescription>
-          </div>
-          <Button onClick={() => setShowQ1Results((prev) => !prev)}>
-            {showQ1Results ? 'Hide Results' : 'Show Results'}
-          </Button>
-        </CardHeader>
-        {showQ1Results ? (
-          <CardContent className="space-y-2 text-sm text-slate-700">
-            <p>
-              Q1 {currentYear} Show Orders: {formatNumber(q1AcceptedOrdersCurrent)} units (from {q1CompletedShowsCurrent.length}{' '}
-              completed shows)
-            </p>
-            <p>
-              Q1 {previousYear} Same Period: {formatNumber(q1AcceptedOrdersPrevious)} units
-            </p>
-            <p>
-              YoY Growth:
-              {q1YoYGrowth === null ? ' N/A (previous year is 0)' : ` ${q1YoYGrowth >= 0 ? '+' : ''}${q1YoYGrowth.toFixed(1)}%`}
-            </p>
-            <p className="text-xs text-slate-500">
-              Data source priority: confirmed/accepted show orders → all show orders → budget order fields → show sales
-              fallback (for {previousYear}, uses Total Sales {previousYear} when available).
-            </p>
-          </CardContent>
-        ) : null}
-      </Card>
 
       {/* Main Content Tabs */}
       <Tabs defaultValue="employees" className="space-y-6">
