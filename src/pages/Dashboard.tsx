@@ -1,6 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   BarChart,
@@ -46,7 +45,6 @@ export default function Dashboard() {
   const [budgets, setBudgets] = useState<Record<string, Record<string, unknown>>>({});
   const [financeActuals, setFinanceActuals] = useState<Record<string, { dealer: number; factory: number }>>({});
   const [loading, setLoading] = useState(true);
-  const [showQ1Results, setShowQ1Results] = useState(false);
 
   useEffect(() => {
     loadData();
@@ -419,56 +417,6 @@ export default function Dashboard() {
     ? Math.round((completedShowOrders.length / completedShowTarget2026) * 100)
     : 0;
   const overallAchievement = target2026 > 0 ? Math.round((totalSales2026 / target2026) * 100) : 0;
-  const currentYear = new Date().getFullYear();
-  const previousYear = currentYear - 1;
-
-  const isQ1Date = (value?: string) => {
-    if (!value) return false;
-    const parsed = new Date(value);
-    if (Number.isNaN(parsed.getTime())) return false;
-    const month = parsed.getMonth();
-    return month >= 0 && month <= 2;
-  };
-
-  const getCompletedShowYear = (show: Show) => {
-    const completedDate = show.finishDate || show.startDate;
-    if (!completedDate) return null;
-    const parsed = new Date(completedDate);
-    if (Number.isNaN(parsed.getTime())) return null;
-    return parsed.getFullYear();
-  };
-
-  const isAcceptedOrder = (order: ShowOrder) => {
-    const status = typeof order.status === 'string' ? order.status.trim().toLowerCase() : '';
-    if (status === 'approved' || status === 'accepted' || status === 'confirmed') return true;
-    return Boolean((order as ShowOrder & { dealerConfirm?: boolean }).dealerConfirm);
-  };
-
-  const getQ1CompletedShowIds = (year: number) =>
-    new Set(
-      shows
-        .filter((show) => {
-          if (show.status !== 'Completed') return false;
-          const completedDate = show.finishDate || show.startDate;
-          if (!isQ1Date(completedDate)) return false;
-          return getCompletedShowYear(show) === year;
-        })
-        .map((show) => show.id)
-        .filter(Boolean)
-    );
-
-  const q1CompletedShowIdsCurrent = getQ1CompletedShowIds(currentYear);
-  const q1CompletedShowIdsPrevious = getQ1CompletedShowIds(previousYear);
-
-  const q1AcceptedOrdersCurrent = orders.filter(
-    (order) => q1CompletedShowIdsCurrent.has(order.showId) && isAcceptedOrder(order)
-  ).length;
-  const q1AcceptedOrdersPrevious = orders.filter(
-    (order) => q1CompletedShowIdsPrevious.has(order.showId) && isAcceptedOrder(order)
-  ).length;
-  const q1YoYGrowth = q1AcceptedOrdersPrevious > 0
-    ? ((q1AcceptedOrdersCurrent - q1AcceptedOrdersPrevious) / q1AcceptedOrdersPrevious) * 100
-    : null;
 
   const stats = [
     {
@@ -861,34 +809,6 @@ export default function Dashboard() {
           ))}
         </div>
       </div>
-
-      <Card className="hover:shadow-lg transition-shadow border-slate-200">
-        <CardHeader className="sm:flex-row sm:items-center sm:justify-between gap-3">
-          <div>
-            <CardTitle>Q1 Show Conversion</CardTitle>
-            <CardDescription>
-              Compare accepted orders from completed Q1 shows between {currentYear} and {previousYear}.
-            </CardDescription>
-          </div>
-          <Button onClick={() => setShowQ1Results((prev) => !prev)}>
-            {showQ1Results ? 'Hide Results' : 'Show Results'}
-          </Button>
-        </CardHeader>
-        {showQ1Results ? (
-          <CardContent className="space-y-2 text-sm text-slate-700">
-            <p>
-              {currentYear}年Q1展会订单：{formatNumber(q1AcceptedOrdersCurrent)}台（来自 {q1CompletedShowIdsCurrent.size} 场展会）
-            </p>
-            <p>
-              {previousYear}年同期：{formatNumber(q1AcceptedOrdersPrevious)}台
-            </p>
-            <p>
-              同比增长：
-              {q1YoYGrowth === null ? ' N/A（去年同期为0）' : ` ${q1YoYGrowth >= 0 ? '+' : ''}${q1YoYGrowth.toFixed(1)}%`}
-            </p>
-          </CardContent>
-        ) : null}
-      </Card>
 
       {/* Main Content Tabs */}
       <Tabs defaultValue="employees" className="space-y-6">
