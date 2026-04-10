@@ -8,7 +8,6 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { dbGet, dbUpdate } from '@/lib/firebase';
 import type { Show, TeamMember } from '@/types';
 
@@ -204,65 +203,6 @@ export default function ShowTeamAssignments() {
     [teamMembers, selectedTeamMembers]
   );
 
-  const showNameById = useMemo(() => {
-    const map: Record<string, string> = {};
-    shows.forEach((show) => {
-      if (!show.id) return;
-      map[show.id] = show.name || show.id;
-    });
-    return map;
-  }, [shows]);
-
-  const workingDaysMatrix = useMemo(() => {
-    const usedShowIds = new Set<string>();
-    teamMembers.forEach((member) => {
-      buildMemberShowDaysList(member).forEach((entry) => {
-        if (entry.days > 0) {
-          usedShowIds.add(entry.showId);
-        }
-      });
-    });
-
-    const orderedShowIds = [...usedShowIds].sort((a, b) => {
-      const showA = shows.find((show) => show.id === a);
-      const showB = shows.find((show) => show.id === b);
-      const timestampDiff = getShowTimestamp(showA || ({} as Show)) - getShowTimestamp(showB || ({} as Show));
-      if (timestampDiff !== 0) return timestampDiff;
-      const nameA = showNameById[a] || a;
-      const nameB = showNameById[b] || b;
-      return nameA.localeCompare(nameB);
-    });
-
-    const rows = teamMembers.map((member) => {
-      const dayMap = buildMemberShowDaysList(member).reduce(
-        (acc, entry) => {
-          acc[entry.showId] = (acc[entry.showId] || 0) + entry.days;
-          return acc;
-        },
-        {} as Record<string, number>
-      );
-      const total = Object.values(dayMap).reduce((sum, days) => sum + days, 0);
-      return {
-        memberId: member.memberId,
-        memberName: member.memberName || member.memberId,
-        dayMap,
-        total,
-      };
-    });
-
-    const columnTotals = orderedShowIds.reduce(
-      (acc, showId) => {
-        acc[showId] = rows.reduce((sum, row) => sum + (row.dayMap[showId] || 0), 0);
-        return acc;
-      },
-      {} as Record<string, number>
-    );
-
-    const grandTotal = rows.reduce((sum, row) => sum + row.total, 0);
-
-    return { orderedShowIds, rows, columnTotals, grandTotal };
-  }, [teamMembers, shows, showNameById]);
-
   const handleSaveTeam = async () => {
     if (!selectedShow || !selectedShow.id) {
       toast.error('Please select a show first.');
@@ -422,7 +362,7 @@ export default function ShowTeamAssignments() {
       <Card>
         <CardHeader>
           <CardTitle>Show Days</CardTitle>
-          <CardDescription>Record and review working days for each member and each show.</CardDescription>
+          <CardDescription>Record how many days each member will work at this show.</CardDescription>
         </CardHeader>
         <CardContent>
           {selectedShow ? (
@@ -467,57 +407,6 @@ export default function ShowTeamAssignments() {
           ) : (
             <div className="text-sm text-slate-500">Select a show to update team days.</div>
           )}
-
-          <div className="mt-8">
-            <div className="mb-3">
-              <h3 className="text-base font-semibold text-slate-900">Working Days Summary (All Shows)</h3>
-              <p className="text-sm text-slate-500">
-                Includes each member total, each show total, and the overall total.
-              </p>
-            </div>
-
-            {workingDaysMatrix.rows.length > 0 ? (
-              <div className="overflow-x-auto rounded-lg border border-slate-200">
-                <Table className="min-w-[760px]">
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="w-48">Member</TableHead>
-                      <TableHead className="text-right">Total Working Days</TableHead>
-                      {workingDaysMatrix.orderedShowIds.map((showId) => (
-                        <TableHead key={showId} className="text-right">
-                          {showNameById[showId] || showId}
-                        </TableHead>
-                      ))}
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {workingDaysMatrix.rows.map((row) => (
-                      <TableRow key={row.memberId}>
-                        <TableCell className="font-medium">{row.memberName}</TableCell>
-                        <TableCell className="text-right font-semibold">{row.total}</TableCell>
-                        {workingDaysMatrix.orderedShowIds.map((showId) => (
-                          <TableCell key={`${row.memberId}-${showId}`} className="text-right">
-                            {row.dayMap[showId] || 0}
-                          </TableCell>
-                        ))}
-                      </TableRow>
-                    ))}
-                    <TableRow className="bg-slate-50">
-                      <TableCell className="font-semibold">Show Totals</TableCell>
-                      <TableCell className="text-right font-semibold">{workingDaysMatrix.grandTotal}</TableCell>
-                      {workingDaysMatrix.orderedShowIds.map((showId) => (
-                        <TableCell key={`total-${showId}`} className="text-right font-semibold">
-                          {workingDaysMatrix.columnTotals[showId] || 0}
-                        </TableCell>
-                      ))}
-                    </TableRow>
-                  </TableBody>
-                </Table>
-              </div>
-            ) : (
-              <div className="text-sm text-slate-500">No working days data yet.</div>
-            )}
-          </div>
         </CardContent>
       </Card>
     </div>
