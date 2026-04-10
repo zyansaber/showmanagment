@@ -8,6 +8,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { dbGet, dbUpdate } from '@/lib/firebase';
 import type { Show, TeamMember } from '@/types';
 
@@ -86,6 +87,14 @@ const buildMemberShowDaysList = (member: TeamMember) => {
   return [] as { showId: string; showName: string; days: number }[];
 };
 
+const buildShowQuarterKey = (show?: Show) => {
+  if (!show) return null;
+  const date = parseDate(show.startDate) ?? parseDate(show.finishDate);
+  if (!date) return null;
+  const quarter = `Q${Math.floor(date.getMonth() / 3) + 1}`;
+  return `${date.getFullYear()}-${quarter}`;
+};
+
 export default function ShowTeamAssignments() {
   const [loading, setLoading] = useState(true);
   const [shows, setShows] = useState<Show[]>([]);
@@ -95,6 +104,7 @@ export default function ShowTeamAssignments() {
   const [selectedShowId, setSelectedShowId] = useState('');
   const [selectedTeamMembers, setSelectedTeamMembers] = useState<string[]>([]);
   const [memberDayDrafts, setMemberDayDrafts] = useState<Record<string, string>>({});
+  const [selectedQuarterFilter, setSelectedQuarterFilter] = useState<'all' | string>('all');
 
   useEffect(() => {
     const loadData = async () => {
@@ -202,6 +212,132 @@ export default function ShowTeamAssignments() {
     () => teamMembers.filter((member) => selectedTeamMembers.includes(member.memberId)),
     [teamMembers, selectedTeamMembers]
   );
+
+  const showNameById = useMemo(() => {
+    const map: Record<string, string> = {};
+    shows.forEach((show) => {
+      if (!show.id) return;
+      map[show.id] = show.name || show.id;
+    });
+    return map;
+  }, [shows]);
+
+  const showDateRangeById = useMemo(() => {
+    const map: Record<string, string> = {};
+    shows.forEach((show) => {
+      if (!show.id) return;
+      map[show.id] = formatDateRange(show);
+    });
+    return map;
+  }, [shows]);
+
+  const quarterFilterOptions = useMemo(() => {
+    const seen = new Set<string>();
+    const options: { value: string; label: string }[] = [];
+    shows.forEach((show) => {
+      if (!show.id) return;
+      const date = parseDate(show.startDate) ?? parseDate(show.finishDate);
+      if (!date) return;
+      const quarter = `Q${Math.floor(date.getMonth() / 3) + 1}`;
+      const key = `${date.getFullYear()}-${quarter}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      options.push({ value: key, label: `${date.getFullYear()} ${quarter}` });
+    });
+    return options.sort((a, b) => b.value.localeCompare(a.value));
+  }, [shows]);
+
+  const workingDaysMatrix = useMemo(() => {
+    const includedShowIds = new Set(
+      shows.filter((show) => selectedQuarterFilter === 'all' || buildShowQuarterKey(show) === selectedQuarterFilter).map((show) => show.id || '')
+    );
+
+    const usedShowIds = new Set<string>();
+    teamMembers.forEach((member) => {
+      buildMemberShowDaysList(member).forEach((entry) => {
+        if (entry.days > 0 && includedShowIds.has(entry.showId)) {
+          usedShowIds.add(entry.showId);
+        }
+      });
+    });
+
+    const orderedShowIds = [...usedShowIds].sort((a, b) => {
+      const showA = shows.find((show) => show.id === a);
+      const showB = shows.find((show) => show.id === b);
+      const timestampDiff = getShowTimestamp(showA || ({} as Show)) - getShowTimestamp(showB || ({} as Show));
+      if (timestampDiff !== 0) return timestampDiff;
+      const nameA = showNameById[a] || a;
+      const nameB = showNameById[b] || b;
+      return nameA.localeCompare(nameB);
+    });
+
+    const rows = teamMembers.map((member) => {
+      const dayMap = buildMemberShowDaysList(member).reduce(
+        (acc, entry) => {
+          if (!includedShowIds.has(entry.showId)) return acc;
+          acc[entry.showId] = (acc[entry.showId] || 0) + entry.days;
+          return acc;
+        },
+        {} as Record<string, number>
+      );
+      const total = Object.values(dayMap).reduce((sum, days) => sum + days, 0);
+      return {
+        memberId: member.memberId,
+        memberName: member.memberName || member.memberId,
+        dayMap,
+        total,
+      };
+    });
+
+    const columnTotals = orderedShowIds.reduce(
+      (acc, showId) => {
+        acc[showId] = rows.reduce((sum, row) => sum + (row.dayMap[showId] || 0), 0);
+        return acc;
+      },
+      {} as Record<string, number>
+    );
+
+    const grandTotal = rows.reduce((sum, row) => sum + row.total, 0);
+
+    return { orderedShowIds, rows, columnTotals, grandTotal };
+  }, [teamMembers, shows, showNameById, selectedQuarterFilter]);
+
+  const handleExportExcel = () => {
+    const headerRow = [
+      'Member',
+      'Total Working Days',
+      ...workingDaysMatrix.orderedShowIds.map((showId) => showNameById[showId] || showId),
+    ];
+    const timeRow = [
+      'Show Time',
+      '',
+      ...workingDaysMatrix.orderedShowIds.map((showId) => showDateRangeById[showId] || '-'),
+    ];
+    const memberRows = workingDaysMatrix.rows.map((row) => [
+      row.memberName,
+      String(row.total),
+      ...workingDaysMatrix.orderedShowIds.map((showId) => String(row.dayMap[showId] || 0)),
+    ]);
+    const totalRow = [
+      'Show Totals',
+      String(workingDaysMatrix.grandTotal),
+      ...workingDaysMatrix.orderedShowIds.map((showId) => String(workingDaysMatrix.columnTotals[showId] || 0)),
+    ];
+
+    const csv = [headerRow, timeRow, ...memberRows, totalRow]
+      .map((cols) => cols.map((value) => `"${String(value).replace(/"/g, '""')}"`).join(','))
+      .join('\n');
+
+    const blob = new Blob([`\uFEFF${csv}`], { type: 'application/vnd.ms-excel;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.href = url;
+    link.download = `working-days-${selectedQuarterFilter}.xls`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  };
 
   const handleSaveTeam = async () => {
     if (!selectedShow || !selectedShow.id) {
@@ -362,7 +498,7 @@ export default function ShowTeamAssignments() {
       <Card>
         <CardHeader>
           <CardTitle>Show Days</CardTitle>
-          <CardDescription>Record how many days each member will work at this show.</CardDescription>
+          <CardDescription>Record and review working days for each member and each show.</CardDescription>
         </CardHeader>
         <CardContent>
           {selectedShow ? (
@@ -407,6 +543,87 @@ export default function ShowTeamAssignments() {
           ) : (
             <div className="text-sm text-slate-500">Select a show to update team days.</div>
           )}
+
+          <div className="mt-8">
+            <div className="mb-3 flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+              <h3 className="text-base font-semibold text-slate-900">Working Days Summary (All Shows)</h3>
+              <div className="flex flex-col gap-2 md:flex-row md:items-center">
+                <div className="w-52">
+                  <Label className="mb-1 block text-xs uppercase text-slate-500">Show Quarter</Label>
+                  <Select value={selectedQuarterFilter} onValueChange={setSelectedQuarterFilter}>
+                    <SelectTrigger className="h-9">
+                      <SelectValue placeholder="Filter by quarter" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Quarters</SelectItem>
+                      {quarterFilterOptions.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <Button variant="outline" onClick={handleExportExcel}>
+                  下载Excel
+                </Button>
+              </div>
+            </div>
+            <p className="mb-3 text-sm text-slate-500">
+              Includes show time, each member total, each show total, and the overall total.
+            </p>
+
+            {workingDaysMatrix.rows.length > 0 ? (
+              <div className="overflow-x-auto rounded-lg border border-slate-200">
+                <Table className="min-w-[760px]">
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-48">Member</TableHead>
+                      <TableHead className="text-right">Total Working Days</TableHead>
+                      {workingDaysMatrix.orderedShowIds.map((showId) => (
+                        <TableHead key={showId} className="text-right">
+                          {showNameById[showId] || showId}
+                        </TableHead>
+                      ))}
+                    </TableRow>
+                    <TableRow>
+                      <TableHead className="text-xs text-slate-500">Show Time</TableHead>
+                      <TableHead className="text-right text-xs text-slate-500">-</TableHead>
+                      {workingDaysMatrix.orderedShowIds.map((showId) => (
+                        <TableHead key={`time-${showId}`} className="text-right text-xs text-slate-500">
+                          {showDateRangeById[showId] || '-'}
+                        </TableHead>
+                      ))}
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {workingDaysMatrix.rows.map((row) => (
+                      <TableRow key={row.memberId}>
+                        <TableCell className="font-medium">{row.memberName}</TableCell>
+                        <TableCell className="text-right font-semibold">{row.total}</TableCell>
+                        {workingDaysMatrix.orderedShowIds.map((showId) => (
+                          <TableCell key={`${row.memberId}-${showId}`} className="text-right">
+                            {row.dayMap[showId] || 0}
+                          </TableCell>
+                        ))}
+                      </TableRow>
+                    ))}
+                    <TableRow className="bg-slate-50">
+                      <TableCell className="font-semibold">Show Totals</TableCell>
+                      <TableCell className="text-right font-semibold">{workingDaysMatrix.grandTotal}</TableCell>
+                      {workingDaysMatrix.orderedShowIds.map((showId) => (
+                        <TableCell key={`total-${showId}`} className="text-right font-semibold">
+                          {workingDaysMatrix.columnTotals[showId] || 0}
+                        </TableCell>
+                      ))}
+                    </TableRow>
+                  </TableBody>
+                </Table>
+              </div>
+            ) : (
+              <div className="text-sm text-slate-500">No working days data yet.</div>
+            )}
+          </div>
         </CardContent>
       </Card>
     </div>
