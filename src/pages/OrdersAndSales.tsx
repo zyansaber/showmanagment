@@ -13,7 +13,7 @@ import OrderCommentsEditor from '@/components/OrderCommentsEditor';
 import { dbGet, dbSet, dbUpdate, schedulingDbGet, uploadStorageFile } from '@/lib/firebase';
 import type { ScheduleOrder, Show, ShowOrder, TeamMember } from '@/types';
 import { toast } from 'sonner';
-import { CalendarDays, Check, Loader2, Plus, Search, Sparkles, X } from 'lucide-react';
+import { CalendarDays, Check, Download, Loader2, Plus, Search, Sparkles, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 const CONFIRMATION_STATUS_ID = 'confirmation';
@@ -124,6 +124,12 @@ const formatDate = (value: string | undefined) => {
     month: 'short',
     year: 'numeric',
   });
+};
+
+const escapeCsvValue = (value: unknown) => {
+  if (value === null || value === undefined) return '';
+  const text = String(value).replace(/"/g, '""');
+  return `"${text}"`;
 };
 
 const hasCommissionSent = (value: unknown) => {
@@ -460,6 +466,69 @@ export default function OrdersAndSales() {
         dealerStatus: deriveDealerStatus(order),
     }));
   }, [deriveDealerStatus, orderingDateFilter, orders, searchTerm, showFilter, showLookup, statusFilter, statusLookup]);
+
+  const handleExportOrdersExcel = useCallback(() => {
+    if (!decoratedOrders.length) {
+      toast.error('No orders available to export.');
+      return;
+    }
+
+    const headers = [
+      'Ordering Date',
+      'Deal #',
+      'Customer Name',
+      'Model',
+      'Contract Number',
+      'Contract Value (AUD)',
+      'Sales Person',
+      'Deposit Received (AUD)',
+      'Conditions',
+      'Top Up Date',
+      'Type',
+      'Handover Dealer',
+      'Dealer Status',
+      'Status',
+      'Commission Sent',
+      'Show',
+    ];
+
+    const rows = decoratedOrders.map((order) => {
+      const statusLabel = order.orderStatusId ? statusLookup[order.orderStatusId]?.label || '' : '';
+      const depositReceived = order.depositReceived ?? order.deposit ?? DEFAULT_DEPOSIT;
+      return [
+        order.date || '',
+        order.dealNumber ?? '',
+        order.customerName || '',
+        order.model || '',
+        order.contractNumber || '',
+        order.contractValue ?? 0,
+        order.salesperson || '',
+        depositReceived,
+        order.conditions || '',
+        order.topUpDate || '',
+        order.orderType || '',
+        order.handoverDealer || '',
+        order.dealerStatus || '',
+        statusLabel,
+        hasCommissionSent(order.emailconfirmation) ? 'Yes' : 'No',
+        order.showName || '',
+      ];
+    });
+
+    const csvLines = [headers, ...rows].map((row) => row.map((cell) => escapeCsvValue(cell)).join(','));
+    const csvContent = `\uFEFF${csvLines.join('\n')}`;
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    const exportDate = new Date().toISOString().slice(0, 10);
+    link.href = url;
+    link.download = `orders-export-${exportDate}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    toast.success('Orders exported. You can open the CSV file in Excel.');
+  }, [decoratedOrders, statusLookup]);
 
   const ordersMatchingLowerFilters = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
@@ -1156,6 +1225,10 @@ export default function OrdersAndSales() {
                     className="h-10 border-blue-200 bg-blue-50/60 pl-9 text-slate-900 placeholder:text-slate-500 focus-visible:ring-2 focus-visible:ring-blue-400"
                   />
                 </div>
+                <Button type="button" variant="outline" onClick={handleExportOrdersExcel}>
+                  <Download className="mr-2 h-4 w-4" />
+                  Export Excel
+                </Button>
                 <Dialog
                   open={isAddingOrder}
                   onOpenChange={(open) => {
