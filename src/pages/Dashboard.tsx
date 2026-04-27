@@ -10,6 +10,7 @@ import {
   CartesianGrid,
   Tooltip,
   Legend,
+  LabelList,
   ResponsiveContainer,
   PieChart,
   Pie,
@@ -17,7 +18,6 @@ import {
   LineChart,
   Line,
 } from 'recharts';
-import { Calendar } from 'lucide-react';
 import { dbGet } from '@/lib/firebase';
 import type { Show, ShowOrder, ShowTask, TeamMember } from '@/types';
 import { format as formatDate } from 'date-fns';
@@ -546,7 +546,6 @@ export default function Dashboard() {
   const ytdPercent = target2026 > 0 ? Math.round((completedShowTarget2026 / target2026) * 100) : 0;
   const sales2025SamePeriod = finishedShows2026.reduce((sum, show) => sum + parseNumber(show.sales2025), 0);
   const yoy2025Percent = sales2025SamePeriod > 0 ? Math.round((totalSales2026 / sales2025SamePeriod) * 100) : 0;
-  const completedShowPercent = totalShows2026 > 0 ? Math.round((completedShows / totalShows2026) * 100) : 0;
   const ytdTargetDeltaPercent = completedShowTarget2026 > 0
     ? ((totalSales2026 - completedShowTarget2026) / completedShowTarget2026) * 100
     : 0;
@@ -554,9 +553,39 @@ export default function Dashboard() {
   const pendingOrders2026 = orders.reduce((sum, order) => {
     const year = showYearById[order.showId];
     if (year !== 2026) return sum;
+    const status = typeof order.status === 'string' ? order.status.trim().toLowerCase() : '';
+    const orderStatusId =
+      typeof (order as ShowOrder & { orderStatusId?: string }).orderStatusId === 'string'
+        ? (order as ShowOrder & { orderStatusId?: string }).orderStatusId?.trim().toLowerCase()
+        : '';
+    const cancelled =
+      status.includes('cancel') ||
+      status.includes('cancellation') ||
+      orderStatusId.includes('cancel') ||
+      orderStatusId.includes('cancellation');
+    if (cancelled) return sum;
     return isConfirmationOrder(order) ? sum : sum + 1;
   }, 0);
+  const cancellationOrders2026 = orders.reduce((sum, order) => {
+    const year = showYearById[order.showId];
+    if (year !== 2026) return sum;
+    const status = typeof order.status === 'string' ? order.status.trim().toLowerCase() : '';
+    const orderStatusId =
+      typeof (order as ShowOrder & { orderStatusId?: string }).orderStatusId === 'string'
+        ? (order as ShowOrder & { orderStatusId?: string }).orderStatusId?.trim().toLowerCase()
+        : '';
+    if (
+      status.includes('cancel') ||
+      status.includes('cancellation') ||
+      orderStatusId.includes('cancel') ||
+      orderStatusId.includes('cancellation')
+    ) {
+      return sum + 1;
+    }
+    return sum;
+  }, 0);
   const remainingShows2026 = Math.max(totalShows2026 - completedShows, 0);
+  const remainingShowsTarget2026 = Math.max(target2026 - completedShowTarget2026, 0);
 
   const salesVsCards = [
     {
@@ -599,6 +628,7 @@ export default function Dashboard() {
   const totalOrderTypes2026 = orderTypes2026.transferFromStock + orderTypes2026.newOrder;
   const transferPercent = totalOrderTypes2026 > 0 ? Math.round((orderTypes2026.transferFromStock / totalOrderTypes2026) * 100) : 0;
   const newOrderPercent = totalOrderTypes2026 > 0 ? Math.round((orderTypes2026.newOrder / totalOrderTypes2026) * 100) : 0;
+  const caravanRangeData = [...vehicleTypeData].sort((a, b) => b.value - a.value);
   const formatNumber = (value: number) => value.toLocaleString();
   const formatCurrency = (value: number) => `$${value.toLocaleString('en-AU')}`;
   const calculatePercent = (actual: number, target: number) => {
@@ -884,29 +914,52 @@ export default function Dashboard() {
           </CardHeader>
           <CardContent>
             <div className="space-y-5">
-              <div className="rounded-xl border border-slate-200 bg-gradient-to-r from-slate-50 to-white p-5 shadow-sm">
-                <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-                  <div>
-                    <p className="text-xs uppercase tracking-wide text-slate-500">Sales to date (confirmation orders)</p>
-                    <p className="text-4xl font-bold text-slate-900">{formatNumber(totalSales2026)}</p>
-                    <div className="mt-2 flex flex-wrap items-center gap-2">
-                      <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
-                        Sales: {formatNumber(totalSales2026)}
-                      </span>
-                      <span className="rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700">
-                        Pending: {formatNumber(pendingOrders2026)}
-                      </span>
-                      <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">
-                        Shows Completed: {completedShows}
-                      </span>
-                      <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">
-                        Shows Remaining: {remainingShows2026}
-                      </span>
+              <div className="grid gap-4 xl:grid-cols-3">
+                <div className="rounded-xl border border-slate-200 bg-gradient-to-r from-slate-50 to-white p-5 shadow-sm">
+                  <p className="text-xs uppercase tracking-wide text-slate-500">Sales to date (confirmation orders)</p>
+                  <p className="mt-1 text-4xl font-bold text-slate-900">{formatNumber(totalSales2026)}</p>
+                  <div className="mt-4 flex items-end justify-between">
+                    <div>
+                      <p className="text-xs text-slate-500">Annual target progress</p>
+                      <p className="text-3xl font-bold text-emerald-600">{gaugePercent}%</p>
+                    </div>
+                    <p className="text-xs font-semibold text-slate-500">vs annual target {formatNumber(target2026)}</p>
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                  <p className="text-xs uppercase tracking-wide text-slate-500">Order pipeline status</p>
+                  <div className="mt-4 space-y-3">
+                    <div className="flex items-center justify-between rounded-lg bg-amber-50 px-3 py-2">
+                      <span className="text-sm font-medium text-amber-800">Pending</span>
+                      <span className="text-2xl font-bold text-amber-700">{formatNumber(pendingOrders2026)}</span>
+                    </div>
+                    <div className="flex items-center justify-between rounded-lg bg-rose-50 px-3 py-2">
+                      <span className="text-sm font-medium text-rose-800">Cancellation</span>
+                      <span className="text-2xl font-bold text-rose-700">{formatNumber(cancellationOrders2026)}</span>
                     </div>
                   </div>
-                  <div className="text-right">
-                    <p className="text-xs text-slate-500">Annual target progress</p>
-                    <p className="text-3xl font-bold text-emerald-600">{gaugePercent}%</p>
+                </div>
+
+                <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                  <p className="text-xs uppercase tracking-wide text-slate-500">Show execution status</p>
+                  <div className="mt-4 grid grid-cols-2 gap-3">
+                    <div className="rounded-lg bg-emerald-50 px-3 py-2">
+                      <p className="text-xs text-emerald-700">Shows Completed</p>
+                      <p className="text-2xl font-bold text-emerald-700">{completedShows}</p>
+                    </div>
+                    <div className="rounded-lg bg-slate-100 px-3 py-2">
+                      <p className="text-xs text-slate-600">Shows Remaining</p>
+                      <p className="text-2xl font-bold text-slate-800">{remainingShows2026}</p>
+                    </div>
+                  </div>
+                  <div className="mt-3 flex items-center justify-between text-sm">
+                    <span className="text-slate-500">Total Shows 2026</span>
+                    <span className="font-semibold text-slate-900">{totalShows2026}</span>
+                  </div>
+                  <div className="mt-1 flex items-center justify-between text-sm">
+                    <span className="text-slate-500">Remaining shows target</span>
+                    <span className="font-semibold text-indigo-700">{formatNumber(remainingShowsTarget2026)}</span>
                   </div>
                 </div>
               </div>
@@ -956,21 +1009,35 @@ export default function Dashboard() {
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-1 gap-6">
           <Card className="hover:shadow-lg transition-shadow">
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium text-gray-600">Total Shows 2026</CardTitle>
-              <Calendar className="h-5 w-5 text-blue-600" />
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-gray-600">Caravan Range Comparison</CardTitle>
+              <CardDescription>Ranked by sold units (high to low)</CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="text-3xl font-bold text-gray-900">{totalShows2026}</div>
-              <p className="text-xs text-gray-500 mt-1">
-                {completedShows} completed ({completedShowPercent}%)
-              </p>
+              {caravanRangeData.length > 0 ? (
+                <ResponsiveContainer width="100%" height={240}>
+                  <BarChart data={caravanRangeData} layout="vertical" margin={{ top: 6, right: 24, left: 6, bottom: 6 }}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis type="number" allowDecimals={false} />
+                    <YAxis dataKey="name" type="category" width={110} />
+                    <Tooltip />
+                    <Bar dataKey="value" name="Units" radius={[0, 6, 6, 0]}>
+                      {caravanRangeData.map((entry, index) => (
+                        <Cell key={`caravan-range-${entry.name}-${index}`} fill={entry.color} />
+                      ))}
+                      <LabelList dataKey="value" position="right" />
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="text-center py-8 text-gray-500">No caravan data available</div>
+              )}
             </CardContent>
           </Card>
 
           <Card className="hover:shadow-lg transition-shadow">
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-gray-600">Order Type Mix (2026)</CardTitle>
+              <CardTitle className="text-lg font-semibold text-gray-700">Order Type Mix (2026)</CardTitle>
               <CardDescription>Transfer from Stock : New Order</CardDescription>
             </CardHeader>
             <CardContent>
