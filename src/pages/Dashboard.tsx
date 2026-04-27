@@ -387,7 +387,6 @@ export default function Dashboard() {
 
   const totalShows2026 = shows2026.length;
   const totalShows = shows.length;
-  const completedShows = shows2026.filter(s => s.status === 'Completed').length;
 
   const showYearById = shows.reduce((acc, show) => {
     const year = getShowYear(show);
@@ -397,10 +396,14 @@ export default function Dashboard() {
     return acc;
   }, {} as Record<string, number>);
 
-  const totalSales2026 = orders.reduce((sum, order) => {
-    const year = showYearById[order.showId];
-    return year === 2026 ? sum + 1 : sum;
-  }, 0);
+  const isConfirmationOrder = (order: ShowOrder) => {
+    const status = typeof order.status === 'string' ? order.status.trim().toLowerCase() : '';
+    const orderStatusId =
+      typeof (order as ShowOrder & { orderStatusId?: string }).orderStatusId === 'string'
+        ? (order as ShowOrder & { orderStatusId?: string }).orderStatusId?.trim().toLowerCase()
+        : '';
+    return orderStatusId === 'confirmation' || status === 'confirmation';
+  };
 
   // Only sum non-zero (non-N/A) values
   const target2026 = shows2026.reduce((sum, s) => sum + (s.target2026 > 0 ? s.target2026 : 0), 0);
@@ -409,10 +412,26 @@ export default function Dashboard() {
   const totalSales2024 = shows.reduce((sum, s) => sum + (s.sales2024 > 0 ? s.sales2024 : 0), 0);
   const target2024 = shows.reduce((sum, s) => sum + (s.target2024 > 0 ? s.target2024 : 0), 0);
 
-  const completedShowIds = new Set(shows2026.filter(show => show.status === 'Completed').map(show => show.id));
-  const completedShowOrders = orders.filter(order => completedShowIds.has(order.showId));
+  const isShowFinishedForYtd = (show: Show) => {
+    const status = String(show.status || '').trim().toLowerCase();
+    if (status === 'completed' || status === 'finished') return true;
+    if (!show.finishDate) return false;
+    const finishDate = new Date(show.finishDate);
+    if (Number.isNaN(finishDate.getTime())) return false;
+    return finishDate.getTime() <= Date.now();
+  };
+
+  const finishedShows2026 = shows2026.filter(isShowFinishedForYtd);
+  const completedShows = finishedShows2026.length;
+  const completedShowIds = new Set(finishedShows2026.map((show) => show.id));
+  const completedShowOrders = orders.filter((order) => completedShowIds.has(order.showId) && isConfirmationOrder(order));
+  const totalSales2026 = orders.reduce((sum, order) => {
+    const year = showYearById[order.showId];
+    if (year !== 2026 || !isConfirmationOrder(order)) return sum;
+    return sum + 1;
+  }, 0);
   const completedShowTarget2026 = shows2026.reduce(
-    (sum, show) => sum + (show.status === 'Completed' && show.target2026 > 0 ? show.target2026 : 0),
+    (sum, show) => sum + (isShowFinishedForYtd(show) && show.target2026 > 0 ? show.target2026 : 0),
     0
   );
   const completedAchievement = completedShowTarget2026 > 0
@@ -566,14 +585,14 @@ export default function Dashboard() {
     {
       label: 'Completed Show Targets (YTD)',
       value: completedShowTarget2026,
-      helper: `${completedShows} completed shows`,
+      helper: `${completedShows} finished shows`,
       accent: 'bg-blue-50 text-blue-700',
       pill: `${ytdPercent}% of annual target`,
     },
     {
       label: 'Sales to Date',
       value: totalSales2026,
-      helper: `${totalSales2026.toLocaleString()} orders placed`,
+      helper: `${totalSales2026.toLocaleString()} confirmation orders`,
       accent: 'bg-emerald-50 text-emerald-700',
       pill: `${gaugePercent}% of annual target`,
     },
@@ -845,7 +864,7 @@ export default function Dashboard() {
           <CardHeader>
             <CardTitle>2026 Target Completion</CardTitle>
             <CardDescription>
-              Visual comparison between the overall 2026 target, completed-show targets (YTD), and sales achieved.
+              Visual comparison between the overall 2026 target, finished-show targets (YTD), and confirmation sales achieved.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -855,7 +874,7 @@ export default function Dashboard() {
                 <div className="absolute inset-2 rounded-full border border-slate-200" />
                 <div
                   className="absolute inset-3 rounded-full"
-                  style={getRingStyle(ytdPercent, 'rgba(59, 130, 246, 0.45)')}
+                  style={getRingStyle(ytdPercent, 'rgba(239, 68, 68, 0.55)')}
                 />
                 <div
                   className="absolute inset-6 rounded-full"
@@ -867,8 +886,8 @@ export default function Dashboard() {
                   <p className="text-xs text-gray-500">of {formatNumber(target2026)} target</p>
                 </div>
                 <div className="absolute -bottom-6 left-1/2 flex -translate-x-1/2 gap-3 text-xs font-medium">
-                  <span className="flex items-center gap-1 text-blue-700">
-                    <span className="h-2 w-2 rounded-full bg-blue-500" /> Completed targets
+                  <span className="flex items-center gap-1 text-red-700">
+                    <span className="h-2 w-2 rounded-full bg-red-500" /> YTD Target Completion
                   </span>
                   <span className="flex items-center gap-1 text-emerald-700">
                     <span className="h-2 w-2 rounded-full bg-emerald-500" /> Sales
