@@ -17,7 +17,7 @@ import {
   LineChart,
   Line,
 } from 'recharts';
-import { Calendar } from 'lucide-react';
+import { TrendingUp, Calendar } from 'lucide-react';
 import { dbGet } from '@/lib/firebase';
 import type { Show, ShowOrder, ShowTask, TeamMember } from '@/types';
 import { format as formatDate } from 'date-fns';
@@ -47,7 +47,6 @@ export default function Dashboard() {
   const [financeActuals, setFinanceActuals] = useState<Record<string, { dealer: number; factory: number }>>({});
   const [loading, setLoading] = useState(true);
   const [showQ1Results, setShowQ1Results] = useState(false);
-  const [showCurrentLastSection, setShowCurrentLastSection] = useState(false);
 
   useEffect(() => {
     loadData();
@@ -388,6 +387,7 @@ export default function Dashboard() {
 
   const totalShows2026 = shows2026.length;
   const totalShows = shows.length;
+  const completedShows = shows2026.filter(s => s.status === 'Completed').length;
 
   const showYearById = shows.reduce((acc, show) => {
     const year = getShowYear(show);
@@ -397,14 +397,10 @@ export default function Dashboard() {
     return acc;
   }, {} as Record<string, number>);
 
-  const isConfirmationOrder = (order: ShowOrder) => {
-    const status = typeof order.status === 'string' ? order.status.trim().toLowerCase() : '';
-    const orderStatusId =
-      typeof (order as ShowOrder & { orderStatusId?: string }).orderStatusId === 'string'
-        ? (order as ShowOrder & { orderStatusId?: string }).orderStatusId?.trim().toLowerCase()
-        : '';
-    return orderStatusId === 'confirmation' || status === 'confirmation';
-  };
+  const totalSales2026 = orders.reduce((sum, order) => {
+    const year = showYearById[order.showId];
+    return year === 2026 ? sum + 1 : sum;
+  }, 0);
 
   // Only sum non-zero (non-N/A) values
   const target2026 = shows2026.reduce((sum, s) => sum + (s.target2026 > 0 ? s.target2026 : 0), 0);
@@ -413,26 +409,10 @@ export default function Dashboard() {
   const totalSales2024 = shows.reduce((sum, s) => sum + (s.sales2024 > 0 ? s.sales2024 : 0), 0);
   const target2024 = shows.reduce((sum, s) => sum + (s.target2024 > 0 ? s.target2024 : 0), 0);
 
-  const isShowFinishedForYtd = (show: Show) => {
-    const status = String(show.status || '').trim().toLowerCase();
-    if (status === 'completed' || status === 'finished') return true;
-    if (!show.finishDate) return false;
-    const finishDate = new Date(show.finishDate);
-    if (Number.isNaN(finishDate.getTime())) return false;
-    return finishDate.getTime() <= Date.now();
-  };
-
-  const finishedShows2026 = shows2026.filter(isShowFinishedForYtd);
-  const completedShows = finishedShows2026.length;
-  const completedShowIds = new Set(finishedShows2026.map((show) => show.id));
-  const completedShowOrders = orders.filter((order) => completedShowIds.has(order.showId) && isConfirmationOrder(order));
-  const totalSales2026 = orders.reduce((sum, order) => {
-    const year = showYearById[order.showId];
-    if (year !== 2026 || !isConfirmationOrder(order)) return sum;
-    return sum + 1;
-  }, 0);
+  const completedShowIds = new Set(shows2026.filter(show => show.status === 'Completed').map(show => show.id));
+  const completedShowOrders = orders.filter(order => completedShowIds.has(order.showId));
   const completedShowTarget2026 = shows2026.reduce(
-    (sum, show) => sum + (isShowFinishedForYtd(show) && show.target2026 > 0 ? show.target2026 : 0),
+    (sum, show) => sum + (show.status === 'Completed' && show.target2026 > 0 ? show.target2026 : 0),
     0
   );
   const completedAchievement = completedShowTarget2026 > 0
@@ -542,63 +522,62 @@ export default function Dashboard() {
     ? ((q1AcceptedOrdersCurrent - q1AcceptedOrdersPrevious) / q1AcceptedOrdersPrevious) * 100
     : null;
 
+  const stats = [
+    {
+      title: 'Total Shows 2026',
+      value: totalShows2026.toString(),
+      description: `${completedShows} completed`,
+      icon: Calendar,
+      color: 'text-blue-600',
+    },
+    {
+      title: 'Total Sales 2025',
+      value: totalSales2025.toString(),
+      description: `Target: ${target2025}`,
+      icon: TrendingUp,
+      color: 'text-purple-600',
+    },
+  ];
+
   const gaugePercent = target2026 > 0 ? Math.round((totalSales2026 / target2026) * 100) : 0;
   const ytdPercent = target2026 > 0 ? Math.round((completedShowTarget2026 / target2026) * 100) : 0;
-  const sales2025SamePeriod = finishedShows2026.reduce((sum, show) => sum + parseNumber(show.sales2025), 0);
-  const yoy2025Percent = sales2025SamePeriod > 0 ? Math.round((totalSales2026 / sales2025SamePeriod) * 100) : 0;
-  const completedShowPercent = totalShows2026 > 0 ? Math.round((completedShows / totalShows2026) * 100) : 0;
-  const ytdTargetDeltaPercent = completedShowTarget2026 > 0
-    ? ((totalSales2026 - completedShowTarget2026) / completedShowTarget2026) * 100
-    : 0;
-  const yoyDeltaPercent = sales2025SamePeriod > 0 ? ((totalSales2026 - sales2025SamePeriod) / sales2025SamePeriod) * 100 : 0;
 
-  const salesVsCards = [
-    {
-      label: 'Year to date Target completion',
-      numerator: totalSales2026,
-      denominator: completedShowTarget2026,
-      helper: 'Finished-show target total',
-      color: 'bg-rose-500',
-    },
-    {
-      label: 'Year to year Sales completion',
-      numerator: totalSales2026,
-      denominator: sales2025SamePeriod,
-      helper: 'Compared with 2025 orders for the same finished shows',
-      color: 'bg-indigo-500',
-    },
-    {
-      label: 'TargetCompletion',
-      numerator: totalSales2026,
-      denominator: target2026,
-      helper: 'Against annual 2026 total target',
-      color: 'bg-emerald-500',
-    },
-  ].map((entry) => {
-    const percent = entry.denominator > 0 ? Math.round((entry.numerator / entry.denominator) * 100) : 0;
-    return { ...entry, percent };
-  });
-
-  const orderTypes2026 = orders.reduce(
-    (acc, order) => {
-      const year = showYearById[order.showId];
-      if (year !== 2026 || !isConfirmationOrder(order)) return acc;
-      const type = String(order.orderType || '').trim().toLowerCase();
-      if (type === 'transfer from stock') acc.transferFromStock += 1;
-      else if (type === 'new order') acc.newOrder += 1;
-      return acc;
-    },
-    { transferFromStock: 0, newOrder: 0 }
-  );
-  const totalOrderTypes2026 = orderTypes2026.transferFromStock + orderTypes2026.newOrder;
-  const transferPercent = totalOrderTypes2026 > 0 ? Math.round((orderTypes2026.transferFromStock / totalOrderTypes2026) * 100) : 0;
-  const newOrderPercent = totalOrderTypes2026 > 0 ? Math.round((orderTypes2026.newOrder / totalOrderTypes2026) * 100) : 0;
   const formatNumber = (value: number) => value.toLocaleString();
   const formatCurrency = (value: number) => `$${value.toLocaleString('en-AU')}`;
   const calculatePercent = (actual: number, target: number) => {
     if (!Number.isFinite(actual) || !Number.isFinite(target) || target <= 0) return 0;
     return Math.round((actual / target) * 100);
   };
+
+  const getRingStyle = (percent: number, color: string) => {
+    const safePercent = Math.min(Math.max(percent, 0), 100);
+    return {
+      background: `conic-gradient(${color} ${safePercent}%, #e5e7eb ${safePercent}% 100%)`,
+    };
+  };
+
+  const metricHighlights = [
+    {
+      label: 'Total Target 2026',
+      value: target2026,
+      helper: 'Overall annual target',
+      accent: 'bg-slate-100 text-slate-700',
+    },
+    {
+      label: 'Completed Show Targets (YTD)',
+      value: completedShowTarget2026,
+      helper: `${completedShows} completed shows`,
+      accent: 'bg-blue-50 text-blue-700',
+      pill: `${ytdPercent}% of annual target`,
+    },
+    {
+      label: 'Sales to Date',
+      value: totalSales2026,
+      helper: `${totalSales2026.toLocaleString()} orders placed`,
+      accent: 'bg-emerald-50 text-emerald-700',
+      pill: `${gaugePercent}% of annual target`,
+    },
+  ];
 
   const timelineShows = useMemo(() => {
     const safeDate = (value?: string) => {
@@ -726,41 +705,35 @@ export default function Dashboard() {
   return (
     <div className="space-y-6">
       <Card className="hover:shadow-lg transition-shadow border-blue-100">
-        <CardHeader className="sm:flex-row sm:items-center sm:justify-between gap-3">
-          <div>
-            <CardTitle>Current and Last Show</CardTitle>
-            <CardDescription>Quick pulse on the most recent shows with performance versus targets.</CardDescription>
-          </div>
-          <Button variant="outline" onClick={() => setShowCurrentLastSection((prev) => !prev)}>
-            {showCurrentLastSection ? 'Collapse' : 'Expand'}
-          </Button>
+        <CardHeader>
+          <CardTitle>Current and Last Show</CardTitle>
+          <CardDescription>Quick pulse on the most recent shows with performance versus targets.</CardDescription>
         </CardHeader>
-        {showCurrentLastSection ? (
-          <CardContent>
-            <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-              {[
-                { title: 'Current / Upcoming Show', data: currentShowSnapshot, tone: 'blue', isCurrent: true },
-                { title: 'Last Completed Show', data: lastShowSnapshot, tone: 'emerald', isCurrent: false },
-              ].map((entry) => (
-                <Card key={entry.title} className="border-slate-200 shadow-sm">
-                  <CardHeader className="pb-3">
-                    <CardTitle className="flex items-center justify-between text-base">
-                      <span>{entry.title}</span>
-                      {entry.data ? (
-                        <span
-                          className={`rounded-full px-3 py-1 text-[11px] font-semibold ${entry.tone === 'blue' ? 'bg-blue-50 text-blue-700' : 'bg-emerald-50 text-emerald-700'}`}
-                        >
-                          {entry.data.dealership || 'Show on deck'}
-                        </span>
-                      ) : null}
-                    </CardTitle>
-                    <CardDescription>
-                      {entry.data ? `${entry.data.startLabel} → ${entry.data.endLabel}` : 'No show available'}
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent>
+        <CardContent>
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+            {[
+              { title: 'Current / Upcoming Show', data: currentShowSnapshot, tone: 'blue', isCurrent: true },
+              { title: 'Last Completed Show', data: lastShowSnapshot, tone: 'emerald', isCurrent: false },
+            ].map((entry) => (
+              <Card key={entry.title} className="border-slate-200 shadow-sm">
+                <CardHeader className="pb-3">
+                  <CardTitle className="flex items-center justify-between text-base">
+                    <span>{entry.title}</span>
                     {entry.data ? (
-                      <div className="space-y-4">
+                      <span
+                        className={`rounded-full px-3 py-1 text-[11px] font-semibold ${entry.tone === 'blue' ? 'bg-blue-50 text-blue-700' : 'bg-emerald-50 text-emerald-700'}`}
+                      >
+                        {entry.data.dealership || 'Show on deck'}
+                      </span>
+                    ) : null}
+                  </CardTitle>
+                  <CardDescription>
+                    {entry.data ? `${entry.data.startLabel} → ${entry.data.endLabel}` : 'No show available'}
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {entry.data ? (
+                    <div className="space-y-4">
                       <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 shadow-sm">
                         <p className="text-[11px] uppercase tracking-wide text-slate-500">{entry.title}</p>
                         <p className="text-lg font-bold text-slate-900">{entry.data.name}</p>
@@ -853,18 +826,17 @@ export default function Dashboard() {
                           );
                         })}
                       </div>
-                      </div>
-                    ) : (
-                      <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-center text-sm text-slate-500">
-                        No show data found. Add show dates to see live insights.
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          </CardContent>
-        ) : null}
+                    </div>
+                  ) : (
+                    <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-center text-sm text-slate-500">
+                      No show data found. Add show dates to see live insights.
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </CardContent>
       </Card>
 
       {/* Target Completion Gauge & Stats */}
@@ -873,111 +845,72 @@ export default function Dashboard() {
           <CardHeader>
             <CardTitle>2026 Target Completion</CardTitle>
             <CardDescription>
-              Professional progress view based on confirmation order volume against YTD, YoY, and annual target baselines.
+              Visual comparison between the overall 2026 target, completed-show targets (YTD), and sales achieved.
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="space-y-5">
-              <div className="rounded-xl border border-slate-200 bg-gradient-to-r from-slate-50 to-white p-5 shadow-sm">
-                <div className="flex items-end justify-between">
-                  <div>
-                    <p className="text-xs uppercase tracking-wide text-slate-500">Sales to date (confirmation orders)</p>
-                    <p className="text-4xl font-bold text-slate-900">{formatNumber(totalSales2026)}</p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-xs text-slate-500">Annual target progress</p>
-                    <p className="text-3xl font-bold text-emerald-600">{gaugePercent}%</p>
-                  </div>
+            <div className="grid grid-cols-1 gap-8 md:grid-cols-2 md:items-center">
+              <div className="relative mx-auto h-64 w-64">
+                <div className="absolute inset-0 rounded-full bg-gradient-to-br from-slate-50 via-white to-slate-100 shadow-inner" />
+                <div className="absolute inset-2 rounded-full border border-slate-200" />
+                <div
+                  className="absolute inset-3 rounded-full"
+                  style={getRingStyle(ytdPercent, 'rgba(59, 130, 246, 0.45)')}
+                />
+                <div
+                  className="absolute inset-6 rounded-full"
+                  style={getRingStyle(gaugePercent, 'rgba(16, 185, 129, 0.65)')}
+                />
+                <div className="absolute inset-10 flex flex-col items-center justify-center rounded-full bg-white text-center shadow">
+                  <p className="text-xs uppercase tracking-wide text-gray-500">Sales Completion</p>
+                  <p className="text-4xl font-bold text-gray-900">{gaugePercent}%</p>
+                  <p className="text-xs text-gray-500">of {formatNumber(target2026)} target</p>
+                </div>
+                <div className="absolute -bottom-6 left-1/2 flex -translate-x-1/2 gap-3 text-xs font-medium">
+                  <span className="flex items-center gap-1 text-blue-700">
+                    <span className="h-2 w-2 rounded-full bg-blue-500" /> Completed targets
+                  </span>
+                  <span className="flex items-center gap-1 text-emerald-700">
+                    <span className="h-2 w-2 rounded-full bg-emerald-500" /> Sales
+                  </span>
                 </div>
               </div>
 
               <div className="space-y-4">
-                {salesVsCards.map((metric) => {
-                  const safePercent = Math.min(Math.max(metric.percent, 0), 100);
-                  return (
-                    <div key={metric.label} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-                      <div className="flex items-start justify-between">
-                        <div>
-                          <p className="text-sm font-semibold text-slate-700">{metric.label}</p>
-                          <p className="text-xs text-slate-500">{metric.helper}</p>
-                        </div>
-                        <div className="text-right">
-                          <p className="text-3xl font-bold text-slate-900">{metric.percent}%</p>
-                          <p className="text-lg font-bold text-slate-800">
-                            {formatNumber(metric.numerator)} / {formatNumber(metric.denominator)}
-                          </p>
-                        </div>
+                {metricHighlights.map((metric) => (
+                  <div key={metric.label} className="rounded-lg border p-4 shadow-sm">
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <p className="text-sm text-gray-600">{metric.label}</p>
+                        <p className="text-2xl font-bold text-gray-900">{formatNumber(metric.value)}</p>
+                        <p className="text-xs text-gray-500">{metric.helper}</p>
                       </div>
-                      <div className="mt-3 h-4 overflow-hidden rounded-full bg-slate-100">
-                        <div
-                          className={`h-full rounded-full ${metric.color}`}
-                          style={{ width: `${safePercent}%` }}
-                        />
-                      </div>
-                      <div className="mt-2 flex justify-end">
-                        {metric.label === 'Year to date Target completion' ? (
-                          <p className={`text-lg font-bold ${ytdTargetDeltaPercent >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                            {ytdTargetDeltaPercent >= 0 ? '▲' : '▼'} {Math.abs(ytdTargetDeltaPercent).toFixed(1)}%
-                          </p>
-                        ) : null}
-                        {metric.label === 'Year to year Sales completion' ? (
-                          <p className={`text-lg font-bold ${yoyDeltaPercent >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                            {yoyDeltaPercent >= 0 ? '▲' : '▼'} {Math.abs(yoyDeltaPercent).toFixed(1)}%
-                          </p>
-                        ) : null}
-                      </div>
+                      <span className={`rounded-full px-3 py-1 text-xs font-semibold ${metric.accent}`}>
+                        {metric.pill || 'Target detail'}
+                      </span>
                     </div>
-                  );
-                })}
+                  </div>
+                ))}
               </div>
             </div>
           </CardContent>
         </Card>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-1 gap-6">
-          <Card className="hover:shadow-lg transition-shadow">
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium text-gray-600">Total Shows 2026</CardTitle>
-              <Calendar className="h-5 w-5 text-blue-600" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-3xl font-bold text-gray-900">{totalShows2026}</div>
-              <p className="text-xs text-gray-500 mt-1">
-                {completedShows} completed ({completedShowPercent}%)
-              </p>
-            </CardContent>
-          </Card>
-
-          <Card className="hover:shadow-lg transition-shadow">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-gray-600">Order Type Mix (2026)</CardTitle>
-              <CardDescription>Transfer from Stock : New Order</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-1 gap-5 xl:grid-cols-2 xl:items-center">
-                <div
-                  className="mx-auto h-40 w-40 rounded-full"
-                  style={{
-                    background: `conic-gradient(#0ea5e9 ${transferPercent}%, #22c55e ${transferPercent}% 100%)`,
-                  }}
-                >
-                  <div className="m-5 flex h-[120px] w-[120px] items-center justify-center rounded-full bg-white text-3xl font-bold text-slate-700">
-                    {totalOrderTypes2026}
-                  </div>
-                </div>
-                <div className="space-y-3">
-                  <p className="flex items-center gap-2 text-base font-semibold text-sky-700">
-                    <span className="h-3 w-3 rounded-full bg-sky-500" />
-                    Transfer from Stock: {orderTypes2026.transferFromStock} ({transferPercent}%)
-                  </p>
-                  <p className="flex items-center gap-2 text-base font-semibold text-emerald-700">
-                    <span className="h-3 w-3 rounded-full bg-emerald-500" />
-                    New Order: {orderTypes2026.newOrder} ({newOrderPercent}%)
-                  </p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+          {stats.map((stat, index) => (
+            <Card key={index} className="hover:shadow-lg transition-shadow">
+              <CardHeader className="flex flex-row items-center justify-between pb-2">
+                <CardTitle className="text-sm font-medium text-gray-600">
+                  {stat.title}
+                </CardTitle>
+                <stat.icon className={`h-5 w-5 ${stat.color}`} />
+              </CardHeader>
+              <CardContent>
+                <div className="text-3xl font-bold text-gray-900">{stat.value}</div>
+                <p className="text-xs text-gray-500 mt-1">{stat.description}</p>
+              </CardContent>
+            </Card>
+          ))}
         </div>
       </div>
 
