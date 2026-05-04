@@ -76,6 +76,7 @@ export default function ShowManagement() {
   const [searchTerm, setSearchTerm] = useState('');
   const [sortKey, setSortKey] = useState<'name' | 'startDate'>('startDate');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
+  const [isDistributionMapVisible, setIsDistributionMapVisible] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
@@ -655,6 +656,13 @@ export default function ShowManagement() {
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
+              <Button
+                variant={isDistributionMapVisible ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setIsDistributionMapVisible((prev) => !prev)}
+              >
+                {isDistributionMapVisible ? 'Hide Map' : 'Show Map'}
+              </Button>
               <Button onClick={handleAddShow} disabled={isCreatingShow}>
                 <Plus className="mr-2 h-4 w-4" /> {isCreatingShow ? 'Creating...' : 'Add Show'}
               </Button>
@@ -676,13 +684,15 @@ export default function ShowManagement() {
             as CSV before uploading—the import will overwrite matching records by ID.
           </p>
         </CardHeader>
-        <CardContent>
-          <AustraliaMap
-            stateStats={stateStats}
-            onStateClick={handleStateSelect}
-            selectedState={selectedState}
-          />
-        </CardContent>
+        {isDistributionMapVisible && (
+          <CardContent>
+            <AustraliaMap
+              stateStats={stateStats}
+              onStateClick={handleStateSelect}
+              selectedState={selectedState}
+            />
+          </CardContent>
+        )}
       </Card>
 
       <Card>

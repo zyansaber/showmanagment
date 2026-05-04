@@ -4,11 +4,12 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useNavigate } from 'react-router-dom';
-import { MapPin, Calendar as CalendarIcon, Users } from 'lucide-react';
+import { MapPin, Calendar as CalendarIcon, Users, Search } from 'lucide-react';
 import { format, parseISO, isValid, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, addMonths, subMonths } from 'date-fns';
 import { dbGet } from '@/lib/firebase';
 import type { Show, ShowTask } from '@/types';
 import AustraliaMap from '@/components/AustraliaMap';
+import { Input } from '@/components/ui/input';
 
 export default function ShowCalendar() {
   const navigate = useNavigate();
@@ -20,6 +21,9 @@ export default function ShowCalendar() {
   const [selectedState, setSelectedState] = useState<string>('All');
   const [selectedDealership, setSelectedDealership] = useState<string>('All');
   const [taskDialogShowId, setTaskDialogShowId] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [showFinished, setShowFinished] = useState(false);
+  const [isMapVisible, setIsMapVisible] = useState(false);
 
   useEffect(() => {
     loadShows();
@@ -124,17 +128,46 @@ export default function ShowCalendar() {
     return ['All', ...Array.from(uniqueDealers).sort((a, b) => a.localeCompare(b))];
   }, [validShows]);
 
-  const filteredShows = validShows.filter(show => {
-    try {
-      const matchesState = selectedState === 'All' || show.siteLocation?.state === selectedState;
-      const dealerValue = typeof show.dealership === 'string' ? show.dealership.trim() : '';
-      const matchesDealer = selectedDealership === 'All' || dealerValue === selectedDealership;
-      const timelineStatus = getShowTimelineStatus(show);
-      return matchesState && matchesDealer && timelineStatus !== 'Finished';
-    } catch {
-      return false;
-    }
-  });
+  const searchedShows = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    return validShows.filter((show) => {
+      try {
+        const matchesState = selectedState === 'All' || show.siteLocation?.state === selectedState;
+        const dealerValue = typeof show.dealership === 'string' ? show.dealership.trim() : '';
+        const matchesDealer = selectedDealership === 'All' || dealerValue === selectedDealership;
+        if (!matchesState || !matchesDealer) return false;
+
+        if (!query) return true;
+        const searchable = [
+          show.name,
+          show.dealership,
+          show.handoverDealer,
+          show.siteLocation?.suburb,
+          show.siteLocation?.state,
+          show.siteLocation?.street,
+          show.siteLocation?.postcode,
+          show.siteLocation?.number,
+        ]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase();
+
+        return searchable.includes(query);
+      } catch {
+        return false;
+      }
+    });
+  }, [validShows, searchQuery, selectedState, selectedDealership]);
+
+  const filteredShows = useMemo(
+    () => searchedShows.filter((show) => showFinished || getShowTimelineStatus(show) !== 'Finished'),
+    [searchedShows, showFinished]
+  );
+
+  const hiddenFinishedMatches = useMemo(
+    () => searchedShows.filter((show) => getShowTimelineStatus(show) === 'Finished').length,
+    [searchedShows]
+  );
 
   const sortedFilteredShows = useMemo(() => {
     return [...filteredShows].sort((a, b) => {
@@ -322,6 +355,32 @@ export default function ShowCalendar() {
                   )}
                 </Button>
               ))}
+            </div>
+            <div className="space-y-2">
+              <h4 className="text-sm font-semibold text-slate-700">Search Shows</h4>
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                <Input
+                  value={searchQuery}
+                  onChange={(event) => setSearchQuery(event.target.value)}
+                  placeholder="Search by show, suburb, state, dealership..."
+                  className="pl-9"
+                />
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  size="sm"
+                  variant={showFinished ? 'default' : 'outline'}
+                  onClick={() => setShowFinished((prev) => !prev)}
+                >
+                  Finished
+                </Button>
+                {!showFinished && hiddenFinishedMatches > 0 && (
+                  <p className="text-xs text-muted-foreground">
+                    Search matched {hiddenFinishedMatches} finished show{hiddenFinishedMatches === 1 ? '' : 's'}. Click Finished to view.
+                  </p>
+                )}
+              </div>
             </div>
             <div>
               <h4 className="text-sm font-semibold text-slate-700">Filter by Dealership</h4>
@@ -547,21 +606,30 @@ export default function ShowCalendar() {
 
       <Card>
         <CardHeader>
-          <div className="flex items-center justify-between gap-2 flex-wrap">
-            <CardTitle>Show Statistics by State</CardTitle>
-            <p className="text-sm text-muted-foreground max-w-xl">
-              Click on a state or New Zealand to focus the list above. The fill intensity reflects how many shows are
-              recorded for that region.
-            </p>
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <CardTitle>Show Distribution</CardTitle>
+            <Button
+              variant={isMapVisible ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => setIsMapVisible((prev) => !prev)}
+            >
+              {isMapVisible ? 'Hide Map' : 'Show Map'}
+            </Button>
           </div>
+          <p className="text-sm text-muted-foreground max-w-xl">
+            Click on a state or New Zealand to focus the list above. The fill intensity reflects how many shows are
+            recorded for that region.
+          </p>
         </CardHeader>
-        <CardContent>
-          <AustraliaMap
-            stateStats={mapStateStats}
-            onStateClick={(state) => setSelectedState(state)}
-            selectedState={selectedState}
-          />
-        </CardContent>
+        {isMapVisible && (
+          <CardContent>
+            <AustraliaMap
+              stateStats={mapStateStats}
+              onStateClick={(state) => setSelectedState(state)}
+              selectedState={selectedState}
+            />
+          </CardContent>
+        )}
       </Card>
 
       <Dialog
