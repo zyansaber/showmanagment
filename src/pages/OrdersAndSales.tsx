@@ -224,6 +224,34 @@ const getPrimaryShowDateValue = (show: Show) => {
   return Number.MAX_SAFE_INTEGER;
 };
 
+const showOccursInMonth = (show: Show | undefined, selectedMonth: string) => {
+  if (!show || !selectedMonth) return true;
+  const [yearText, monthText] = selectedMonth.split('-');
+  const year = Number(yearText);
+  const month = Number(monthText);
+  if (!Number.isFinite(year) || !Number.isFinite(month) || month < 1 || month > 12) return true;
+
+  const monthStart = new Date(year, month - 1, 1);
+  monthStart.setHours(0, 0, 0, 0);
+  const monthEnd = new Date(year, month, 0);
+  monthEnd.setHours(23, 59, 59, 999);
+
+  const start = parseDateValue(show.startDate);
+  const finish = parseDateValue(show.finishDate);
+  const primary = start || finish;
+  if (!primary) return false;
+
+  if (start && finish) {
+    const normalizedStart = new Date(start);
+    const normalizedFinish = new Date(finish);
+    normalizedStart.setHours(0, 0, 0, 0);
+    normalizedFinish.setHours(23, 59, 59, 999);
+    return normalizedStart <= monthEnd && normalizedFinish >= monthStart;
+  }
+
+  return primary >= monthStart && primary <= monthEnd;
+};
+
 export default function OrdersAndSales() {
   const [orders, setOrders] = useState<ShowOrderWithContract[]>([]);
   const [shows, setShows] = useState<Show[]>([]);
@@ -272,6 +300,7 @@ export default function OrdersAndSales() {
   const [statusFilter, setStatusFilter] = useState<'all' | 'unassigned' | string>('all');
   const [showFilter, setShowFilter] = useState('all');
   const [orderingDateFilter, setOrderingDateFilter] = useState('');
+  const [showMonthFilter, setShowMonthFilter] = useState('');
   const [inlineEdits, setInlineEdits] = useState<Record<string, { dealNumber?: string; conditions?: string; topUpDate?: string }>>({});
 
 
@@ -419,6 +448,7 @@ export default function OrdersAndSales() {
   const decoratedOrders: DecoratedOrder[] = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
     const selectedDate = orderingDateFilter.trim();
+    const selectedShowMonth = showMonthFilter.trim();
     return orders
       .slice()
       .sort((a, b) => {
@@ -433,6 +463,7 @@ export default function OrdersAndSales() {
         }
         if (showFilter !== 'all' && order.showId !== showFilter) return false;
         if (selectedDate && String(order.date || '').slice(0, 10) !== selectedDate) return false;
+        if (selectedShowMonth && !showOccursInMonth(showLookup[order.showId], selectedShowMonth)) return false;
         if (!term) return true;
         const matchedShow = showLookup[order.showId];
         const haystack = [
@@ -465,7 +496,7 @@ export default function OrdersAndSales() {
         handoverDealer: order.handoverDealer || showLookup[order.showId]?.handoverDealer || 'Not set',
         dealerStatus: deriveDealerStatus(order),
     }));
-  }, [deriveDealerStatus, orderingDateFilter, orders, searchTerm, showFilter, showLookup, statusFilter, statusLookup]);
+  }, [deriveDealerStatus, orderingDateFilter, orders, searchTerm, showFilter, showLookup, showMonthFilter, statusFilter, statusLookup]);
 
   const handleExportOrdersExcel = useCallback(() => {
     if (!decoratedOrders.length) {
@@ -533,10 +564,12 @@ export default function OrdersAndSales() {
   const ordersMatchingLowerFilters = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
     const selectedDate = orderingDateFilter.trim();
+    const selectedShowMonth = showMonthFilter.trim();
 
     return orders.filter((order) => {
       if (showFilter !== 'all' && order.showId !== showFilter) return false;
       if (selectedDate && String(order.date || '').slice(0, 10) !== selectedDate) return false;
+      if (selectedShowMonth && !showOccursInMonth(showLookup[order.showId], selectedShowMonth)) return false;
       if (!term) return true;
 
       const matchedShow = showLookup[order.showId];
@@ -565,20 +598,34 @@ export default function OrdersAndSales() {
 
       return haystack.includes(term);
     });
-  }, [orderingDateFilter, orders, searchTerm, showFilter, showLookup, statusLookup]);
+  }, [orderingDateFilter, orders, searchTerm, showFilter, showLookup, showMonthFilter, statusLookup]);
 
   const orderingDateCount = useMemo(() => {
     const selectedDate = orderingDateFilter.trim();
+    const selectedShowMonth = showMonthFilter.trim();
     return orders.filter((order) => {
       if (statusFilter === 'unassigned' && order.orderStatusId) return false;
       if (statusFilter !== 'all' && statusFilter !== 'unassigned' && order.orderStatusId !== statusFilter) {
         return false;
       }
       if (showFilter !== 'all' && order.showId !== showFilter) return false;
+      if (selectedShowMonth && !showOccursInMonth(showLookup[order.showId], selectedShowMonth)) return false;
       if (!selectedDate) return true;
-      return String(order.date || '').slice(0, 10) === selectedDate;
+      if (String(order.date || '').slice(0, 10) !== selectedDate) return false;
+      return true;
     }).length;
-  }, [orderingDateFilter, orders, showFilter, statusFilter]);
+  }, [orderingDateFilter, orders, showFilter, showLookup, showMonthFilter, statusFilter]);
+
+  const showMonthCount = useMemo(() => {
+    const selectedShowMonth = showMonthFilter.trim();
+    return orders.filter((order) => {
+      if (statusFilter === 'unassigned' && order.orderStatusId) return false;
+      if (statusFilter !== 'all' && statusFilter !== 'unassigned' && order.orderStatusId !== statusFilter) return false;
+      if (showFilter !== 'all' && order.showId !== showFilter) return false;
+      if (!selectedShowMonth) return true;
+      return showOccursInMonth(showLookup[order.showId], selectedShowMonth);
+    }).length;
+  }, [orders, showFilter, showLookup, showMonthFilter, statusFilter]);
 
   const statusCounts = useMemo(
     () =>
@@ -1201,6 +1248,47 @@ export default function OrdersAndSales() {
                 <Button type="button" variant="ghost" size="sm" onClick={() => setOrderingDateFilter('')}>
                   <X className="mr-1 h-3.5 w-3.5" />
                   Clear date
+                </Button>
+              )}
+            </PopoverContent>
+          </Popover>
+          <Popover>
+            <PopoverTrigger asChild>
+              <button
+                type="button"
+                className={cn(
+                  'inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors',
+                  showMonthFilter
+                    ? 'border-violet-600 bg-violet-600 text-white shadow-sm'
+                    : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50'
+                )}
+              >
+                <CalendarDays className="h-3.5 w-3.5" />
+                <span>{showMonthFilter ? `Show Month: ${showMonthFilter}` : 'Show Month'}</span>
+                <span
+                  className={cn(
+                    'rounded-full px-1.5 py-0.5 text-[10px]',
+                    showMonthFilter ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-600'
+                  )}
+                >
+                  {showMonthCount}
+                </span>
+              </button>
+            </PopoverTrigger>
+            <PopoverContent className="w-72 space-y-3" align="start">
+              <div>
+                <p className="text-sm font-medium text-slate-900">Show Month</p>
+                <p className="text-xs text-slate-500">Filter and export by the month when the show is held.</p>
+              </div>
+              <Input
+                type="month"
+                value={showMonthFilter}
+                onChange={(event) => setShowMonthFilter(event.target.value)}
+              />
+              {showMonthFilter && (
+                <Button type="button" variant="ghost" size="sm" onClick={() => setShowMonthFilter('')}>
+                  <X className="mr-1 h-3.5 w-3.5" />
+                  Clear month
                 </Button>
               )}
             </PopoverContent>
