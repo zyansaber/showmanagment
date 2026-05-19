@@ -13,7 +13,7 @@ import OrderCommentsEditor from '@/components/OrderCommentsEditor';
 import { dbGet, dbSet, dbUpdate, schedulingDbGet, uploadStorageFile } from '@/lib/firebase';
 import type { ScheduleOrder, Show, ShowOrder, TeamMember } from '@/types';
 import { toast } from 'sonner';
-import { CalendarDays, Check, Download, Loader2, Plus, Search, Sparkles, X } from 'lucide-react';
+import { ArrowDownRight, ArrowUpRight, CalendarDays, Check, Download, Loader2, Minus, Plus, Search, Sparkles, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 const CONFIRMATION_STATUS_ID = 'confirmation';
@@ -627,6 +627,60 @@ export default function OrdersAndSales() {
     }).length;
   }, [orders, showFilter, showLookup, showMonthFilter, statusFilter]);
 
+
+
+  const modelConfirmationInsights = useMemo(() => {
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth();
+    const previousMonthDate = new Date(currentYear, currentMonth - 1, 1);
+
+    const byModel = new Map<string, { current: number; previous: number }>();
+
+    const filteredConfirmationOrders = orders.filter((order) => {
+      if (order.orderStatusId !== CONFIRMATION_STATUS_ID) return false;
+      if (showFilter !== 'all' && order.showId !== showFilter) return false;
+      if (showMonthFilter && !showOccursInMonth(showLookup[order.showId], showMonthFilter)) return false;
+      return true;
+    });
+
+    filteredConfirmationOrders.forEach((order) => {
+      const modelName = (order.model || 'Unknown Model').trim() || 'Unknown Model';
+      const existing = byModel.get(modelName) || { current: 0, previous: 0 };
+      const orderDate = parseDateValue(order.date);
+
+      if (orderDate) {
+        const year = orderDate.getFullYear();
+        const month = orderDate.getMonth();
+        if (year == currentYear && month == currentMonth) existing.current += 1;
+        if (year == previousMonthDate.getFullYear() && month == previousMonthDate.getMonth()) existing.previous += 1;
+      }
+
+      byModel.set(modelName, existing);
+    });
+
+    const top10 = Array.from(byModel.entries())
+      .map(([model, counts]) => {
+        const delta = counts.current - counts.previous;
+        const growthRate = counts.previous === 0 ? (counts.current > 0 ? 100 : 0) : (delta / counts.previous) * 100;
+        return { model, ...counts, delta, growthRate };
+      })
+      .sort((a, b) => {
+        if (b.current !== a.current) return b.current - a.current;
+        if (b.delta !== a.delta) return b.delta - a.delta;
+        return a.model.localeCompare(b.model);
+      })
+      .slice(0, 10);
+
+    return {
+      top10,
+      totalCurrent: top10.reduce((sum, item) => sum + item.current, 0),
+      totalPrevious: top10.reduce((sum, item) => sum + item.previous, 0),
+      currentMonthLabel: now.toLocaleDateString('en-AU', { month: 'short', year: 'numeric' }),
+      previousMonthLabel: previousMonthDate.toLocaleDateString('en-AU', { month: 'short', year: 'numeric' }),
+    };
+  }, [orders, showFilter, showLookup, showMonthFilter]);
+
   const statusCounts = useMemo(
     () =>
       statusOptions.reduce<Record<string, number>>((acc, option) => {
@@ -1122,6 +1176,71 @@ export default function OrdersAndSales() {
           <h1 className="text-4xl font-extrabold text-gray-900">Orders & Sales</h1>
           <p className="text-sm text-gray-500">Overview of all show orders and sales confirmations</p>
         </div>
+        <Dialog>
+          <DialogTrigger asChild>
+            <Button type="button" className="bg-gradient-to-r from-indigo-600 via-blue-600 to-cyan-500 text-white shadow-lg hover:opacity-95">
+              <Sparkles className="mr-2 h-4 w-4" />
+              Model Confirmation Insights
+            </Button>
+          </DialogTrigger>
+          <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-3xl">
+            <DialogHeader>
+              <DialogTitle>Model Confirmation Analysis (Top 10)</DialogTitle>
+              <DialogDescription>
+                Compare confirmed order counts by model between {modelConfirmationInsights.currentMonthLabel} and {modelConfirmationInsights.previousMonthLabel}.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="grid gap-4 md:grid-cols-2">
+              <Card className="border-indigo-100 bg-indigo-50/70">
+                <CardHeader className="pb-2">
+                  <CardDescription>{modelConfirmationInsights.currentMonthLabel}</CardDescription>
+                  <CardTitle className="text-3xl text-indigo-700">{modelConfirmationInsights.totalCurrent}</CardTitle>
+                </CardHeader>
+              </Card>
+              <Card className="border-slate-200 bg-slate-50">
+                <CardHeader className="pb-2">
+                  <CardDescription>{modelConfirmationInsights.previousMonthLabel}</CardDescription>
+                  <CardTitle className="text-3xl text-slate-700">{modelConfirmationInsights.totalPrevious}</CardTitle>
+                </CardHeader>
+              </Card>
+            </div>
+
+            <div className="space-y-2">
+              {modelConfirmationInsights.top10.length === 0 && (
+                <div className="rounded-lg border border-dashed p-8 text-center text-sm text-slate-500">No confirmation data available.</div>
+              )}
+              {modelConfirmationInsights.top10.map((item, index) => {
+                const isUp = item.delta > 0;
+                const isDown = item.delta < 0;
+                return (
+                  <div key={item.model} className="flex items-center justify-between rounded-xl border bg-white p-4 shadow-sm">
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-900 text-xs font-bold text-white">
+                        #{index + 1}
+                      </div>
+                      <div>
+                        <p className="font-semibold text-slate-900">{item.model}</p>
+                        <p className="text-xs text-slate-500">{item.previous} → {item.current} confirmations</p>
+                      </div>
+                    </div>
+                    <div
+                      className={cn(
+                        'inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-semibold',
+                        isUp && 'bg-emerald-100 text-emerald-700',
+                        isDown && 'bg-rose-100 text-rose-700',
+                        !isUp && !isDown && 'bg-slate-100 text-slate-700'
+                      )}
+                    >
+                      {isUp ? <ArrowUpRight className="h-3.5 w-3.5" /> : isDown ? <ArrowDownRight className="h-3.5 w-3.5" /> : <Minus className="h-3.5 w-3.5" />}
+                      {isUp ? '+' : ''}
+                      {item.delta} ({item.growthRate.toFixed(1)}%)
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
 
       {error && (
