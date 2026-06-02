@@ -364,7 +364,7 @@ export default function OrdersAndSales() {
           const dealers = Array.from(
             new Set(values.map((order) => order.Dealer?.trim()).filter((name): name is string => Boolean(name)))
           ).sort((a, b) => a.localeCompare(b));
-          const extraModels = ['SRV22.1', 'SRV22.2', 'SRV22.3', 'SRV19.1'];
+          const extraModels = ['SRV22.1', 'SRV22.2', 'SRV22.3', 'SRV19.1', 'SRM22.1', 'SRM22.2'];
           const models = Array.from(
             new Set([
               ...values.map((order) => order.Model?.trim()).filter((name): name is string => Boolean(name)),
