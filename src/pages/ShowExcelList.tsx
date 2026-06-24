@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { FileSpreadsheet, RefreshCw, Edit2, Save, X, Search } from 'lucide-react';
+import { FileSpreadsheet, RefreshCw, Search, Eye, EyeOff } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -34,7 +34,7 @@ type ShowRecord = {
   layoutAddress?: string;
   status?: string;
   teamMembers?: string[];
-  rowColor?: string;
+  finished?: boolean;
 };
 
 type TeamMember = {
@@ -96,7 +96,15 @@ const calculateWeekBeforeStartFromToday = (startDate?: string) => {
   return Math.ceil((start.getTime() - today.getTime()) / 86_400_000);
 };
 
-const ROW_COLORS = ['bg-white', 'bg-blue-50', 'bg-green-50', 'bg-yellow-50', 'bg-purple-50', 'bg-pink-50'];
+const isShowFinished = (finishDate?: string) => {
+  if (!finishDate) return false;
+  const finish = parseDate(finishDate);
+  if (!finish) return false;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  finish.setHours(0, 0, 0, 0);
+  return finish.getTime() < today.getTime();
+};
 
 export default function ShowExcelList() {
   const [shows, setShows] = useState<ShowRecord[]>([]);
@@ -104,10 +112,10 @@ export default function ShowExcelList() {
   const [internalSalesOrders, setInternalSalesOrders] = useState<InternalSalesOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [isEditMode, setIsEditMode] = useState(false);
-  const [editingShowId, setEditingShowId] = useState<string | null>(null);
-  const [editData, setEditData] = useState<ShowRecord | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const [hideFinished, setHideFinished] = useState(false);
+  const [editingCell, setEditingCell] = useState<{ showId: string; field: string } | null>(null);
+  const [editValue, setEditValue] = useState('');
   const [isSaving, setIsSaving] = useState(false);
 
   const loadData = async () => {
@@ -158,77 +166,117 @@ export default function ShowExcelList() {
 
   const sortedShows = useMemo(() => {
     return [...shows]
-      .filter((show) =>
-        !searchTerm ||
-        (show.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (show.dealership || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (show.siteLocation?.suburb || '').toLowerCase().includes(searchTerm.toLowerCase())
-      )
+      .filter((show) => {
+        // Search filter
+        if (
+          searchTerm &&
+          !(
+            (show.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+            (show.dealership || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+            (show.siteLocation?.suburb || '').toLowerCase().includes(searchTerm.toLowerCase())
+          )
+        ) {
+          return false;
+        }
+        // Hide finished filter
+        if (hideFinished && isShowFinished(show.finishDate)) {
+          return false;
+        }
+        return true;
+      })
       .sort((a, b) => {
         const aTime = parseDate(a.startDate)?.getTime() ?? Number.MAX_SAFE_INTEGER;
         const bTime = parseDate(b.startDate)?.getTime() ?? Number.MAX_SAFE_INTEGER;
         if (aTime !== bTime) return aTime - bTime;
         return (a.name || '').localeCompare(b.name || '');
       });
-  }, [shows, searchTerm]);
+  }, [shows, searchTerm, hideFinished]);
 
-  const handleEditClick = (show: ShowRecord) => {
-    setEditingShowId(show.id || null);
-    setEditData({ ...show });
+  const handleCellEdit = (showId: string, field: string, currentValue: any) => {
+    setEditingCell({ showId, field });
+    setEditValue(formatValue(currentValue));
   };
 
-  const handleSaveEdit = async () => {
-    if (!editData || !editingShowId) return;
+  const handleSaveCell = async (showId: string, field: string) => {
+    if (!editValue || editValue === formatValue(shows.find((s) => s.id === showId)?.[field as keyof ShowRecord])) {
+      setEditingCell(null);
+      return;
+    }
+
     setIsSaving(true);
     try {
-      await dbSet(`shows/${editingShowId}`, editData);
-      setShows(shows.map((s) => (s.id === editingShowId ? editData : s)));
-      setEditingShowId(null);
-      setEditData(null);
+      const show = shows.find((s) => s.id === showId);
+      if (!show) return;
+
+      let updateData: any = {};
+      if (field === 'siteLocation') {
+        updateData = {
+          ...show,
+          siteLocation: { ...show.siteLocation, ...JSON.parse(editValue) },
+        };
+      } else {
+        updateData = { ...show, [field]: editValue };
+      }
+
+      await dbSet(`shows/${showId}`, updateData);
+      setShows(shows.map((s) => (s.id === showId ? updateData : s)));
+      setEditingCell(null);
     } catch (err) {
-      console.error('Failed to save changes:', err);
+      console.error('Failed to save cell:', err);
       setError('Failed to save changes. Please try again.');
     } finally {
       setIsSaving(false);
     }
   };
 
-  const handleCancel = () => {
-    setEditingShowId(null);
-    setEditData(null);
-  };
-
-  const handleRowColorChange = (showId: string, newColor: string) => {
-    const updated = shows.map((s) =>
-      s.id === showId ? { ...s, rowColor: newColor } : s
-    );
-    setShows(updated);
-    if (editingShowId === showId && editData) {
-      setEditData({ ...editData, rowColor: newColor });
-    }
-  };
-
-  const EditCell = ({
+  const EditableCell = ({
     value,
-    onChange,
+    showId,
+    field,
     type = 'text',
+    isEditing,
   }: {
-    value?: unknown;
-    onChange: (val: string) => void;
+    value: any;
+    showId: string;
+    field: string;
     type?: string;
-  }) => (
-    <input
-      type={type}
-      value={formatValue(value)}
-      onChange={(e) => onChange(e.target.value)}
-      className="w-full px-2 py-1 border border-blue-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-    />
-  );
+    isEditing: boolean;
+  }) => {
+    if (isEditing) {
+      return (
+        <input
+          type={type}
+          value={editValue}
+          onChange={(e) => setEditValue(e.target.value)}
+          onBlur={() => handleSaveCell(showId, field)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              handleSaveCell(showId, field);
+            }
+            if (e.key === 'Escape') {
+              setEditingCell(null);
+            }
+          }}
+          autoFocus
+          className="w-full px-2 py-1 border border-blue-400 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-blue-50"
+        />
+      );
+    }
+
+    return (
+      <div
+        onClick={() => handleCellEdit(showId, field, value)}
+        className="cursor-pointer px-2 py-1 hover:bg-blue-50 rounded transition-colors"
+      >
+        {formatValue(value)}
+      </div>
+    );
+  };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 p-4">
-      {/* Header Section */}
-      <div className="mb-6">
+    <div className="h-screen bg-gradient-to-br from-slate-50 to-slate-100 flex flex-col">
+      {/* Header - Fixed */}
+      <div className="bg-white border-b border-slate-200 shadow-sm flex-shrink-0 p-4">
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 mb-4">
           <div>
             <div className="flex items-center gap-3 mb-2">
@@ -237,29 +285,17 @@ export default function ShowExcelList() {
               </div>
               <h1 className="text-3xl font-bold text-slate-900">All Shows Spreadsheet</h1>
             </div>
-            <p className="text-sm text-slate-600 ml-11">
-              Manage and track all shows with real-time editing and search capabilities
-            </p>
+            <p className="text-sm text-slate-600 ml-11">Click any cell to edit • Press Enter to save</p>
           </div>
           <div className="flex gap-2">
             <Button
-              variant={isEditMode ? 'destructive' : 'default'}
-              onClick={() => {
-                setIsEditMode(!isEditMode);
-                setEditingShowId(null);
-                setEditData(null);
-              }}
+              variant={hideFinished ? 'default' : 'outline'}
+              onClick={() => setHideFinished(!hideFinished)}
               className="gap-2"
+              title="Click to toggle finished shows visibility"
             >
-              {isEditMode ? (
-                <>
-                  <X className="h-4 w-4" /> Exit Edit
-                </>
-              ) : (
-                <>
-                  <Edit2 className="h-4 w-4" /> Edit Mode
-                </>
-              )}
+              {hideFinished ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+              {hideFinished ? 'Show All' : 'Hide Finished'}
             </Button>
             <Button variant="outline" onClick={loadData} disabled={loading} className="gap-2">
               <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
@@ -278,384 +314,327 @@ export default function ShowExcelList() {
             className="pl-10 bg-white border-slate-200"
           />
         </div>
+
+        {/* Error Message */}
+        {error && (
+          <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
+            {error}
+          </div>
+        )}
       </div>
 
-      {/* Error Message */}
-      {error && (
-        <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
-          {error}
-        </div>
-      )}
+      {/* Main Content - Scrollable */}
+      <div className="flex-1 overflow-auto">
+        {loading ? (
+          <div className="flex items-center justify-center h-full text-slate-500">
+            <div className="text-center">
+              <div className="mb-2">Loading shows...</div>
+              <RefreshCw className="h-6 w-6 animate-spin mx-auto" />
+            </div>
+          </div>
+        ) : sortedShows.length === 0 ? (
+          <div className="flex items-center justify-center h-full text-slate-500">
+            {searchTerm ? 'No shows match your search' : 'No shows found'}
+          </div>
+        ) : (
+          <div className="h-full overflow-auto">
+            <table className="w-full border-collapse text-xs sticky">
+              <thead>
+                <tr className="bg-gradient-to-r from-blue-600 to-blue-700 text-white sticky top-0 z-20 h-16">
+                  {/* Block 1: Basic Info */}
+                  <th className="px-4 py-3 text-left font-bold border-r-2 border-blue-500 min-w-[200px]">
+                    Name
+                  </th>
+                  <th className="px-3 py-3 text-left font-semibold border-r-2 border-blue-500 min-w-[120px]">
+                    Internal Order
+                  </th>
+                  <th className="px-3 py-3 text-left font-semibold border-r-2 border-blue-500 min-w-[140px]">
+                    Dealership
+                  </th>
 
-      {/* Loading State */}
-      {loading && (
-        <div className="p-8 text-center text-slate-500">Loading shows...</div>
-      )}
+                  {/* Block 2: Location */}
+                  <th className="px-3 py-3 text-left font-semibold border-r-2 border-blue-500 min-w-[100px]">
+                    Suburb
+                  </th>
+                  <th className="px-3 py-3 text-left font-semibold border-r-2 border-blue-500 min-w-[80px]">
+                    State
+                  </th>
 
-      {/* Main Content */}
-      {!loading && (
-        <Card className="border-0 shadow-lg overflow-hidden">
-          <CardContent className="p-0">
-            {sortedShows.length === 0 ? (
-              <div className="p-8 text-center text-slate-500">
-                {searchTerm ? 'No shows match your search' : 'No shows found'}
-              </div>
-            ) : (
-              <div className="overflow-x-auto max-h-[calc(100vh-280px)]">
-                <table className="w-full border-collapse text-sm">
-                  <thead>
-                    <tr className="bg-gradient-to-r from-blue-600 to-blue-700 text-white sticky top-0 z-20">
-                      {/* Block 1: Basic Info */}
-                      <th className="px-4 py-3 text-left font-bold border-r-2 border-blue-500">Name</th>
-                      <th className="px-3 py-3 text-left font-semibold border-r-2 border-blue-500">
-                        Internal Order
-                      </th>
-                      <th className="px-3 py-3 text-left font-semibold border-r-2 border-blue-500">
-                        Dealership
-                      </th>
+                  {/* Block 3: Dates & Duration */}
+                  <th className="px-3 py-3 text-left font-semibold border-r-2 border-blue-500 min-w-[140px]">
+                    Start Date
+                  </th>
+                  <th className="px-3 py-3 text-left font-semibold border-r-2 border-blue-500 min-w-[140px]">
+                    Finish Date
+                  </th>
+                  <th className="px-3 py-3 text-center font-semibold border-r-2 border-blue-500 min-w-[60px]">
+                    Week
+                  </th>
+                  <th className="px-3 py-3 text-center font-semibold border-r-2 border-blue-500 min-w-[70px]">
+                    Duration
+                  </th>
 
-                      {/* Block 2: Location */}
-                      <th className="px-3 py-3 text-left font-semibold border-r-2 border-blue-500">Suburb</th>
-                      <th className="px-3 py-3 text-left font-semibold border-r-2 border-blue-500">State</th>
+                  {/* Block 4: Team Members */}
+                  {activeTeamMembers.map((member) => (
+                    <th
+                      key={member.memberId || member.memberName}
+                      className="px-2 py-3 text-center font-semibold border-r border-blue-500 min-w-[80px] whitespace-normal break-words"
+                      title={member.memberName}
+                    >
+                      {member.memberName || member.memberId}
+                    </th>
+                  ))}
+                  <th className="px-3 py-3 text-center font-semibold border-r-2 border-blue-500 min-w-[70px]">
+                    Team Count
+                  </th>
 
-                      {/* Block 3: Dates & Duration */}
-                      <th className="px-3 py-3 text-left font-semibold border-r-2 border-blue-500">
-                        Start Date
-                      </th>
-                      <th className="px-3 py-3 text-left font-semibold border-r-2 border-blue-500">
-                        Finish Date
-                      </th>
-                      <th className="px-3 py-3 text-left font-semibold border-r-2 border-blue-500">
-                        Week Before
-                      </th>
-                      <th className="px-3 py-3 text-left font-semibold border-r-2 border-blue-500">
-                        Duration
-                      </th>
+                  {/* Block 5: Sales & Details */}
+                  <th className="px-3 py-3 text-left font-semibold border-r-2 border-blue-500 min-w-[100px]">
+                    2024 Sales
+                  </th>
+                  <th className="px-3 py-3 text-left font-semibold border-r-2 border-blue-500 min-w-[100px]">
+                    2025 Sales
+                  </th>
+                  <th className="px-3 py-3 text-left font-semibold border-r-2 border-blue-500 min-w-[100px]">
+                    2026 Target
+                  </th>
+                  <th className="px-3 py-3 text-left font-semibold border-r-2 border-blue-500 min-w-[200px]">
+                    Address
+                  </th>
+                  <th className="px-3 py-3 text-left font-semibold border-r-2 border-blue-500 min-w-[120px]">
+                    Event Organizer
+                  </th>
+                  <th className="px-3 py-3 text-left font-semibold border-r-2 border-blue-500 min-w-[80px]">
+                    Caravans
+                  </th>
+                  <th className="px-3 py-3 text-left font-semibold min-w-[100px]">Stand Size</th>
+                </tr>
+              </thead>
+              <tbody>
+                {sortedShows.map((show, index) => {
+                  const assignedMemberIds = new Set(show.teamMembers || []);
+                  const membershipExcludingManagers = (show.teamMembers || []).filter((memberId) => {
+                    const member = teamMemberById[memberId];
+                    return member?.role !== 'Show Manager';
+                  }).length;
 
-                      {/* Block 4: Team & Sales */}
-                      {activeTeamMembers.map((member) => (
-                        <th
-                          key={member.memberId || member.memberName}
-                          className="px-2 py-3 text-center font-semibold border-r border-blue-500 min-w-12 text-xs"
-                          title={member.memberName}
-                        >
-                          {(member.memberName || member.memberId || '').substring(0, 3)}
-                        </th>
-                      ))}
-                      <th className="px-3 py-3 text-center font-semibold border-r-2 border-blue-500">
-                        Team Count
-                      </th>
+                  const isFinished = isShowFinished(show.finishDate);
 
-                      {/* Block 5: Sales & Details */}
-                      <th className="px-3 py-3 text-left font-semibold border-r-2 border-blue-500">
-                        2024 Sales
-                      </th>
-                      <th className="px-3 py-3 text-left font-semibold border-r-2 border-blue-500">
-                        2025 Sales
-                      </th>
-                      <th className="px-3 py-3 text-left font-semibold border-r-2 border-blue-500">
-                        2026 Target
-                      </th>
-                      <th className="px-3 py-3 text-left font-semibold border-r-2 border-blue-500">
-                        Address
-                      </th>
-                      <th className="px-3 py-3 text-left font-semibold border-r-2 border-blue-500">
-                        Event Organizer
-                      </th>
-                      <th className="px-3 py-3 text-left font-semibold border-r-2 border-blue-500">
-                        Caravans
-                      </th>
-                      <th className="px-3 py-3 text-left font-semibold border-r-2 border-blue-500">
-                        Stand Size
-                      </th>
-                      {isEditMode && (
-                        <>
-                          <th className="px-3 py-3 text-left font-semibold border-r-2 border-blue-500">
-                            Row Color
-                          </th>
-                          <th className="px-3 py-3 text-center font-semibold">Actions</th>
-                        </>
-                      )}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {sortedShows.map((show, index) => {
-                      const assignedMemberIds = new Set(show.teamMembers || []);
-                      const membershipExcludingManagers = (show.teamMembers || []).filter((memberId) => {
-                        const member = teamMemberById[memberId];
-                        return member?.role !== 'Show Manager';
-                      }).length;
-
-                      const isEditing = editingShowId === show.id;
-                      const rowData = isEditing ? editData : show;
-                      const rowColorClass = rowData?.rowColor || 'bg-white';
-
-                      return (
-                        <tr
-                          key={show.id || `${show.name}-${index}`}
-                          className={`${rowColorClass} hover:opacity-90 border-b border-slate-200 transition-colors`}
-                        >
-                          {/* Block 1: Basic Info */}
-                          <td className="px-4 py-3 font-bold text-blue-900 border-r-2 border-slate-200">
-                            {isEditing ? (
-                              <EditCell
-                                value={rowData?.name}
-                                onChange={(val) => setEditData({ ...rowData, name: val } as ShowRecord)}
-                              />
-                            ) : (
-                              formatValue(show.name)
-                            )}
-                          </td>
-                          <td className="px-3 py-3 border-r-2 border-slate-200">
-                            {isEditing ? (
-                              <EditCell
-                                value={show.id ? internalOrderByShowId[show.id] : ''}
-                                onChange={() => {}}
-                              />
-                            ) : (
-                              formatValue(show.id ? internalOrderByShowId[show.id] : '')
-                            )}
-                          </td>
-                          <td className="px-3 py-3 border-r-2 border-slate-200">
-                            {isEditing ? (
-                              <EditCell
-                                value={rowData?.dealership}
-                                onChange={(val) => setEditData({ ...rowData, dealership: val } as ShowRecord)}
-                              />
-                            ) : (
-                              formatValue(show.dealership)
-                            )}
-                          </td>
-
-                          {/* Block 2: Location */}
-                          <td className="px-3 py-3 border-r-2 border-slate-200">
-                            {isEditing ? (
-                              <EditCell
-                                value={rowData?.siteLocation?.suburb}
-                                onChange={(val) =>
-                                  setEditData({
-                                    ...rowData,
-                                    siteLocation: { ...rowData?.siteLocation, suburb: val },
-                                  } as ShowRecord)
-                                }
-                              />
-                            ) : (
-                              formatValue(show.siteLocation?.suburb)
-                            )}
-                          </td>
-                          <td className="px-3 py-3 border-r-2 border-slate-200">
-                            {isEditing ? (
-                              <EditCell
-                                value={rowData?.siteLocation?.state}
-                                onChange={(val) =>
-                                  setEditData({
-                                    ...rowData,
-                                    siteLocation: { ...rowData?.siteLocation, state: val },
-                                  } as ShowRecord)
-                                }
-                              />
-                            ) : (
-                              formatValue(show.siteLocation?.state)
-                            )}
-                          </td>
-
-                          {/* Block 3: Dates & Duration */}
-                          <td className="px-3 py-3 border-r-2 border-slate-200">
-                            {isEditing ? (
-                              <EditCell
-                                value={rowData?.startDate}
-                                onChange={(val) => setEditData({ ...rowData, startDate: val } as ShowRecord)}
-                                type="date"
-                              />
-                            ) : (
-                              formatValue(show.startDate)
-                            )}
-                          </td>
-                          <td className="px-3 py-3 border-r-2 border-slate-200">
-                            {isEditing ? (
-                              <EditCell
-                                value={rowData?.finishDate}
-                                onChange={(val) => setEditData({ ...rowData, finishDate: val } as ShowRecord)}
-                                type="date"
-                              />
-                            ) : (
-                              formatValue(show.finishDate)
-                            )}
-                          </td>
-                          <td className="px-3 py-3 border-r-2 border-slate-200 text-center">
-                            {formatValue(calculateWeekBeforeStartFromToday(show.startDate))}
-                          </td>
-                          <td className="px-3 py-3 border-r-2 border-slate-200 text-center font-medium">
-                            {formatValue(calculateShowDuration(show))}
-                          </td>
-
-                          {/* Block 4: Team & Sales */}
-                          {activeTeamMembers.map((member) => (
-                            <td
-                              key={member.memberId || member.memberName}
-                              className="px-2 py-3 text-center border-r border-slate-200 text-sm"
-                            >
-                              {member.memberId && assignedMemberIds.has(member.memberId) ? (
-                                <span className="inline-block px-2 py-1 bg-green-100 text-green-800 rounded font-semibold text-xs">
-                                  ✓
-                                </span>
-                              ) : (
-                                ''
-                              )}
-                            </td>
-                          ))}
-                          <td className="px-3 py-3 border-r-2 border-slate-200 text-center font-bold text-blue-900">
-                            {membershipExcludingManagers}
-                          </td>
-
-                          {/* Block 5: Sales & Details */}
-                          <td className="px-3 py-3 border-r-2 border-slate-200">
-                            {isEditing ? (
-                              <EditCell
-                                value={rowData?.sales2024}
-                                onChange={(val) => setEditData({ ...rowData, sales2024: val } as ShowRecord)}
-                                type="number"
-                              />
-                            ) : (
-                              formatValue(show.sales2024)
-                            )}
-                          </td>
-                          <td className="px-3 py-3 border-r-2 border-slate-200">
-                            {isEditing ? (
-                              <EditCell
-                                value={rowData?.sales2025}
-                                onChange={(val) => setEditData({ ...rowData, sales2025: val } as ShowRecord)}
-                                type="number"
-                              />
-                            ) : (
-                              formatValue(show.sales2025)
-                            )}
-                          </td>
-                          <td className="px-3 py-3 border-r-2 border-slate-200">
-                            {isEditing ? (
-                              <EditCell
-                                value={rowData?.target2026}
-                                onChange={(val) => setEditData({ ...rowData, target2026: val } as ShowRecord)}
-                                type="number"
-                              />
-                            ) : (
-                              formatValue(show.target2026)
-                            )}
-                          </td>
-                          <td className="px-3 py-3 border-r-2 border-slate-200 max-w-xs">
-                            {isEditing ? (
-                              <EditCell
-                                value={formatAddress(rowData?.siteLocation)}
-                                onChange={(val) => {
-                                  const parts = val.split(',').map((p) => p.trim());
-                                  setEditData({
-                                    ...rowData,
-                                    siteLocation: {
-                                      ...rowData?.siteLocation,
-                                      number: parts[0],
-                                      street: parts[1],
-                                      suburb: parts[2],
-                                      state: parts[3],
-                                      postcode: parts[4],
-                                      country: parts[5],
-                                    },
-                                  } as ShowRecord);
-                                }}
-                              />
-                            ) : (
-                              <div className="text-xs whitespace-normal">{formatAddress(show.siteLocation)}</div>
-                            )}
-                          </td>
-                          <td className="px-3 py-3 border-r-2 border-slate-200">
-                            {isEditing ? (
-                              <EditCell
-                                value={rowData?.eventOrganiser}
-                                onChange={(val) => setEditData({ ...rowData, eventOrganiser: val } as ShowRecord)}
-                              />
-                            ) : (
-                              formatValue(show.eventOrganiser)
-                            )}
-                          </td>
-                          <td className="px-3 py-3 border-r-2 border-slate-200">
-                            {isEditing ? (
-                              <EditCell
-                                value={rowData?.caravansOnDisplay}
-                                onChange={(val) => setEditData({ ...rowData, caravansOnDisplay: val } as ShowRecord)}
-                                type="number"
-                              />
-                            ) : (
-                              formatValue(show.caravansOnDisplay)
-                            )}
-                          </td>
-                          <td className="px-3 py-3 border-r-2 border-slate-200">
-                            {isEditing ? (
-                              <EditCell
-                                value={rowData?.standSize}
-                                onChange={(val) => setEditData({ ...rowData, standSize: val } as ShowRecord)}
-                              />
-                            ) : (
-                              formatValue(show.standSize)
-                            )}
-                          </td>
-
-                          {/* Edit Mode Controls */}
-                          {isEditMode && (
-                            <>
-                              <td className="px-3 py-3 border-r-2 border-slate-200">
-                                <select
-                                  value={rowData?.rowColor || 'bg-white'}
-                                  onChange={(e) => handleRowColorChange(show.id || '', e.target.value)}
-                                  className="w-full px-2 py-1 border border-slate-300 rounded text-xs"
-                                >
-                                  {ROW_COLORS.map((color) => (
-                                    <option key={color} value={color}>
-                                      {color.replace('bg-', '').replace('-50', '').toUpperCase() || 'White'}
-                                    </option>
-                                  ))}
-                                </select>
-                              </td>
-                              <td className="px-3 py-3 whitespace-nowrap">
-                                {isEditing ? (
-                                  <div className="flex gap-2 justify-center">
-                                    <Button
-                                      size="sm"
-                                      onClick={handleSaveEdit}
-                                      disabled={isSaving}
-                                      className="bg-green-600 hover:bg-green-700"
-                                    >
-                                      <Save className="h-3 w-3" />
-                                    </Button>
-                                    <Button
-                                      size="sm"
-                                      variant="outline"
-                                      onClick={handleCancel}
-                                      disabled={isSaving}
-                                    >
-                                      <X className="h-3 w-3" />
-                                    </Button>
-                                  </div>
-                                ) : (
-                                  <Button
-                                    size="sm"
-                                    onClick={() => handleEditClick(show)}
-                                    className="bg-blue-600 hover:bg-blue-700"
-                                  >
-                                    <Edit2 className="h-3 w-3" />
-                                  </Button>
-                                )}
-                              </td>
-                            </>
+                  return (
+                    <tr
+                      key={show.id || `${show.name}-${index}`}
+                      className={`border-b border-slate-200 hover:bg-slate-50 transition-colors ${
+                        isFinished ? 'bg-slate-100' : 'bg-white'
+                      }`}
+                    >
+                      {/* Name with Finished Tag */}
+                      <td className="px-4 py-3 font-bold text-blue-900 border-r-2 border-slate-200">
+                        <div className="flex flex-col gap-1">
+                          <EditableCell
+                            value={show.name}
+                            showId={show.id || ''}
+                            field="name"
+                            isEditing={editingCell?.showId === show.id && editingCell?.field === 'name'}
+                          />
+                          {isFinished && (
+                            <span className="inline-block px-2 py-1 bg-green-100 text-green-800 rounded-full text-xs font-semibold w-fit">
+                              finished
+                            </span>
                           )}
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      )}
+                        </div>
+                      </td>
+
+                      {/* Internal Order */}
+                      <td className="px-3 py-3 border-r-2 border-slate-200">
+                        <div className="cursor-default text-slate-600">
+                          {show.id ? internalOrderByShowId[show.id] : ''}
+                        </div>
+                      </td>
+
+                      {/* Dealership */}
+                      <td className="px-3 py-3 border-r-2 border-slate-200">
+                        <EditableCell
+                          value={show.dealership}
+                          showId={show.id || ''}
+                          field="dealership"
+                          isEditing={editingCell?.showId === show.id && editingCell?.field === 'dealership'}
+                        />
+                      </td>
+
+                      {/* Suburb */}
+                      <td className="px-3 py-3 border-r-2 border-slate-200">
+                        <EditableCell
+                          value={show.siteLocation?.suburb}
+                          showId={show.id || ''}
+                          field="suburb"
+                          isEditing={editingCell?.showId === show.id && editingCell?.field === 'suburb'}
+                        />
+                      </td>
+
+                      {/* State */}
+                      <td className="px-3 py-3 border-r-2 border-slate-200">
+                        <EditableCell
+                          value={show.siteLocation?.state}
+                          showId={show.id || ''}
+                          field="state"
+                          isEditing={editingCell?.showId === show.id && editingCell?.field === 'state'}
+                        />
+                      </td>
+
+                      {/* Start Date */}
+                      <td className="px-3 py-3 border-r-2 border-slate-200">
+                        <EditableCell
+                          value={show.startDate}
+                          showId={show.id || ''}
+                          field="startDate"
+                          type="date"
+                          isEditing={editingCell?.showId === show.id && editingCell?.field === 'startDate'}
+                        />
+                      </td>
+
+                      {/* Finish Date */}
+                      <td className="px-3 py-3 border-r-2 border-slate-200">
+                        <div
+                          onClick={() => handleCellEdit(show.id || '', 'finishDate', show.finishDate)}
+                          className={`cursor-pointer px-2 py-1 hover:bg-blue-50 rounded transition-colors ${
+                            isFinished ? 'bg-green-100' : ''
+                          }`}
+                        >
+                          {editingCell?.showId === show.id && editingCell?.field === 'finishDate' ? (
+                            <input
+                              type="date"
+                              value={editValue}
+                              onChange={(e) => setEditValue(e.target.value)}
+                              onBlur={() => handleSaveCell(show.id || '', 'finishDate')}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  handleSaveCell(show.id || '', 'finishDate');
+                                }
+                                if (e.key === 'Escape') {
+                                  setEditingCell(null);
+                                }
+                              }}
+                              autoFocus
+                              className="w-full px-2 py-1 border border-blue-400 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-blue-50"
+                            />
+                          ) : (
+                            formatValue(show.finishDate)
+                          )}
+                        </div>
+                      </td>
+
+                      {/* Week Before */}
+                      <td className="px-3 py-3 border-r-2 border-slate-200 text-center text-sm">
+                        {formatValue(calculateWeekBeforeStartFromToday(show.startDate))}
+                      </td>
+
+                      {/* Duration */}
+                      <td className="px-3 py-3 border-r-2 border-slate-200 text-center font-medium">
+                        {formatValue(calculateShowDuration(show))}
+                      </td>
+
+                      {/* Team Members */}
+                      {activeTeamMembers.map((member) => (
+                        <td
+                          key={member.memberId || member.memberName}
+                          className="px-2 py-3 text-center border-r border-slate-200"
+                        >
+                          {member.memberId && assignedMemberIds.has(member.memberId) ? (
+                            <span className="inline-block px-2 py-1 bg-green-100 text-green-800 rounded font-semibold text-xs">
+                              ✓
+                            </span>
+                          ) : (
+                            ''
+                          )}
+                        </td>
+                      ))}
+
+                      {/* Team Count */}
+                      <td className="px-3 py-3 border-r-2 border-slate-200 text-center font-bold text-blue-900">
+                        {membershipExcludingManagers}
+                      </td>
+
+                      {/* Sales 2024 */}
+                      <td className="px-3 py-3 border-r-2 border-slate-200">
+                        <EditableCell
+                          value={show.sales2024}
+                          showId={show.id || ''}
+                          field="sales2024"
+                          type="number"
+                          isEditing={editingCell?.showId === show.id && editingCell?.field === 'sales2024'}
+                        />
+                      </td>
+
+                      {/* Sales 2025 */}
+                      <td className="px-3 py-3 border-r-2 border-slate-200">
+                        <EditableCell
+                          value={show.sales2025}
+                          showId={show.id || ''}
+                          field="sales2025"
+                          type="number"
+                          isEditing={editingCell?.showId === show.id && editingCell?.field === 'sales2025'}
+                        />
+                      </td>
+
+                      {/* Target 2026 */}
+                      <td className="px-3 py-3 border-r-2 border-slate-200">
+                        <EditableCell
+                          value={show.target2026}
+                          showId={show.id || ''}
+                          field="target2026"
+                          type="number"
+                          isEditing={editingCell?.showId === show.id && editingCell?.field === 'target2026'}
+                        />
+                      </td>
+
+                      {/* Address */}
+                      <td className="px-3 py-3 border-r-2 border-slate-200 text-sm whitespace-normal break-words">
+                        <EditableCell
+                          value={formatAddress(show.siteLocation)}
+                          showId={show.id || ''}
+                          field="address"
+                          isEditing={editingCell?.showId === show.id && editingCell?.field === 'address'}
+                        />
+                      </td>
+
+                      {/* Event Organizer */}
+                      <td className="px-3 py-3 border-r-2 border-slate-200">
+                        <EditableCell
+                          value={show.eventOrganiser}
+                          showId={show.id || ''}
+                          field="eventOrganiser"
+                          isEditing={editingCell?.showId === show.id && editingCell?.field === 'eventOrganiser'}
+                        />
+                      </td>
+
+                      {/* Caravans */}
+                      <td className="px-3 py-3 border-r-2 border-slate-200">
+                        <EditableCell
+                          value={show.caravansOnDisplay}
+                          showId={show.id || ''}
+                          field="caravansOnDisplay"
+                          type="number"
+                          isEditing={editingCell?.showId === show.id && editingCell?.field === 'caravansOnDisplay'}
+                        />
+                      </td>
+
+                      {/* Stand Size */}
+                      <td className="px-3 py-3">
+                        <EditableCell
+                          value={show.standSize}
+                          showId={show.id || ''}
+                          field="standSize"
+                          isEditing={editingCell?.showId === show.id && editingCell?.field === 'standSize'}
+                        />
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
