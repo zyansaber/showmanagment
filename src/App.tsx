@@ -38,6 +38,7 @@ import AdminSettings from './pages/AdminSettings';
 import BudgetSetting from './pages/BudgetSetting';
 import ShowTeamAssignments from './pages/ShowTeamAssignments';
 import EmailDigestCenter from './pages/EmailDigestCenter';
+import ShowExcelList from './pages/ShowExcelList';
 import ProtectedRoute from './components/ProtectedRoute';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { Navigate } from 'react-router-dom';
@@ -198,6 +199,7 @@ function AppLayout() {
   const { user, loading } = useAuth();
   const location = useLocation();
   const isLoginPage = location.pathname === '/login';
+  const isStandaloneShowExcelPage = location.pathname === '/shows-excel';
 
   if (loading) {
     return <div className="min-h-screen flex items-center justify-center text-slate-500">Loading…</div>;
@@ -211,6 +213,21 @@ function AppLayout() {
     return (
       <Routes>
         <Route path="/login" element={<Login />} />
+      </Routes>
+    );
+  }
+
+  if (isStandaloneShowExcelPage) {
+    return (
+      <Routes>
+        <Route
+          path="/shows-excel"
+          element={
+            <ProtectedRoute>
+              <ShowExcelList />
+            </ProtectedRoute>
+          }
+        />
       </Routes>
     );
   }
