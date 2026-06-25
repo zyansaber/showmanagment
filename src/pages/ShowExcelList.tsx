@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { FileSpreadsheet, RefreshCw, Search, Eye, EyeOff, Lock, Unlock } from 'lucide-react';
+import { FileSpreadsheet, RefreshCw, Search, Eye, EyeOff } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -45,11 +45,8 @@ type TeamMember = {
 };
 
 type InternalSalesOrder = {
-  id?: string;
   showId?: string;
   internalSalesOrderNumber?: string;
-  internalSalesOrderNumberDealer?: string;
-  dealership?: string;
 };
 
 const normaliseList = <T,>(data: unknown): T[] => {
@@ -60,23 +57,7 @@ const normaliseList = <T,>(data: unknown): T[] => {
 
 const parseDate = (value?: string) => {
   if (!value) return null;
-  const trimmed = value.trim();
-  const isoMatch = trimmed.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
-  const displayMatch = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-
-  if (isoMatch) {
-    const [, year, month, day] = isoMatch;
-    const date = new Date(Number(year), Number(month) - 1, Number(day));
-    return Number.isNaN(date.getTime()) ? null : date;
-  }
-
-  if (displayMatch) {
-    const [, day, month, year] = displayMatch;
-    const date = new Date(Number(year), Number(month) - 1, Number(day));
-    return Number.isNaN(date.getTime()) ? null : date;
-  }
-
-  const date = new Date(trimmed);
+  const date = new Date(value);
   return Number.isNaN(date.getTime()) ? null : date;
 };
 
@@ -84,37 +65,6 @@ const formatValue = (value: unknown) => {
   if (value === undefined || value === null || value === '') return '';
   return String(value);
 };
-
-const isEmptyValue = (value: unknown) => formatValue(value).trim().length === 0;
-
-const formatDisplayDate = (value?: string) => {
-  const date = parseDate(value);
-  if (!date) return formatValue(value);
-  const day = String(date.getDate()).padStart(2, '0');
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const year = date.getFullYear();
-  return `${day}/${month}/${year}`;
-};
-
-const convertDisplayDateToStorage = (value: string) => {
-  const trimmed = value.trim();
-  const match = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-  if (!match) return trimmed;
-
-  const [, dayPart, monthPart, yearPart] = match;
-  const day = Number(dayPart);
-  const month = Number(monthPart);
-  const year = Number(yearPart);
-  const date = new Date(year, month - 1, day);
-
-  if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) {
-    return trimmed;
-  }
-
-  return `${yearPart}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-};
-
-const EDIT_MODE_PASSWORD = 'regshow';
 
 const formatAddress = (site?: SiteLocation) => {
   if (!site) return '';
@@ -167,7 +117,6 @@ export default function ShowExcelList() {
   const [editingCell, setEditingCell] = useState<{ showId: string; field: string } | null>(null);
   const [editValue, setEditValue] = useState('');
   const [isSaving, setIsSaving] = useState(false);
-  const [editModeEnabled, setEditModeEnabled] = useState(false);
 
   const loadData = async () => {
     setLoading(true);
@@ -208,13 +157,6 @@ export default function ShowExcelList() {
     }, {} as Record<string, string>);
   }, [internalSalesOrders]);
 
-  const internalOrderRecordByShowId = useMemo(() => {
-    return internalSalesOrders.reduce((acc, order) => {
-      if (order.showId) acc[order.showId] = order;
-      return acc;
-    }, {} as Record<string, InternalSalesOrder>);
-  }, [internalSalesOrders]);
-
   const teamMemberById = useMemo(() => {
     return teamMembers.reduce((acc, member) => {
       if (member.memberId) acc[member.memberId] = member;
@@ -250,93 +192,30 @@ export default function ShowExcelList() {
       });
   }, [shows, searchTerm, hideFinished]);
 
-  const handleCellEdit = (showId: string, field: string, currentValue: unknown) => {
-    if (!editModeEnabled || !showId) return;
+  const handleCellEdit = (showId: string, field: string, currentValue: any) => {
     setEditingCell({ showId, field });
-    setEditValue(
-      field === 'startDate' || field === 'finishDate'
-        ? formatDisplayDate(formatValue(currentValue))
-        : formatValue(currentValue)
-    );
-  };
-
-  const handleToggleEditMode = () => {
-    if (editModeEnabled) {
-      setEditModeEnabled(false);
-      setEditingCell(null);
-      return;
-    }
-
-    const password = window.prompt('Enter password to unlock spreadsheet editing');
-    if (password === EDIT_MODE_PASSWORD) {
-      setEditModeEnabled(true);
-      setError(null);
-    } else if (password !== null) {
-      setError('Incorrect password. Spreadsheet editing remains locked.');
-    }
-  };
-
-  const persistInternalOrders = async (orders: InternalSalesOrder[]) => {
-    const payload = orders.reduce((acc, order) => {
-      if (!order.id) return acc;
-      acc[order.id] = order;
-      return acc;
-    }, {} as Record<string, InternalSalesOrder>);
-    await dbSet('finance/internalSalesOrders', payload as unknown as Record<string, unknown>);
+    setEditValue(formatValue(currentValue));
   };
 
   const handleSaveCell = async (showId: string, field: string) => {
-    const show = shows.find((s) => s.id === showId);
-    const currentValue =
-      field === 'internalOrder'
-        ? internalOrderByShowId[showId]
-        : field === 'suburb' || field === 'state'
-          ? show?.siteLocation?.[field]
-          : field === 'address'
-            ? formatAddress(show?.siteLocation)
-            : show?.[field as keyof ShowRecord];
-
-    const nextEditValue = field === 'startDate' || field === 'finishDate' ? convertDisplayDateToStorage(editValue) : editValue;
-
-    if (nextEditValue === formatValue(currentValue)) {
+    if (!editValue || editValue === formatValue(shows.find((s) => s.id === showId)?.[field as keyof ShowRecord])) {
       setEditingCell(null);
       return;
     }
 
     setIsSaving(true);
     try {
-      if (field === 'internalOrder') {
-        const existingOrder = internalOrderRecordByShowId[showId];
-        const order: InternalSalesOrder = existingOrder
-          ? { ...existingOrder, internalSalesOrderNumber: nextEditValue }
-          : {
-              id: `order-${showId}`,
-              showId,
-              internalSalesOrderNumber: nextEditValue,
-              internalSalesOrderNumberDealer: '',
-              dealership: show?.dealership || '',
-            };
-        const nextOrders = existingOrder
-          ? internalSalesOrders.map((item) => (item.showId === showId ? order : item))
-          : [...internalSalesOrders, order];
-        await persistInternalOrders(nextOrders);
-        setInternalSalesOrders(nextOrders);
-        setEditingCell(null);
-        return;
-      }
-
+      const show = shows.find((s) => s.id === showId);
       if (!show) return;
 
-      let updateData: ShowRecord;
-      if (field === 'suburb' || field === 'state') {
+      let updateData: any = {};
+      if (field === 'siteLocation') {
         updateData = {
           ...show,
-          siteLocation: { ...show.siteLocation, [field]: nextEditValue },
+          siteLocation: { ...show.siteLocation, ...JSON.parse(editValue) },
         };
-      } else if (field === 'address') {
-        updateData = { ...show, layoutAddress: nextEditValue };
       } else {
-        updateData = { ...show, [field]: nextEditValue };
+        updateData = { ...show, [field]: editValue };
       }
 
       await dbSet(`shows/${showId}`, updateData);
@@ -350,49 +229,23 @@ export default function ShowExcelList() {
     }
   };
 
-  const handleToggleTeamMember = async (show: ShowRecord, memberId?: string) => {
-    if (!editModeEnabled || !show.id || !memberId || isSaving) return;
-
-    setIsSaving(true);
-    try {
-      const currentMembers = show.teamMembers || [];
-      const nextMembers = currentMembers.includes(memberId)
-        ? currentMembers.filter((id) => id !== memberId)
-        : [...currentMembers, memberId];
-      const updateData = { ...show, teamMembers: nextMembers };
-
-      await dbSet(`shows/${show.id}`, updateData);
-      setShows(shows.map((item) => (item.id === show.id ? updateData : item)));
-    } catch (err) {
-      console.error('Failed to save team member assignment:', err);
-      setError('Failed to save team member assignment. Please try again.');
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
   const EditableCell = ({
     value,
     showId,
     field,
+    type = 'text',
     isEditing,
-    displayValue,
   }: {
-    value: unknown;
+    value: any;
     showId: string;
     field: string;
+    type?: string;
     isEditing: boolean;
-    displayValue?: string;
   }) => {
-    const isBlank = isEmptyValue(value);
-    const shouldShowEditableStyle = editModeEnabled;
-
     if (isEditing) {
       return (
         <input
-          type="text"
-          inputMode={field === 'startDate' || field === 'finishDate' ? 'numeric' : undefined}
-          placeholder={field === 'startDate' || field === 'finishDate' ? 'dd/mm/yyyy' : undefined}
+          type={type}
           value={editValue}
           onChange={(e) => setEditValue(e.target.value)}
           onBlur={() => handleSaveCell(showId, field)}
@@ -413,11 +266,9 @@ export default function ShowExcelList() {
     return (
       <div
         onClick={() => handleCellEdit(showId, field, value)}
-        className={`cursor-pointer px-2 py-1 hover:bg-blue-50 rounded transition-colors ${
-          shouldShowEditableStyle ? 'min-h-7 border border-dashed border-blue-300 bg-blue-50/70 text-slate-800' : ''
-        }`}
+        className="cursor-pointer px-2 py-1 hover:bg-blue-50 rounded transition-colors"
       >
-        {isBlank ? (editModeEnabled ? 'Click to edit' : '') : displayValue || formatValue(value)}
+        {formatValue(value)}
       </div>
     );
   };
@@ -434,18 +285,9 @@ export default function ShowExcelList() {
               </div>
               <h1 className="text-3xl font-bold text-slate-900">All Shows Spreadsheet</h1>
             </div>
-            <p className="text-sm text-slate-600 ml-11">Unlock editing to change cells • Use dd/mm/yyyy for dates • Press Enter to save</p>
+            <p className="text-sm text-slate-600 ml-11">Click any cell to edit • Press Enter to save</p>
           </div>
           <div className="flex gap-2">
-            <Button
-              variant={editModeEnabled ? 'default' : 'outline'}
-              onClick={handleToggleEditMode}
-              className="gap-2"
-              title="Password required to unlock all spreadsheet editing"
-            >
-              {editModeEnabled ? <Unlock className="h-4 w-4" /> : <Lock className="h-4 w-4" />}
-              {editModeEnabled ? 'Editing Unlocked' : 'Unlock Editing'}
-            </Button>
             <Button
               variant={hideFinished ? 'default' : 'outline'}
               onClick={() => setHideFinished(!hideFinished)}
@@ -500,13 +342,13 @@ export default function ShowExcelList() {
               <thead>
                 <tr className="bg-gradient-to-r from-blue-600 to-blue-700 text-white sticky top-0 z-20 h-16">
                   {/* Block 1: Basic Info */}
-                  <th className="px-4 py-3 text-left font-bold border-r-2 border-indigo-500 min-w-[200px] bg-indigo-700">
+                  <th className="px-4 py-3 text-left font-bold border-r-2 border-blue-500 min-w-[200px]">
                     Name
                   </th>
-                  <th className="px-2 py-3 text-left font-semibold border-r-2 border-indigo-500 min-w-[82px] bg-indigo-700">
+                  <th className="px-3 py-3 text-left font-semibold border-r-2 border-blue-500 min-w-[120px]">
                     Internal Order
                   </th>
-                  <th className="px-3 py-3 text-left font-semibold border-r-2 border-indigo-500 min-w-[140px] bg-indigo-700">
+                  <th className="px-3 py-3 text-left font-semibold border-r-2 border-blue-500 min-w-[140px]">
                     Dealership
                   </th>
 
@@ -519,16 +361,16 @@ export default function ShowExcelList() {
                   </th>
 
                   {/* Block 3: Dates & Duration */}
-                  <th className="px-3 py-3 text-left font-semibold border-r-2 border-emerald-500 min-w-[140px] bg-emerald-700">
+                  <th className="px-3 py-3 text-left font-semibold border-r-2 border-blue-500 min-w-[140px]">
                     Start Date
                   </th>
-                  <th className="px-3 py-3 text-left font-semibold border-r-2 border-emerald-500 min-w-[140px] bg-emerald-700">
+                  <th className="px-3 py-3 text-left font-semibold border-r-2 border-blue-500 min-w-[140px]">
                     Finish Date
                   </th>
-                  <th className="px-3 py-3 text-center font-semibold border-r-2 border-emerald-500 min-w-[60px] bg-emerald-700">
+                  <th className="px-3 py-3 text-center font-semibold border-r-2 border-blue-500 min-w-[60px]">
                     Week
                   </th>
-                  <th className="px-3 py-3 text-center font-semibold border-r-2 border-emerald-500 min-w-[70px] bg-emerald-700">
+                  <th className="px-3 py-3 text-center font-semibold border-r-2 border-blue-500 min-w-[70px]">
                     Duration
                   </th>
 
@@ -536,7 +378,7 @@ export default function ShowExcelList() {
                   {activeTeamMembers.map((member) => (
                     <th
                       key={member.memberId || member.memberName}
-                      className="px-2 py-3 text-center font-semibold border-r border-purple-500 min-w-[80px] whitespace-normal break-words bg-purple-700"
+                      className="px-2 py-3 text-center font-semibold border-r border-blue-500 min-w-[80px] whitespace-normal break-words"
                       title={member.memberName}
                     >
                       {member.memberName || member.memberId}
@@ -603,13 +445,10 @@ export default function ShowExcelList() {
                       </td>
 
                       {/* Internal Order */}
-                      <td className="px-2 py-3 border-r-2 border-slate-200">
-                        <EditableCell
-                          value={show.id ? internalOrderByShowId[show.id] : ''}
-                          showId={show.id || ''}
-                          field="internalOrder"
-                          isEditing={editingCell?.showId === show.id && editingCell?.field === 'internalOrder'}
-                        />
+                      <td className="px-3 py-3 border-r-2 border-slate-200">
+                        <div className="cursor-default text-slate-600">
+                          {show.id ? internalOrderByShowId[show.id] : ''}
+                        </div>
                       </td>
 
                       {/* Dealership */}
@@ -646,22 +485,42 @@ export default function ShowExcelList() {
                       <td className="px-3 py-3 border-r-2 border-slate-200">
                         <EditableCell
                           value={show.startDate}
-                          displayValue={formatDisplayDate(show.startDate)}
                           showId={show.id || ''}
                           field="startDate"
+                          type="date"
                           isEditing={editingCell?.showId === show.id && editingCell?.field === 'startDate'}
                         />
                       </td>
 
                       {/* Finish Date */}
-                      <td className={`px-3 py-3 border-r-2 border-slate-200 ${isFinished ? 'bg-green-50' : ''}`}>
-                        <EditableCell
-                          value={show.finishDate}
-                          displayValue={formatDisplayDate(show.finishDate)}
-                          showId={show.id || ''}
-                          field="finishDate"
-                          isEditing={editingCell?.showId === show.id && editingCell?.field === 'finishDate'}
-                        />
+                      <td className="px-3 py-3 border-r-2 border-slate-200">
+                        <div
+                          onClick={() => handleCellEdit(show.id || '', 'finishDate', show.finishDate)}
+                          className={`cursor-pointer px-2 py-1 hover:bg-blue-50 rounded transition-colors ${
+                            isFinished ? 'bg-green-100' : ''
+                          }`}
+                        >
+                          {editingCell?.showId === show.id && editingCell?.field === 'finishDate' ? (
+                            <input
+                              type="date"
+                              value={editValue}
+                              onChange={(e) => setEditValue(e.target.value)}
+                              onBlur={() => handleSaveCell(show.id || '', 'finishDate')}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  handleSaveCell(show.id || '', 'finishDate');
+                                }
+                                if (e.key === 'Escape') {
+                                  setEditingCell(null);
+                                }
+                              }}
+                              autoFocus
+                              className="w-full px-2 py-1 border border-blue-400 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-blue-50"
+                            />
+                          ) : (
+                            formatValue(show.finishDate)
+                          )}
+                        </div>
                       </td>
 
                       {/* Week Before */}
@@ -675,32 +534,20 @@ export default function ShowExcelList() {
                       </td>
 
                       {/* Team Members */}
-                      {activeTeamMembers.map((member) => {
-                        const checked = Boolean(member.memberId && assignedMemberIds.has(member.memberId));
-
-                        return (
-                          <td
-                            key={member.memberId || member.memberName}
-                            className="px-2 py-3 text-center border-r border-slate-200"
-                          >
-                            <button
-                              type="button"
-                              onClick={() => handleToggleTeamMember(show, member.memberId)}
-                              disabled={!editModeEnabled || isSaving}
-                              className={`inline-flex h-7 w-7 items-center justify-center rounded border text-xs font-semibold transition-colors ${
-                                checked
-                                  ? 'border-green-300 bg-green-100 text-green-800'
-                                  : editModeEnabled
-                                    ? 'border-dashed border-blue-300 bg-blue-50 text-blue-500 hover:bg-blue-100'
-                                    : 'border-transparent text-transparent'
-                              }`}
-                              title={editModeEnabled ? 'Toggle team member assignment' : 'Unlock editing to change team ticks'}
-                            >
-                              {checked ? '✓' : editModeEnabled ? '+' : ''}
-                            </button>
-                          </td>
-                        );
-                      })}
+                      {activeTeamMembers.map((member) => (
+                        <td
+                          key={member.memberId || member.memberName}
+                          className="px-2 py-3 text-center border-r border-slate-200"
+                        >
+                          {member.memberId && assignedMemberIds.has(member.memberId) ? (
+                            <span className="inline-block px-2 py-1 bg-green-100 text-green-800 rounded font-semibold text-xs">
+                              ✓
+                            </span>
+                          ) : (
+                            ''
+                          )}
+                        </td>
+                      ))}
 
                       {/* Team Count */}
                       <td className="px-3 py-3 border-r-2 border-slate-200 text-center font-bold text-blue-900">
@@ -713,6 +560,7 @@ export default function ShowExcelList() {
                           value={show.sales2024}
                           showId={show.id || ''}
                           field="sales2024"
+                          type="number"
                           isEditing={editingCell?.showId === show.id && editingCell?.field === 'sales2024'}
                         />
                       </td>
@@ -723,6 +571,7 @@ export default function ShowExcelList() {
                           value={show.sales2025}
                           showId={show.id || ''}
                           field="sales2025"
+                          type="number"
                           isEditing={editingCell?.showId === show.id && editingCell?.field === 'sales2025'}
                         />
                       </td>
@@ -733,6 +582,7 @@ export default function ShowExcelList() {
                           value={show.target2026}
                           showId={show.id || ''}
                           field="target2026"
+                          type="number"
                           isEditing={editingCell?.showId === show.id && editingCell?.field === 'target2026'}
                         />
                       </td>
@@ -763,6 +613,7 @@ export default function ShowExcelList() {
                           value={show.caravansOnDisplay}
                           showId={show.id || ''}
                           field="caravansOnDisplay"
+                          type="number"
                           isEditing={editingCell?.showId === show.id && editingCell?.field === 'caravansOnDisplay'}
                         />
                       </td>
