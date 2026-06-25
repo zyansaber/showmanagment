@@ -39,6 +39,10 @@ import BudgetSetting from './pages/BudgetSetting';
 import ShowTeamAssignments from './pages/ShowTeamAssignments';
 import EmailDigestCenter from './pages/EmailDigestCenter';
 import ShowExcelList from './pages/ShowExcelList';
+import TeamMemberProfile from './pages/TeamMemberProfile';
+import TicketAndBooking from './pages/TicketAndBooking';
+import EmailJsSettings from './pages/EmailJsSettings';
+import MessageCenter from './pages/MessageCenter';
 import ProtectedRoute from './components/ProtectedRoute';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { Navigate } from 'react-router-dom';
@@ -60,6 +64,9 @@ function Sidebar({ isOpen, setIsOpen }: { isOpen: boolean; setIsOpen: (open: boo
         { icon: FileSpreadsheet, label: 'Orders & Sales', path: '/orders' },
         { icon: Users, label: 'Show Team', path: '/show-team' },
         { icon: Mail, label: 'Confirmation Email', path: '/order-digest-mail', adminOnly: true },
+        { icon: FileSpreadsheet, label: 'Ticket & Booking', path: '/ticket_and_booking' },
+        { icon: Mail, label: 'Messages', path: '/messages' },
+        { icon: Mail, label: 'EmailJS', path: '/emailjs', adminOnly: true },
       ],
     },
     {
@@ -200,12 +207,13 @@ function AppLayout() {
   const location = useLocation();
   const isLoginPage = location.pathname === '/login';
   const isStandaloneShowExcelPage = location.pathname === '/shows-excel';
+  const isStandaloneTeamMemberPage = location.pathname.startsWith('/team/');
 
   if (loading) {
     return <div className="min-h-screen flex items-center justify-center text-slate-500">Loading…</div>;
   }
 
-  if (!user && !isLoginPage) {
+  if (!user && !isLoginPage && !isStandaloneTeamMemberPage) {
     return <Navigate to="/login" replace />;
   }
 
@@ -217,7 +225,7 @@ function AppLayout() {
     );
   }
 
-  if (isStandaloneShowExcelPage) {
+  if (isStandaloneShowExcelPage || isStandaloneTeamMemberPage) {
     return (
       <Routes>
         <Route
@@ -228,6 +236,7 @@ function AppLayout() {
             </ProtectedRoute>
           }
         />
+        <Route path="/team/:memberSlug" element={<TeamMemberProfile />} />
       </Routes>
     );
   }
@@ -320,6 +329,14 @@ function AppLayout() {
               }
             />
             <Route
+              path="/team/:memberSlug"
+              element={
+                <ProtectedRoute>
+                  <TeamMemberProfile />
+                </ProtectedRoute>
+              }
+            />
+            <Route
               path="/powerbi"
               element={
                 <ProtectedRoute>
@@ -380,6 +397,30 @@ function AppLayout() {
               element={
                 <ProtectedRoute requiredRole="admin">
                   <EmailDigestCenter />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/messages"
+              element={
+                <ProtectedRoute>
+                  <MessageCenter />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/ticket_and_booking"
+              element={
+                <ProtectedRoute>
+                  <TicketAndBooking />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/emailjs"
+              element={
+                <ProtectedRoute requiredRole="admin">
+                  <EmailJsSettings />
                 </ProtectedRoute>
               }
             />
