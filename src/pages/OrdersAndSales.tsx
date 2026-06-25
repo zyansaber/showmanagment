@@ -452,6 +452,12 @@ export default function OrdersAndSales() {
     return orders
       .slice()
       .sort((a, b) => {
+        if (a.showId === b.showId) {
+          const dealA = Number(a.dealNumber ?? Number.MAX_SAFE_INTEGER);
+          const dealB = Number(b.dealNumber ?? Number.MAX_SAFE_INTEGER);
+          if (Number.isFinite(dealA) && Number.isFinite(dealB) && dealA !== dealB) return dealA - dealB;
+        }
+
         const dateA = new Date(a.date ?? '').getTime();
         const dateB = new Date(b.date ?? '').getTime();
         return Number.isNaN(dateB) ? -1 : Number.isNaN(dateA) ? 1 : dateB - dateA;
