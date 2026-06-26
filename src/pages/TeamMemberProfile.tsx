@@ -442,10 +442,6 @@ export default function TeamMemberProfile() {
   return (
     <div className="min-h-screen bg-slate-950 text-white">
       <div className="mx-auto flex min-h-screen max-w-3xl flex-col px-4 py-5 sm:px-6 sm:py-8">
-        <div className="mb-4 rounded-2xl bg-blue-500/15 p-3 ring-1 ring-blue-300/30">
-          <Button variant="outline" className="w-full gap-2 rounded-2xl border-blue-200 bg-white text-blue-700" onClick={installToHomeScreen}><Star className="h-4 w-4" />Install / Add to Phone Home Screen</Button>
-          {infoMessage && <p className="mt-2 text-center text-xs text-blue-100">{infoMessage}</p>}
-        </div>
         <header className="rounded-[2rem] bg-gradient-to-br from-slate-800 to-slate-900 p-5 shadow-2xl ring-1 ring-white/10 sm:p-7">
           <div className="flex items-start justify-between gap-4">
             <div>
