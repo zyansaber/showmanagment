@@ -282,9 +282,18 @@ export default function TeamMemberProfile() {
     }))
     .filter((row) => {
       const term = historySearch.trim().toLowerCase();
-      if (!term) return true;
+      if (!term) return false;
       return (row.show.name || '').toLowerCase().includes(term) || row.internalOrder.toLowerCase().includes(term);
     });
+  const historySearchSuggestions = shows
+    .flatMap((show) => [show.name || '', internalOrderByShowId[show.id || ''] || ''])
+    .filter(Boolean)
+    .slice(0, 200);
+  const memberHistoryShows = [...assignedShows].sort((a, b) => {
+    const dateA = parseDate(a.startDate)?.getTime() || parseDate(a.finishDate)?.getTime() || 0;
+    const dateB = parseDate(b.startDate)?.getTime() || parseDate(b.finishDate)?.getTime() || 0;
+    return dateB - dateA;
+  });
 
   const filesByShowId = memberFiles.reduce((acc, file) => {
     const showId = file.showId || '';
@@ -597,26 +606,52 @@ export default function TeamMemberProfile() {
               <CardHeader><CardTitle>History & Internal Sales Order</CardTitle></CardHeader>
               <CardContent className="space-y-4">
                 <div>
-                  <h3 className="mb-2 text-sm font-bold uppercase tracking-wide text-slate-500">Shows this member participated in</h3>
-                  <div className="space-y-2">
-                    {assignedShows.map((show) => (
-                      <div key={show.id} className="rounded-2xl bg-slate-50 p-4 text-sm">
-                        <div className="font-black text-slate-900">{show.name}</div>
-                        <div className="text-slate-500">{formatDate(show.startDate)} - {formatDate(show.finishDate)}</div>
-                        <div className="mt-1 font-semibold text-blue-700">Internal Sales Order: {internalOrderByShowId[show.id || ''] || '-'}</div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-                <div className="border-t pt-4">
                   <h3 className="mb-2 text-sm font-bold uppercase tracking-wide text-slate-500">Search all internal sales orders</h3>
-                  <input value={historySearch} onChange={(event) => setHistorySearch(event.target.value)} className="mb-3 w-full rounded-2xl border px-4 py-3 text-sm" placeholder="Search show name or internal sales order..." />
+                  <input
+                    value={historySearch}
+                    onChange={(event) => setHistorySearch(event.target.value)}
+                    className="mb-3 w-full rounded-2xl border px-4 py-3 text-base font-semibold shadow-sm"
+                    placeholder="Search show name or internal sales order..."
+                    list="history-internal-search-options"
+                  />
+                  <datalist id="history-internal-search-options">
+                    {historySearchSuggestions.map((suggestion, index) => (
+                      <option key={`${suggestion}-${index}`} value={suggestion} />
+                    ))}
+                  </datalist>
                   <div className="space-y-2">
-                    {internalOrderRows.map(({ show, internalOrder }) => (
+                    {historySearch.trim() && internalOrderRows.map(({ show, internalOrder }) => (
                       <div key={show.id} className="rounded-2xl border bg-white p-4 text-sm shadow-sm">
                         <div className="font-semibold text-slate-900">{show.name}</div>
                         <div className="text-slate-500">{show.siteLocation?.state || 'No State'} · {formatDate(show.startDate)} - {formatDate(show.finishDate)}</div>
-                        <div className="mt-1 font-semibold text-blue-700">{internalOrder || '-'}</div>
+                        <div className="mt-1 text-lg font-black text-blue-700">{internalOrder || '-'}</div>
+                      </div>
+                    ))}
+                    {historySearch.trim() && internalOrderRows.length === 0 && (
+                      <div className="rounded-2xl border border-dashed bg-slate-50 p-4 text-sm text-slate-500">
+                        No matching internal sales orders found.
+                      </div>
+                    )}
+                    {!historySearch.trim() && (
+                      <div className="rounded-2xl bg-amber-50 p-4 text-sm font-medium text-amber-800">
+                        Start typing a show name or internal sales order number to see results.
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <div className="border-t pt-4">
+                  <h3 className="mb-2 text-sm font-bold uppercase tracking-wide text-slate-500">Shows this member participated in</h3>
+                  <div className="space-y-2">
+                    {memberHistoryShows.map((show) => (
+                      <div key={show.id} className="flex flex-col gap-3 rounded-2xl bg-slate-50 p-4 text-sm sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                          <div className="text-lg font-black text-slate-900">{show.name}</div>
+                          <div className="text-slate-500">{formatDate(show.startDate)} - {formatDate(show.finishDate)}</div>
+                        </div>
+                        <div className="rounded-2xl bg-blue-50 px-4 py-3 text-left sm:text-right">
+                          <div className="text-xs font-bold uppercase tracking-wide text-blue-500">Internal Sales Order</div>
+                          <div className="text-2xl font-black text-blue-800">{internalOrderByShowId[show.id || ''] || '-'}</div>
+                        </div>
                       </div>
                     ))}
                   </div>
