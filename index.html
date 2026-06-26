@@ -5,6 +5,39 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link rel="icon" href="https://public-frontend-cos.metadl.com/mgx/img/favicon.png" type="image/png">
+  <script>
+    (function () {
+      var pathParts = window.location.pathname.split('/').filter(Boolean);
+      var teamStartUrl = pathParts[0] === 'team' && pathParts[1] ? '/team/' + encodeURIComponent(decodeURIComponent(pathParts[1])) : '/';
+      var manifest = {
+        name: 'Snowy River Shows',
+        short_name: 'Shows',
+        description: 'Team member show portal for Snowy River shows.',
+        id: teamStartUrl,
+        start_url: teamStartUrl,
+        scope: '/',
+        display: 'standalone',
+        background_color: '#020617',
+        theme_color: '#020617',
+        icons: [
+          {
+            src: '/favicon.svg',
+            sizes: 'any',
+            type: 'image/svg+xml',
+            purpose: 'any maskable'
+          }
+        ]
+      };
+      var manifestBlob = new Blob([JSON.stringify(manifest)], { type: 'application/manifest+json' });
+      var manifestLink = document.createElement('link');
+      manifestLink.rel = 'manifest';
+      manifestLink.href = URL.createObjectURL(manifestBlob);
+      document.head.appendChild(manifestLink);
+    })();
+  </script>
+  <meta name="theme-color" content="#020617" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-title" content="Shows" />
   <title>Show Management System</title>
   <meta name="description" content="Caravan Show Management Dashboard - Track shows, sales, and team performance" />
   <meta name="author" content="MGX" />
