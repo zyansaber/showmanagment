@@ -1,9 +1,9 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
-import { MessageSquare, Send, Trash2 } from 'lucide-react';
+import { MessageSquare, Send } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
-import { dbGet, dbRemove, dbSet } from '@/lib/firebase';
+import { dbGet, dbSet } from '@/lib/firebase';
 
 type TeamMember = { id?: string; memberId?: string; memberName?: string; activeFlag?: number };
 type TeamMessage = { id?: string; title: string; body: string; targetMemberIds: string[]; createdAt: string };
@@ -48,20 +48,6 @@ export default function MessageCenter() {
   const toggleMember = (memberId?: string) => {
     if (!memberId) return;
     setSelectedMembers((prev) => prev.includes(memberId) ? prev.filter((id) => id !== memberId) : [...prev, memberId]);
-  };
-
-
-  const deleteMessage = async (messageId?: string) => {
-    if (!messageId || !window.confirm('Delete this message?')) return;
-    try {
-      await dbRemove(`teamMessages/${messageId}`);
-      await dbRemove(`teamMessageReadReceipts/${messageId}`);
-      setMessage('Message deleted.');
-      await loadData();
-    } catch (err) {
-      console.error('Failed to delete team message:', err);
-      setMessage('Failed to delete message.');
-    }
   };
 
   const handleSubmit = async (event: FormEvent) => {
@@ -127,7 +113,7 @@ export default function MessageCenter() {
           const readCount = item.targetMemberIds.filter((memberId) => receipts[item.id || '']?.[memberId]).length;
           return (
             <Card key={item.id}>
-              <CardHeader><CardTitle className="flex items-center justify-between gap-3"><span className="flex items-center gap-2"><MessageSquare className="h-5 w-5" />{item.title}</span><Button variant="destructive" size="sm" onClick={() => deleteMessage(item.id)} className="gap-1"><Trash2 className="h-4 w-4" />Delete</Button></CardTitle></CardHeader>
+              <CardHeader><CardTitle className="flex items-center gap-2"><MessageSquare className="h-5 w-5" />{item.title}</CardTitle></CardHeader>
               <CardContent className="space-y-3 text-sm">
                 <p className="whitespace-pre-wrap text-slate-700">{item.body}</p>
                 <p className="font-semibold text-blue-700">Read: {readCount}/{item.targetMemberIds.length}</p>
