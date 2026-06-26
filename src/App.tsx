@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { BrowserRouter, Routes, Route, useNavigate, useLocation } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Toaster } from '@/components/ui/sonner';
@@ -19,6 +19,7 @@ import {
   Banknote,
   Calculator,
   ListTree,
+  Mail,
 } from 'lucide-react';
 import Dashboard from './pages/Dashboard';
 import ShowCalendar from './pages/ShowCalendar';
@@ -36,10 +37,10 @@ import Login from './pages/Login';
 import AdminSettings from './pages/AdminSettings';
 import BudgetSetting from './pages/BudgetSetting';
 import ShowTeamAssignments from './pages/ShowTeamAssignments';
+import EmailDigestCenter from './pages/EmailDigestCenter';
 import ShowExcelList from './pages/ShowExcelList';
 import TeamMemberProfile from './pages/TeamMemberProfile';
 import TicketAndBooking from './pages/TicketAndBooking';
-import TicketBookingConfirm from './pages/TicketBookingConfirm';
 import EmailJsSettings from './pages/EmailJsSettings';
 import MessageCenter from './pages/MessageCenter';
 import ProtectedRoute from './components/ProtectedRoute';
@@ -62,6 +63,7 @@ function Sidebar({ isOpen, setIsOpen }: { isOpen: boolean; setIsOpen: (open: boo
         { icon: Briefcase, label: 'Show Management', path: '/shows' },
         { icon: FileSpreadsheet, label: 'Orders & Sales', path: '/orders' },
         { icon: Users, label: 'Show Team', path: '/show-team' },
+        { icon: Mail, label: 'Confirmation Email', path: '/order-digest-mail', adminOnly: true },
         { icon: FileSpreadsheet, label: 'Ticket & Booking', path: '/ticket_and_booking' },
         { icon: Mail, label: 'Messages', path: '/messages' },
         { icon: Mail, label: 'EmailJS', path: '/emailjs', adminOnly: true },
@@ -203,24 +205,15 @@ function AppLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const { user, loading } = useAuth();
   const location = useLocation();
-
-  useEffect(() => {
-    const suppressInstallPromptOutsideTeam = (event: Event) => {
-      if (!window.location.pathname.startsWith('/team/')) event.preventDefault();
-    };
-    window.addEventListener('beforeinstallprompt', suppressInstallPromptOutsideTeam);
-    return () => window.removeEventListener('beforeinstallprompt', suppressInstallPromptOutsideTeam);
-  }, []);
   const isLoginPage = location.pathname === '/login';
   const isStandaloneShowExcelPage = location.pathname === '/shows-excel';
   const isStandaloneTeamMemberPage = location.pathname.startsWith('/team/');
-  const isStandaloneTicketConfirmPage = location.pathname.startsWith('/ticket-confirm/');
 
   if (loading) {
     return <div className="min-h-screen flex items-center justify-center text-slate-500">Loading…</div>;
   }
 
-  if (!user && !isLoginPage && !isStandaloneTeamMemberPage && !isStandaloneTicketConfirmPage) {
+  if (!user && !isLoginPage && !isStandaloneTeamMemberPage) {
     return <Navigate to="/login" replace />;
   }
 
@@ -232,7 +225,7 @@ function AppLayout() {
     );
   }
 
-  if (isStandaloneShowExcelPage || isStandaloneTeamMemberPage || isStandaloneTicketConfirmPage) {
+  if (isStandaloneShowExcelPage || isStandaloneTeamMemberPage) {
     return (
       <Routes>
         <Route
@@ -244,7 +237,6 @@ function AppLayout() {
           }
         />
         <Route path="/team/:memberSlug/:sectionSlug?" element={<TeamMemberProfile />} />
-        <Route path="/ticket-confirm/:token" element={<TicketBookingConfirm />} />
       </Routes>
     );
   }
@@ -397,6 +389,14 @@ function AppLayout() {
               element={
                 <ProtectedRoute requiredRole="admin">
                   <AdminSettings />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/order-digest-mail"
+              element={
+                <ProtectedRoute requiredRole="admin">
+                  <EmailDigestCenter />
                 </ProtectedRoute>
               }
             />
