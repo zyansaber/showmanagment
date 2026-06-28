@@ -15,6 +15,7 @@ import type { ScheduleOrder } from '@/types';
 const emptyAccountForm = {
   username: '',
   password: '',
+  email: '',
   role: 'user',
 } as const;
 
@@ -224,6 +225,7 @@ export default function AdminSettings() {
       await createAccount({
         username: formState.username,
         password: formState.password,
+        email: formState.email.trim(),
         role: formState.role === 'admin' ? 'admin' : 'user',
       });
       toast.success('Account created');
@@ -236,10 +238,11 @@ export default function AdminSettings() {
     }
   };
 
-  const handleAccountUpdate = async (username: string, updates: Partial<{ role: string }>) => {
+  const handleAccountUpdate = async (username: string, updates: Partial<{ role: string; email: string }>) => {
     try {
       await updateAccount(username, {
         ...(updates.role ? { role: updates.role as 'admin' | 'user' } : {}),
+        ...(updates.email !== undefined ? { email: updates.email } : {}),
       });
       toast.success('Account updated');
     } catch (error) {
@@ -368,7 +371,7 @@ export default function AdminSettings() {
             <CardDescription>Create and maintain login accounts.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
-            <form className="grid gap-4 md:grid-cols-4" onSubmit={handleAccountSubmit}>
+            <form className="grid gap-4 md:grid-cols-5" onSubmit={handleAccountSubmit}>
               <div className="space-y-2">
                 <Label htmlFor="username">Username</Label>
                 <Input
@@ -386,6 +389,17 @@ export default function AdminSettings() {
                   value={formState.password}
                   onChange={(event) =>
                     setFormState((prev) => ({ ...prev, password: event.target.value }))
+                  }
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="email">Email</Label>
+                <Input
+                  id="email"
+                  type="email"
+                  value={formState.email}
+                  onChange={(event) =>
+                    setFormState((prev) => ({ ...prev, email: event.target.value }))
                   }
                 />
               </div>
@@ -420,6 +434,7 @@ export default function AdminSettings() {
                   <TableHeader>
                     <TableRow>
                       <TableHead>Username</TableHead>
+                      <TableHead>Email</TableHead>
                       <TableHead>Role</TableHead>
                       <TableHead className="text-right">Actions</TableHead>
                     </TableRow>
@@ -761,17 +776,21 @@ export default function AdminSettings() {
 }
 
 type AccountRowProps = {
-  account: { username: string; password: string; role: string };
-  onUpdate: (username: string, updates: { role?: string }) => void;
+  account: { username: string; password: string; role: string; email?: string };
+  onUpdate: (username: string, updates: { role?: string; email?: string }) => void;
   onDelete: (username: string) => void;
 };
 
 const AccountRow = ({ account, onUpdate, onDelete }: AccountRowProps) => {
   const [role, setRole] = useState(account.role);
+  const [email, setEmail] = useState(account.email || '');
 
   return (
     <TableRow>
       <TableCell className="font-medium">{account.username}</TableCell>
+      <TableCell>
+        <Input type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="email@example.com" />
+      </TableCell>
       <TableCell>
         <Select value={role} onValueChange={(value) => setRole(value)}>
           <SelectTrigger className="w-32">
@@ -787,7 +806,7 @@ const AccountRow = ({ account, onUpdate, onDelete }: AccountRowProps) => {
         <Button
           variant="outline"
           size="sm"
-          onClick={() => onUpdate(account.username, { role })}
+          onClick={() => onUpdate(account.username, { role, email: email.trim() })}
         >
           Update
         </Button>

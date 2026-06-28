@@ -8,20 +8,23 @@
   <script>
     (function () {
       var pathParts = window.location.pathname.split('/').filter(Boolean);
-      var teamStartUrl = pathParts[0] === 'team' && pathParts[1] ? '/team/' + encodeURIComponent(decodeURIComponent(pathParts[1])) : '/';
+      var teamStartPath = pathParts[0] === 'team' && pathParts[1] ? '/team/' + encodeURIComponent(decodeURIComponent(pathParts[1])) : '/';
+      var teamStartUrl = new URL(teamStartPath, window.location.origin).href;
+      var appScope = new URL('/', window.location.origin).href;
+      var iconUrl = new URL('/snowy-river-logo.svg', window.location.origin).href;
       var manifest = {
         name: 'Snowy River Shows',
         short_name: 'Shows',
         description: 'Team member show portal for Snowy River shows.',
         id: teamStartUrl,
         start_url: teamStartUrl,
-        scope: '/',
+        scope: appScope,
         display: 'standalone',
         background_color: '#020617',
         theme_color: '#020617',
         icons: [
           {
-            src: '/snowy-river-logo.svg',
+            src: iconUrl,
             sizes: 'any',
             type: 'image/svg+xml',
             purpose: 'any maskable'
@@ -36,6 +39,7 @@
     })();
   </script>
   <meta name="theme-color" content="#020617" />
+  <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-title" content="Shows" />
   <title>Show Management System</title>
