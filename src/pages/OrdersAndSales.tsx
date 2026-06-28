@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
@@ -14,7 +13,7 @@ import OrderCommentsEditor from '@/components/OrderCommentsEditor';
 import { dbGet, dbSet, dbUpdate, schedulingDbGet, uploadStorageFile } from '@/lib/firebase';
 import type { ScheduleOrder, Show, ShowOrder, TeamMember } from '@/types';
 import { toast } from 'sonner';
-import { ArrowUpRight, CalendarDays, Check, Download, FileSpreadsheet, Loader2, Plus, Search, Sparkles, X } from 'lucide-react';
+import { ArrowUpRight, CalendarDays, Check, Download, Loader2, Plus, Search, Sparkles, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 const CONFIRMATION_STATUS_ID = 'confirmation';
@@ -1195,13 +1194,6 @@ export default function OrdersAndSales() {
           <h1 className="text-4xl font-extrabold text-gray-900">Orders & Sales</h1>
           <p className="text-sm text-gray-500">Overview of all show orders and sales confirmations</p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Button asChild className="bg-emerald-600 text-white shadow-lg hover:bg-emerald-700">
-            <Link to="/shows-excel">
-              <FileSpreadsheet className="mr-2 h-4 w-4" />
-              Open Shows Excel
-            </Link>
-          </Button>
         <Dialog>
           <DialogTrigger asChild>
             <Button type="button" className="bg-gradient-to-r from-indigo-600 via-blue-600 to-cyan-500 text-white shadow-lg hover:opacity-95">
@@ -1278,7 +1270,6 @@ export default function OrdersAndSales() {
             </div>
           </DialogContent>
         </Dialog>
-        </div>
       </div>
 
       {error && (
