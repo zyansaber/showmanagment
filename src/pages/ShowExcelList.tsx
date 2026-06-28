@@ -119,9 +119,6 @@ const EDIT_MODE_PASSWORD = 'regshow';
 const makeMemberSlug = (member: TeamMember) =>
   encodeURIComponent((member.memberName || member.memberId || '').trim().replace(/\s+/g, '-'));
 
-const isDealershipMember = (member: TeamMember) =>
-  (member.memberName || member.memberId || '').trim().toLowerCase() === 'dealership';
-
 const escapeCsvCell = (value: unknown) => {
   const text = formatValue(value);
   if (/[",\n\r]/.test(text)) return `"${text.replace(/"/g, '""')}"`;
@@ -256,11 +253,7 @@ export default function ShowExcelList() {
     () =>
       teamMembers
         .filter((member) => member.activeFlag === 1)
-        .sort((a, b) => {
-          if (isDealershipMember(a)) return -1;
-          if (isDealershipMember(b)) return 1;
-          return (a.memberName || '').localeCompare(b.memberName || '');
-        }),
+        .sort((a, b) => (a.memberName || '').localeCompare(b.memberName || '')),
     [teamMembers]
   );
 
@@ -719,20 +712,16 @@ export default function ShowExcelList() {
                   {activeTeamMembers.map((member) => (
                     <th
                       key={member.memberId || member.memberName}
-                      className={`px-2 py-2 text-center font-semibold border-r min-w-[80px] whitespace-normal break-words ${isDealershipMember(member) ? 'border-orange-500 bg-orange-600 text-white' : 'border-purple-500 bg-purple-700'}`}
+                      className="px-2 py-2 text-center font-semibold border-r border-purple-500 min-w-[80px] whitespace-normal break-words bg-purple-700"
                       title={member.memberName}
                     >
-                      {isDealershipMember(member) ? (
-                        <span title="Dealership member is external and does not open a team portal">{member.memberName || member.memberId}</span>
-                      ) : (
-                        <a
-                          href={`/team/${makeMemberSlug(member)}`}
-                          className="underline-offset-2 hover:underline"
-                          title={`Open ${member.memberName || member.memberId} profile`}
-                        >
-                          {member.memberName || member.memberId}
-                        </a>
-                      )}
+                      <a
+                        href={`/team/${makeMemberSlug(member)}`}
+                        className="underline-offset-2 hover:underline"
+                        title={`Open ${member.memberName || member.memberId} profile`}
+                      >
+                        {member.memberName || member.memberId}
+                      </a>
                     </th>
                   ))}
                   <th className="px-3 py-2 text-center font-semibold border-r-2 border-blue-500 min-w-[70px]">
@@ -874,7 +863,7 @@ export default function ShowExcelList() {
                         return (
                           <td
                             key={member.memberId || member.memberName}
-                            className={`px-2 py-2 text-center border-r ${isDealershipMember(member) ? 'border-orange-200 bg-orange-50' : 'border-slate-200'}`}
+                            className="px-2 py-2 text-center border-r border-slate-200"
                           >
                             <button
                               type="button"

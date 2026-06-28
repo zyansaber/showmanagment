@@ -1,6 +1,6 @@
 import { initializeApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
-import { getDatabase, ref, set, get, update, remove, push, query, orderByChild, equalTo, onValue, off } from "firebase/database";
+import { getDatabase, ref, set, get, update, remove, push, query, orderByChild, equalTo } from "firebase/database";
 import { getAnalytics } from "firebase/analytics";
 import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
 
@@ -44,12 +44,6 @@ export const dbSet = (path: string, data: Record<string, unknown>) => set(ref(da
 export const dbGet = async (path: string) => {
   const snapshot = await get(ref(database, path));
   return snapshot.exists() ? snapshot.val() : null;
-};
-
-export const dbSubscribe = (path: string, callback: (value: unknown) => void) => {
-  const reference = ref(database, path);
-  onValue(reference, (snapshot) => callback(snapshot.exists() ? snapshot.val() : null));
-  return () => off(reference);
 };
 
 export const dbUpdate = (path: string, data: Record<string, unknown>) => update(ref(database, path), data);
