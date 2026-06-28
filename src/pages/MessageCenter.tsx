@@ -1,42 +1,13 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
-import { MessageSquare, Send, Trash2 } from 'lucide-react';
+import { MessageSquare, Send } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
-import { dbGet, dbRemove, dbSet } from '@/lib/firebase';
+import { dbGet, dbSet } from '@/lib/firebase';
 
-type TeamMember = { id?: string; memberId?: string; memberName?: string; email?: string; activeFlag?: number };
+type TeamMember = { id?: string; memberId?: string; memberName?: string; activeFlag?: number };
 type TeamMessage = { id?: string; title: string; body: string; targetMemberIds: string[]; createdAt: string };
 type ReadReceipts = Record<string, Record<string, { readAt: string }>>;
-
-
-const TICKET_BOOKING_TEMPLATE_ID = 'template_1qpfll8';
-
-type EmailSettings = { serviceId: string; publicKey: string; privateKey: string };
-
-const sendEmailJs = async (toEmail: string, toName: string, params: { title: string; content: string; receipt: string }, settings: EmailSettings) => {
-  const response = await fetch('https://api.emailjs.com/api/v1.0/email/send', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      service_id: settings.serviceId,
-      template_id: TICKET_BOOKING_TEMPLATE_ID,
-      user_id: settings.publicKey,
-      accessToken: settings.privateKey,
-      template_params: { to_email: toEmail, to_name: toName, ...params },
-    }),
-  });
-  if (!response.ok) throw new Error(`EmailJS failed ${response.status}: ${await response.text()}`);
-};
-
-const loadEmailSettings = async (): Promise<EmailSettings> => {
-  const settings = (await dbGet('settings/emailjsTicketBooking')) as Partial<EmailSettings> | null;
-  return {
-    serviceId: settings?.serviceId || 'service_d39k2lv',
-    publicKey: settings?.publicKey || 'Ox1_IwykSClDMOhqz',
-    privateKey: settings?.privateKey || 'Dg7xyuMhc-xtKQbROJT7H',
-  };
-};
 
 const normaliseList = <T,>(data: unknown): T[] => {
   if (!data) return [];
@@ -79,20 +50,6 @@ export default function MessageCenter() {
     setSelectedMembers((prev) => prev.includes(memberId) ? prev.filter((id) => id !== memberId) : [...prev, memberId]);
   };
 
-
-  const deleteMessage = async (messageId?: string) => {
-    if (!messageId || !window.confirm('Delete this message?')) return;
-    try {
-      await dbRemove(`teamMessages/${messageId}`);
-      await dbRemove(`teamMessageReadReceipts/${messageId}`);
-      setMessage('Message deleted.');
-      await loadData();
-    } catch (err) {
-      console.error('Failed to delete team message:', err);
-      setMessage('Failed to delete message.');
-    }
-  };
-
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
     if (!title.trim() || !body.trim() || selectedMembers.length === 0) {
@@ -111,13 +68,6 @@ export default function MessageCenter() {
         createdAt: new Date().toISOString(),
       };
       await dbSet(`teamMessages/${id}`, record as unknown as Record<string, unknown>);
-      const emailSettings = await loadEmailSettings();
-      const recipients = teamMembers.filter((member) => selectedMembers.includes(member.memberId || '') && member.email);
-      await Promise.all(recipients.map((member) => sendEmailJs(member.email || '', member.memberName || 'Team member', {
-        title: record.title,
-        content: `From admin:\n\n${record.body}`,
-        receipt: member.email || '',
-      }, emailSettings)));
       setTitle('');
       setBody('');
       setSelectedMembers([]);
@@ -163,7 +113,7 @@ export default function MessageCenter() {
           const readCount = item.targetMemberIds.filter((memberId) => receipts[item.id || '']?.[memberId]).length;
           return (
             <Card key={item.id}>
-              <CardHeader><CardTitle className="flex items-center justify-between gap-3"><span className="flex items-center gap-2"><MessageSquare className="h-5 w-5" />{item.title}</span><Button variant="destructive" size="sm" onClick={() => deleteMessage(item.id)} className="gap-1"><Trash2 className="h-4 w-4" />Delete</Button></CardTitle></CardHeader>
+              <CardHeader><CardTitle className="flex items-center gap-2"><MessageSquare className="h-5 w-5" />{item.title}</CardTitle></CardHeader>
               <CardContent className="space-y-3 text-sm">
                 <p className="whitespace-pre-wrap text-slate-700">{item.body}</p>
                 <p className="font-semibold text-blue-700">Read: {readCount}/{item.targetMemberIds.length}</p>

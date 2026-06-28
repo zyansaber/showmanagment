@@ -7,7 +7,6 @@ export type AuthAccount = {
   username: string;
   password: string;
   role: AuthRole;
-  email?: string;
 };
 
 type AuthUser = {
