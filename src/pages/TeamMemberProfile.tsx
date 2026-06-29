@@ -81,24 +81,6 @@ const parseDate = (value?: string) => {
   return Number.isNaN(date.getTime()) ? null : date;
 };
 
-const stateColorClasses: Record<string, string> = {
-  NSW: 'bg-blue-600 text-white',
-  VIC: 'bg-purple-600 text-white',
-  QLD: 'bg-orange-500 text-white',
-  WA: 'bg-green-600 text-white',
-  SA: 'bg-red-600 text-white',
-  TAS: 'bg-teal-600 text-white',
-  NT: 'bg-yellow-500 text-slate-950',
-  ACT: 'bg-pink-600 text-white',
-  NZ: 'bg-indigo-600 text-white',
-};
-
-const normaliseState = (state?: string) => {
-  const trimmed = (state || '').trim();
-  if (!trimmed || trimmed.toLowerCase() === 'n/a' || trimmed.toLowerCase() === 'na') return 'No State';
-  return trimmed.toUpperCase();
-};
-
 const formatDate = (value?: string) => {
   const date = parseDate(value);
   if (!date) return value || '';
@@ -710,37 +692,10 @@ export default function TeamMemberProfile() {
                       const key = day.toISOString().slice(0, 10);
                       const dayShows = showsByCalendarDay[key] || [];
                       const inMonth = day.getMonth() === calendarMonth.getMonth();
-                      const dayStates = Array.from(new Set(dayShows.map((show) => normaliseState(show.siteLocation?.state))));
-                      const visibleStates = dayStates.slice(0, 2);
-                      const hiddenStateCount = dayStates.length - visibleStates.length;
                       return (
-                        <button
-                          key={key}
-                          type="button"
-                          onClick={() => dayShows[0] && setSelectedCalendarShow(dayShows[0])}
-                          className={`min-h-16 rounded-xl border p-1 text-left transition ${inMonth ? 'bg-white' : 'bg-slate-50 text-slate-300'} ${dayShows.length ? 'border-blue-300 bg-blue-50 ring-2 ring-blue-100' : 'border-slate-100'}`}
-                        >
-                          <div className="flex items-start justify-between gap-1">
-                            <span className={`text-xs font-bold ${dayShows.length ? 'text-blue-950' : ''}`}>{day.getDate()}</span>
-                            {dayStates.length > 0 && (
-                              <span className="flex flex-wrap justify-end gap-0.5">
-                                {visibleStates.map((state) => (
-                                  <span
-                                    key={state}
-                                    className={`rounded-full px-1.5 py-0.5 text-[9px] font-black leading-none shadow-sm ${stateColorClasses[state] || 'bg-slate-700 text-white'}`}
-                                  >
-                                    {state}
-                                  </span>
-                                ))}
-                                {hiddenStateCount > 0 && (
-                                  <span className="rounded-full bg-slate-700 px-1.5 py-0.5 text-[9px] font-black leading-none text-white shadow-sm">
-                                    +{hiddenStateCount}
-                                  </span>
-                                )}
-                              </span>
-                            )}
-                          </div>
-                          {dayShows.slice(0, 2).map((show, index) => <div key={show.id || `${key}-${index}`} className="mt-1 truncate rounded bg-white/80 px-1 text-[10px] font-semibold text-blue-700 shadow-sm">{show.name}</div>)}
+                        <button key={key} type="button" onClick={() => dayShows[0] && setSelectedCalendarShow(dayShows[0])} className={`min-h-16 rounded-xl border p-1 text-left ${inMonth ? 'bg-white' : 'bg-slate-50 text-slate-300'} ${dayShows.length ? 'border-blue-300 ring-2 ring-blue-100' : 'border-slate-100'}`}>
+                          <div className="text-xs font-bold">{day.getDate()}</div>
+                          {dayShows.slice(0, 2).map((show) => <div key={show.id} className="mt-1 truncate rounded bg-blue-100 px-1 text-[10px] font-semibold text-blue-700">{show.name}</div>)}
                         </button>
                       );
                     })}
@@ -749,7 +704,7 @@ export default function TeamMemberProfile() {
                     <div className="mt-4 rounded-2xl bg-blue-50 p-4 text-sm">
                       <div className="font-black text-slate-900">{selectedCalendarShow.name}</div>
                       <div className="text-blue-700">{formatDate(selectedCalendarShow.startDate)} - {formatDate(selectedCalendarShow.finishDate)}</div>
-                      <div className="text-slate-500">{normaliseState(selectedCalendarShow.siteLocation?.state)}</div>
+                      <div className="text-slate-500">{selectedCalendarShow.siteLocation?.state || 'No State'}</div>
                     </div>
                   )}
                 </CardContent>
