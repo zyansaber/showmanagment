@@ -307,17 +307,25 @@ export default function ShowCalendar() {
   const monthEnd = endOfMonth(currentMonth);
   const daysInMonth = eachDayOfInterval({ start: monthStart, end: monthEnd });
 
-  const hasShowOnDate = (date: Date) => {
-    return filteredShows.some(show => {
-      try {
-        const start = parseISO(show.startDate);
-        const end = parseISO(show.finishDate);
-        return date >= start && date <= end;
-      } catch {
-        return false;
-      }
-    });
+  const getStatesForDate = (date: Date) => {
+    return Array.from(
+      new Set(
+        filteredShows
+          .filter((show) => {
+            try {
+              const start = parseISO(show.startDate);
+              const end = parseISO(show.finishDate);
+              return date >= start && date <= end;
+            } catch {
+              return false;
+            }
+          })
+          .map((show) => show.siteLocation?.state)
+          .filter(isValidState)
+      )
+    ).sort();
   };
+
 
   if (loading) {
     return (
@@ -441,21 +449,41 @@ export default function ShowCalendar() {
 
               {/* Calendar days */}
               {daysInMonth.map(day => {
-                const hasShow = hasShowOnDate(day);
+                const dateStates = getStatesForDate(day);
+                const hasShow = dateStates.length > 0;
                 const isSelected = selectedDate && isSameDay(day, selectedDate);
+                const visibleStates = dateStates.slice(0, 2);
+                const hiddenStateCount = dateStates.length - visibleStates.length;
 
                 return (
                   <button
                     key={day.toISOString()}
                     onClick={() => setSelectedDate(day)}
                     className={`
-                      aspect-square flex items-center justify-center rounded-lg text-sm font-medium
+                      aspect-square flex flex-col items-center justify-center gap-1 rounded-lg p-1 text-sm font-medium
                       transition-all duration-200
-                      ${hasShow ? 'bg-blue-500 text-white hover:bg-blue-600' : 'hover:bg-gray-100'}
+                      ${hasShow ? 'bg-blue-50 text-blue-950 hover:bg-blue-100' : 'hover:bg-gray-100'}
                       ${isSelected ? 'ring-2 ring-blue-700 ring-offset-2' : ''}
                     `}
                   >
-                    {format(day, 'd')}
+                    <span className={hasShow ? 'font-bold leading-none' : 'leading-none'}>{format(day, 'd')}</span>
+                    {hasShow && (
+                      <span className="flex max-w-full flex-wrap items-center justify-center gap-0.5 leading-none">
+                        {visibleStates.map((state) => (
+                          <span
+                            key={state}
+                            className={`rounded px-1 py-0.5 text-[9px] font-bold leading-none text-white ${stateColors[state] || 'bg-gray-500'}`}
+                          >
+                            {state}
+                          </span>
+                        ))}
+                        {hiddenStateCount > 0 && (
+                          <span className="rounded bg-slate-600 px-1 py-0.5 text-[9px] font-bold leading-none text-white">
+                            +{hiddenStateCount}
+                          </span>
+                        )}
+                      </span>
+                    )}
                   </button>
                 );
               })}
@@ -464,8 +492,8 @@ export default function ShowCalendar() {
             <div className="mt-4 space-y-2">
               <h3 className="font-semibold text-sm">Legend</h3>
               <div className="flex items-center gap-2">
-                <div className="w-4 h-4 rounded bg-blue-500" />
-                <span className="text-xs">Show Date</span>
+                <div className="w-4 h-4 rounded bg-blue-50 border border-blue-200" />
+                <span className="text-xs">Show Date with highlighted state abbreviation</span>
               </div>
             </div>
 
