@@ -3,7 +3,6 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { CalendarDays, CheckCircle2, Clock, FileText, MessageSquare, QrCode, ShoppingCart, Star, TrendingUp, UserCog, Users } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { dbGet, dbSet } from '@/lib/firebase';
 
 type ShowRecord = {
@@ -80,24 +79,6 @@ const parseDate = (value?: string) => {
   if (year && month && day) return new Date(year, month - 1, day);
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? null : date;
-};
-
-const stateColorClasses: Record<string, string> = {
-  NSW: 'bg-blue-600 text-white',
-  VIC: 'bg-purple-600 text-white',
-  QLD: 'bg-orange-500 text-white',
-  WA: 'bg-green-600 text-white',
-  SA: 'bg-red-600 text-white',
-  TAS: 'bg-teal-600 text-white',
-  NT: 'bg-yellow-500 text-slate-950',
-  ACT: 'bg-pink-600 text-white',
-  NZ: 'bg-indigo-600 text-white',
-};
-
-const normaliseState = (state?: string) => {
-  const trimmed = (state || '').trim();
-  if (!trimmed || trimmed.toLowerCase() === 'n/a' || trimmed.toLowerCase() === 'na') return 'No State';
-  return trimmed.toUpperCase();
 };
 
 const formatDate = (value?: string) => {
@@ -207,8 +188,7 @@ export default function TeamMemberProfile() {
   const [calendarView, setCalendarView] = useState<CalendarView>('calendar');
   const [historySearch, setHistorySearch] = useState('');
   const [calendarMonth, setCalendarMonth] = useState(() => new Date());
-  const [selectedCalendarDate, setSelectedCalendarDate] = useState<Date | null>(null);
-  const [selectedCalendarDayShows, setSelectedCalendarDayShows] = useState<ShowRecord[]>([]);
+  const [selectedCalendarShow, setSelectedCalendarShow] = useState<ShowRecord | null>(null);
   const activeSection = sectionFromSlug(sectionSlug);
 
   useEffect(() => {
@@ -712,46 +692,21 @@ export default function TeamMemberProfile() {
                       const key = day.toISOString().slice(0, 10);
                       const dayShows = showsByCalendarDay[key] || [];
                       const inMonth = day.getMonth() === calendarMonth.getMonth();
-                      const dayStates = Array.from(new Set(dayShows.map((show) => normaliseState(show.siteLocation?.state))));
-                      const visibleStates = dayStates.slice(0, 2);
-                      const hiddenStateCount = dayStates.length - visibleStates.length;
                       return (
-                        <button
-                          key={key}
-                          type="button"
-                          onClick={() => {
-                            if (!dayShows.length) return;
-                            setSelectedCalendarDate(day);
-                            setSelectedCalendarDayShows(dayShows);
-                          }}
-                          className={`min-h-[4.75rem] rounded-2xl border p-1.5 text-left shadow-sm transition active:scale-[0.98] sm:min-h-20 ${inMonth ? 'bg-white' : 'bg-slate-50 text-slate-300'} ${dayShows.length ? 'border-blue-300 bg-blue-50 ring-2 ring-blue-100' : 'border-slate-100'}`}
-                        >
-                          <div className="flex items-start justify-between gap-1">
-                            <span className={`text-sm font-black ${dayShows.length ? 'text-blue-950' : ''}`}>{day.getDate()}</span>
-                            {dayStates.length > 0 && (
-                              <span className="flex flex-wrap justify-end gap-0.5">
-                                {visibleStates.map((state) => (
-                                  <span
-                                    key={state}
-                                    className={`rounded-full px-1.5 py-0.5 text-[9px] font-black leading-none shadow-sm ${stateColorClasses[state] || 'bg-slate-700 text-white'}`}
-                                  >
-                                    {state}
-                                  </span>
-                                ))}
-                                {hiddenStateCount > 0 && (
-                                  <span className="rounded-full bg-slate-700 px-1.5 py-0.5 text-[9px] font-black leading-none text-white shadow-sm">
-                                    +{hiddenStateCount}
-                                  </span>
-                                )}
-                              </span>
-                            )}
-                          </div>
-                          {dayShows.slice(0, 2).map((show, index) => <div key={show.id || `${key}-${index}`} className="mt-1 truncate rounded-xl bg-white/90 px-1.5 py-0.5 text-[10px] font-semibold text-blue-700 shadow-sm">{show.name}</div>)}
+                        <button key={key} type="button" onClick={() => dayShows[0] && setSelectedCalendarShow(dayShows[0])} className={`min-h-16 rounded-xl border p-1 text-left ${inMonth ? 'bg-white' : 'bg-slate-50 text-slate-300'} ${dayShows.length ? 'border-blue-300 ring-2 ring-blue-100' : 'border-slate-100'}`}>
+                          <div className="text-xs font-bold">{day.getDate()}</div>
+                          {dayShows.slice(0, 2).map((show) => <div key={show.id} className="mt-1 truncate rounded bg-blue-100 px-1 text-[10px] font-semibold text-blue-700">{show.name}</div>)}
                         </button>
                       );
                     })}
                   </div>
-                  <p className="mt-3 text-center text-xs font-semibold text-slate-500">Tap a highlighted date to view show details.</p>
+                  {selectedCalendarShow && (
+                    <div className="mt-4 rounded-2xl bg-blue-50 p-4 text-sm">
+                      <div className="font-black text-slate-900">{selectedCalendarShow.name}</div>
+                      <div className="text-blue-700">{formatDate(selectedCalendarShow.startDate)} - {formatDate(selectedCalendarShow.finishDate)}</div>
+                      <div className="text-slate-500">{selectedCalendarShow.siteLocation?.state || 'No State'}</div>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             )}
@@ -770,41 +725,6 @@ export default function TeamMemberProfile() {
                 </CardContent>
               </Card>
             )}
-            <Dialog
-              open={selectedCalendarDayShows.length > 0}
-              onOpenChange={(open) => {
-                if (!open) {
-                  setSelectedCalendarDayShows([]);
-                  setSelectedCalendarDate(null);
-                }
-              }}
-            >
-              <DialogContent className="max-h-[85vh] w-[calc(100vw-2rem)] overflow-y-auto rounded-[1.5rem] p-4 sm:max-w-lg sm:p-6">
-                <DialogHeader>
-                  <DialogTitle className="text-left text-xl font-black text-slate-950">
-                    {selectedCalendarDate ? `Shows on ${formatDate(selectedCalendarDate.toISOString().slice(0, 10))}` : 'Shows'}
-                  </DialogTitle>
-                </DialogHeader>
-                <div className="space-y-3">
-                  {selectedCalendarDayShows.map((show, index) => (
-                    <div key={show.id || `selected-calendar-show-${index}`} className="rounded-2xl border border-blue-100 bg-blue-50 p-4 text-sm shadow-sm">
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <div className="truncate text-base font-black text-slate-900">{show.name || 'Unnamed Show'}</div>
-                          <div className="mt-1 font-semibold text-blue-700">{formatDate(show.startDate)} - {formatDate(show.finishDate)}</div>
-                        </div>
-                        <span className={`shrink-0 rounded-full px-2 py-1 text-[11px] font-black leading-none shadow-sm ${stateColorClasses[normaliseState(show.siteLocation?.state)] || 'bg-slate-700 text-white'}`}>
-                          {normaliseState(show.siteLocation?.state)}
-                        </span>
-                      </div>
-                      <div className="mt-2 text-slate-600">
-                        {[show.siteLocation?.suburb, show.siteLocation?.state].filter(Boolean).join(', ') || 'No location'}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </DialogContent>
-            </Dialog>
           </main>
         )}
 
