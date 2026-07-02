@@ -52,6 +52,11 @@ type InternalSalesOrder = {
   dealership?: string;
 };
 
+type TicketFile = { showId?: string };
+type ConfirmRequest = { showId?: string; confirmedAt?: string };
+
+const TEAM_MEMBER_CHANGE_LOCK_MESSAGE = 'Show team has been confirmed. Please contact Headquarter to make changes.';
+
 const normaliseList = <T,>(data: unknown): T[] => {
   if (!data) return [];
   if (Array.isArray(data)) return data.filter(Boolean) as T[];
@@ -217,6 +222,8 @@ const isShowFinished = (finishDate?: string) => {
 export default function ShowExcelList() {
   const [shows, setShows] = useState<ShowRecord[]>([]);
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
+  const [ticketFiles, setTicketFiles] = useState<TicketFile[]>([]);
+  const [confirmations, setConfirmations] = useState<ConfirmRequest[]>([]);
   const [internalSalesOrders, setInternalSalesOrders] = useState<InternalSalesOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -232,14 +239,18 @@ export default function ShowExcelList() {
     setLoading(true);
     setError(null);
     try {
-      const [showsData, teamData, internalOrderData] = await Promise.all([
+      const [showsData, teamData, internalOrderData, ticketFileData, confirmationData] = await Promise.all([
         dbGet('shows'),
         dbGet('teamMembers'),
         dbGet('finance/internalSalesOrders'),
+        dbGet('ticketAndBookingFiles'),
+        dbGet('ticketBookingConfirmations'),
       ]);
       setShows(normaliseList<ShowRecord>(showsData));
       setTeamMembers(normaliseList<TeamMember>(teamData));
       setInternalSalesOrders(normaliseList<InternalSalesOrder>(internalOrderData));
+      setTicketFiles(normaliseList<TicketFile>(ticketFileData));
+      setConfirmations(normaliseList<ConfirmRequest>(confirmationData));
     } catch (err) {
       console.error('Failed to load show spreadsheet data:', err);
       setError('Failed to load show spreadsheet data. Please refresh and try again.');
@@ -442,8 +453,15 @@ export default function ShowExcelList() {
     }
   };
 
+  const isShowTeamChangeLocked = (showId?: string) =>
+    Boolean(showId) && (ticketFiles.some((file) => file.showId === showId) || confirmations.some((item) => item.showId === showId && item.confirmedAt));
+
   const handleToggleTeamMember = async (show: ShowRecord, memberId?: string) => {
     if (!editModeEnabled || !show.id || !memberId || isSaving) return;
+    if (isShowTeamChangeLocked(show.id)) {
+      window.alert(TEAM_MEMBER_CHANGE_LOCK_MESSAGE);
+      return;
+    }
 
     setIsSaving(true);
     try {

@@ -12,6 +12,12 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { dbGet, dbUpdate } from '@/lib/firebase';
 import type { Show, TeamMember } from '@/types';
 
+type TicketFile = { showId?: string };
+type ConfirmRequest = { showId?: string; confirmedAt?: string };
+
+const normaliseList = <T,>(data: unknown): T[] => !data ? [] : Array.isArray(data) ? data.filter(Boolean) as T[] : Object.entries(data as Record<string, T>).map(([key, value]) => ({ id: key, ...value }));
+const TEAM_MEMBER_CHANGE_LOCK_MESSAGE = 'Show team has been confirmed. Please contact Headquarter to make changes.';
+
 const parseDate = (value?: string) => {
   if (!value) return null;
   const parsed = new Date(value);
@@ -100,6 +106,8 @@ export default function ShowTeamAssignments() {
   const [shows, setShows] = useState<Show[]>([]);
   const [showKeyMap, setShowKeyMap] = useState<Record<string, string>>({});
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
+  const [ticketFiles, setTicketFiles] = useState<TicketFile[]>([]);
+  const [confirmations, setConfirmations] = useState<ConfirmRequest[]>([]);
   const [teamMemberKeys, setTeamMemberKeys] = useState<Record<string, string>>({});
   const [selectedShowId, setSelectedShowId] = useState('');
   const [selectedTeamMembers, setSelectedTeamMembers] = useState<string[]>([]);
@@ -109,7 +117,12 @@ export default function ShowTeamAssignments() {
   useEffect(() => {
     const loadData = async () => {
       try {
-        const [showsData, teamData] = await Promise.all([dbGet('shows'), dbGet('teamMembers')]);
+        const [showsData, teamData, ticketFileData, confirmationData] = await Promise.all([
+          dbGet('shows'),
+          dbGet('teamMembers'),
+          dbGet('ticketAndBookingFiles'),
+          dbGet('ticketBookingConfirmations'),
+        ]);
 
         const showEntries = showsData ? Object.entries(showsData as Record<string, Show>) : [];
         const map: Record<string, string> = {};
@@ -131,6 +144,8 @@ export default function ShowTeamAssignments() {
         });
         setTeamMemberKeys(memberKeyMap);
         setTeamMembers(members.filter((member) => member.activeFlag === 1));
+        setTicketFiles(normaliseList<TicketFile>(ticketFileData));
+        setConfirmations(normaliseList<ConfirmRequest>(confirmationData));
       } catch (error) {
         console.error('Error loading team assignments:', error);
         toast.error('Failed to load team assignment data.');
@@ -339,11 +354,21 @@ export default function ShowTeamAssignments() {
     URL.revokeObjectURL(url);
   };
 
+  const isShowTeamChangeLocked = (showId?: string) =>
+    Boolean(showId) && (ticketFiles.some((file) => file.showId === showId) || confirmations.some((item) => item.showId === showId && item.confirmedAt));
+
   const handleSaveTeam = async () => {
     if (!selectedShow || !selectedShow.id) {
       toast.error('Please select a show first.');
       return;
     }
+    const currentTeamMembers = selectedShow.teamMembers || [];
+    const teamChanged = currentTeamMembers.length !== selectedTeamMembers.length || currentTeamMembers.some((id) => !selectedTeamMembers.includes(id));
+    if (teamChanged && isShowTeamChangeLocked(selectedShow.id)) {
+      window.alert(TEAM_MEMBER_CHANGE_LOCK_MESSAGE);
+      return;
+    }
+
     const key = showKeyMap[selectedShow.id] || selectedShow.id;
     try {
       await dbUpdate(`shows/${key}`, { teamMembers: selectedTeamMembers });

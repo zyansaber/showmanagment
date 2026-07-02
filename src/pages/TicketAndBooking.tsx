@@ -8,7 +8,7 @@ import { dbGet, dbSet, dbSubscribe, uploadStorageFile } from '@/lib/firebase';
 type ShowRecord = { id?: string; name?: string; startDate?: string; finishDate?: string; teamMembers?: string[] };
 type TeamMember = { id?: string; memberId?: string; memberName?: string; email?: string; activeFlag?: number };
 type TicketFile = { id: string; showId: string; teamMemberId: string; displayName: string; fileName: string; path: string; url: string; uploadedAt: string; replacedAt?: string };
-type ConfirmRequest = { id: string; showId: string; token: string; requestedAt: string; confirmUrl: string; confirmedAt?: string; participantIds: string[]; confirmedParticipantIds?: string[]; approvedAt?: string; approvedParticipantIds?: string[] };
+type ConfirmRequest = { id: string; showId: string; token: string; requestedAt: string; confirmUrl: string; confirmedAt?: string; participantIds: string[]; confirmedParticipantIds?: string[]; approvedAt?: string; approvedParticipantIds?: string[]; requiresTicketApproval?: boolean };
 type EmailSettings = { serviceId: string; templateId: string; publicKey: string; privateKey: string; subject: string; body: string; confirmationSubject: string; confirmationBody: string; confirmationReceipt?: string };
 
 const TICKET_BOOKING_TEMPLATE_ID = 'template_1qpfll8';
@@ -50,6 +50,8 @@ const nextThreeMonths = (shows: ShowRecord[]) => {
   }).sort((a, b) => (parseDate(a.startDate)?.getTime() || 0) - (parseDate(b.startDate)?.getTime() || 0));
 };
 
+
+const haveSameMembers = (left: string[], right: string[]) => left.length === right.length && left.every((id) => right.includes(id));
 
 const renderTemplate = (template: string, values: Record<string, string>) =>
   Object.entries(values).reduce((result, [key, value]) => result.replaceAll(`{{${key}}}`, value), template);
@@ -215,7 +217,11 @@ export default function TicketAndBooking() {
     if (!show.id || (recipients.length === 0 && !emailSettings.confirmationReceipt)) return setMessage('This show has no participants with email addresses.');
     const token = `${show.id}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
     const confirmUrl = `${window.location.origin}/ticket-confirm/${encodeURIComponent(token)}`;
-    const record: ConfirmRequest = { id: token, token, showId: show.id, requestedAt: new Date().toISOString(), confirmUrl, participantIds: participants.map((member) => member.memberId || '').filter(Boolean) };
+    const participantIds = participants.map((member) => member.memberId || '').filter(Boolean);
+    const latestConfirmation = latestConfirmedByShowId[show.id];
+    const latestConfirmedIds = latestConfirmation?.confirmedParticipantIds || latestConfirmation?.participantIds || [];
+    const requiresTicketApproval = Boolean(latestConfirmation?.confirmedAt) && !haveSameMembers(participantIds, latestConfirmedIds);
+    const record: ConfirmRequest = { id: token, token, showId: show.id, requestedAt: new Date().toISOString(), confirmUrl, participantIds, requiresTicketApproval };
     const showTime = `${formatDate(show.startDate)} - ${formatDate(show.finishDate)}`;
     const participantNames = participants.map((p) => p.memberName || p.memberId).join(', ');
     await dbSet(`ticketBookingConfirmations/${token}`, record as unknown as Record<string, unknown>);
