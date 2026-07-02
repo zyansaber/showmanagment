@@ -6,7 +6,7 @@ import { dbGet, dbSet } from '@/lib/firebase';
 
 type ShowRecord = { id?: string; name?: string; startDate?: string; finishDate?: string };
 type TeamMember = { memberId?: string; memberName?: string };
-type ConfirmRequest = { id: string; showId: string; participantIds: string[]; confirmedParticipantIds?: string[]; confirmedAt?: string; approvalUrl?: string };
+type ConfirmRequest = { id: string; showId: string; participantIds: string[]; confirmedParticipantIds?: string[]; confirmedAt?: string; approvalUrl?: string; requiresTicketApproval?: boolean };
 const normaliseList = <T,>(data: unknown): T[] => !data ? [] : Array.isArray(data) ? data.filter(Boolean) as T[] : Object.entries(data as Record<string, T>).map(([key, value]) => ({ id: key, ...value }));
 const fmt = (v?: string) => v ? new Date(v).toLocaleDateString() : '-';
 const TICKET_BOOKING_TEMPLATE_ID = 'template_1qpfll8';
@@ -54,6 +54,7 @@ export default function TicketBookingConfirm() {
     await dbSet(`ticketBookingConfirmations/${request.id}`, nextRequest as unknown as Record<string, unknown>);
     setRequest(nextRequest);
     setMessage('Participants confirmed. Ticket & Booking can now see this confirmation.');
+    if (!request.requiresTicketApproval) return;
     try {
       const settings = (await dbGet('settings/emailjsTicketBooking')) as Record<string, string> | null;
       const approvalReceipt = settings?.ticketApprovalReceipt || '';
@@ -61,7 +62,7 @@ export default function TicketBookingConfirm() {
       const variables = { show_name: show?.name || request.showId, participants: participantNames, approval_url: approvalUrl };
       await sendEmailJs(
         approvalReceipt,
-        renderTemplate(settings?.ticketApprovalSubject || 'Ticket approval required for {{show_name}}', variables),
+        renderTemplate(settings?.ticketApprovalSubject || 'Ticket approval changing teammember required for {{show_name}}', variables),
         renderTemplate(settings?.ticketApprovalBody || `Show manager has confirmed the following participants. Please approve ticket.\n\nShow: {{show_name}}\nParticipants: {{participants}}\n\nApprove here: {{approval_url}}`, variables)
       );
     } catch (err) {

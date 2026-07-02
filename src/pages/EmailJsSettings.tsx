@@ -28,7 +28,7 @@ const defaults: EmailTemplateSettings = {
   confirmationBody: 'Hi {{team_member_name}},\n\nPlease confirm the participants for {{show_name}}.\n\nShow time: {{show_time}}\nParticipants: {{participants}}\n\nConfirm here: {{confirm_url}}',
   confirmationReceipt: '',
   ticketApprovalReceipt: '',
-  ticketApprovalSubject: 'Ticket approval required for {{show_name}}',
+  ticketApprovalSubject: 'Ticket approval changing teammember required for {{show_name}}',
   ticketApprovalBody: 'Show manager has confirmed the following participants. Please approve ticket.\n\nShow: {{show_name}}\nParticipants: {{participants}}\n\nApprove here: {{approval_url}}',
   serviceId: 'service_d39k2lv',
   publicKey: 'Ox1_IwykSClDMOhqz',
