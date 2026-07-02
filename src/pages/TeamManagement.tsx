@@ -7,39 +7,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import { UserPlus, Edit, Check, UserCheck, BarChart3, X, Mail, Loader2 } from 'lucide-react';
+import { UserPlus, Edit, Check, UserCheck, BarChart3, X } from 'lucide-react';
 import { dbGet, dbSet, dbUpdate } from '@/lib/firebase';
 import type { TeamMember, UserRole, Show, ShowOrder } from '@/types';
-
-const TEAM_PORTAL_TEMPLATE_ID = 'template_1qpfll8';
-
-type EmailSettings = { serviceId: string; publicKey: string; privateKey: string };
-
-const slugifyTeamMember = (value?: string) => (value || '').trim().replace(/\s+/g, '-').toLowerCase();
-
-const loadEmailSettings = async (): Promise<EmailSettings> => {
-  const settings = (await dbGet('settings/emailjsTicketBooking')) as Partial<EmailSettings> | null;
-  return {
-    serviceId: settings?.serviceId || 'service_d39k2lv',
-    publicKey: settings?.publicKey || 'Ox1_IwykSClDMOhqz',
-    privateKey: settings?.privateKey || 'Dg7xyuMhc-xtKQbROJT7H',
-  };
-};
-
-const sendEmailJs = async (toEmail: string, toName: string, params: Record<string, string>, settings: EmailSettings) => {
-  const response = await fetch('https://api.emailjs.com/api/v1.0/email/send', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      service_id: settings.serviceId,
-      template_id: TEAM_PORTAL_TEMPLATE_ID,
-      user_id: settings.publicKey,
-      accessToken: settings.privateKey,
-      template_params: { to_email: toEmail, to_name: toName, ...params },
-    }),
-  });
-  if (!response.ok) throw new Error(`EmailJS failed ${response.status}: ${await response.text()}`);
-};
 
 export default function TeamManagement() {
   type TeamMemberRecord = TeamMember & { dbKey: string };
@@ -54,8 +24,6 @@ export default function TeamManagement() {
   const [emailDraft, setEmailDraft] = useState('');
   const [editingRoleMemberId, setEditingRoleMemberId] = useState<string | null>(null);
   const [roleDraft, setRoleDraft] = useState<UserRole>('Show Team');
-  const [sendingPortalMemberId, setSendingPortalMemberId] = useState<string | null>(null);
-  const [portalEmailMessage, setPortalEmailMessage] = useState('');
 
   const [newMember, setNewMember] = useState<Partial<TeamMember>>({
     memberName: '',
@@ -170,47 +138,6 @@ export default function TeamManagement() {
         return 'bg-blue-100 text-blue-800 border border-blue-200';
       default:
         return 'bg-slate-200 text-slate-800 border border-slate-300';
-    }
-  };
-
-  const getMemberPortalUrl = (member: TeamMember) => {
-    const slug = slugifyTeamMember(member.memberName) || slugifyTeamMember(member.memberId);
-    return `${window.location.origin}/team/${encodeURIComponent(slug)}`;
-  };
-
-  const handleSendPortalEmail = async (member: TeamMemberRecord) => {
-    if (!member.email) {
-      setPortalEmailMessage(`Please add an email address for ${member.memberName || member.memberId} first.`);
-      return;
-    }
-
-    const portalUrl = getMemberPortalUrl(member);
-    const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(portalUrl)}`;
-    const title = 'Your team member portal QR code';
-    const content = [
-      `<p>Hi ${member.memberName || 'team member'},</p>`,
-      '<p>Please scan the QR code below to open your personal team member portal.</p>',
-      `<p><img src="${qrCodeUrl}" alt="${member.memberName || 'Team member'} portal QR code" width="180" height="180" style="display:block;border:0;outline:none;text-decoration:none;" /></p>`,
-      `<p>If the QR code is not visible, open this portal page: <a href="${portalUrl}">${portalUrl}</a></p>`,
-    ].join('');
-
-    setSendingPortalMemberId(member.dbKey);
-    setPortalEmailMessage('');
-    try {
-      const emailSettings = await loadEmailSettings();
-      await sendEmailJs(member.email, member.memberName || 'Team member', {
-        title,
-        content,
-        receipt: member.email,
-        portal_url: portalUrl,
-        qr_code_url: qrCodeUrl,
-      }, emailSettings);
-      setPortalEmailMessage(`Portal email sent to ${member.email}.`);
-    } catch (error) {
-      console.error('Error sending team member portal email:', error);
-      setPortalEmailMessage(`Failed to send portal email to ${member.email}.`);
-    } finally {
-      setSendingPortalMemberId(null);
     }
   };
 
@@ -453,7 +380,7 @@ export default function TeamManagement() {
           <div className="flex justify-between items-center">
             <div>
               <CardTitle>Team Members</CardTitle>
-              <CardDescription>Manage employee information, roles, and team portal emails</CardDescription>
+              <CardDescription>Manage employee information and roles</CardDescription>
             </div>
             <div className="flex gap-2">
               <Dialog open={isAddingMember} onOpenChange={setIsAddingMember}>
@@ -517,9 +444,6 @@ export default function TeamManagement() {
           </div>
         </CardHeader>
         <CardContent>
-          {portalEmailMessage && (
-            <div className="mb-4 rounded-md border bg-slate-50 px-4 py-3 text-sm text-slate-700">{portalEmailMessage}</div>
-          )}
           {teamMembers.length > 0 ? (
             <Table>
               <TableHeader>
@@ -623,19 +547,6 @@ export default function TeamManagement() {
                             <Check className="h-4 w-4" />
                           ) : (
                             <Edit className="h-4 w-4" />
-                          )}
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleSendPortalEmail(member)}
-                          disabled={sendingPortalMemberId === member.dbKey || !member.email}
-                          title={member.email ? `Send ${getMemberPortalUrl(member)} to ${member.email}` : 'Add an email address before sending'}
-                        >
-                          {sendingPortalMemberId === member.dbKey ? (
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                          ) : (
-                            <Mail className="h-4 w-4" />
                           )}
                         </Button>
                         <Button
