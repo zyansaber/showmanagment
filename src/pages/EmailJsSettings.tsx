@@ -74,7 +74,7 @@ export default function EmailJsSettings() {
           <div className="rounded border bg-slate-50 px-3 py-2 text-sm text-slate-600">Shared template: <span className="font-semibold text-slate-900">{TICKET_BOOKING_TEMPLATE_ID}</span></div>
           <Input value={settings.publicKey} onChange={(e) => setSettings({ ...settings, publicKey: e.target.value })} placeholder="EmailJS public key" />
           <Input value={settings.privateKey} onChange={(e) => setSettings({ ...settings, privateKey: e.target.value })} placeholder="EmailJS private key" />
-          <p className="text-xs text-slate-500">EmailJS template variables required in template_1qpfll8: {'{{title}}'}, {'{{content}}'}, {'{{receipt}}'}.</p>
+          <p className="text-xs text-slate-500">EmailJS template variables required in template_1qpfll8: {'{{title}}'}, {'{{content}}'}, {'{{receipt}}'}. Team portal emails also send {'{{portal_url}}'} for templates that want to render the member portal link separately.</p>
 
           <div className="rounded-lg border bg-slate-50 p-4">
             <h3 className="mb-3 font-semibold text-slate-900">1. Attachment upload / replacement email</h3>
