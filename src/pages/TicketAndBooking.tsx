@@ -1,4 +1,4 @@
-import { ChangeEvent, DragEvent, FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { CheckCircle2, History, Mail, UploadCloud } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -95,7 +95,6 @@ export default function TicketAndBooking() {
   const [selectedMemberId, setSelectedMemberId] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [files, setFiles] = useState<File[]>([]);
-  const [isDraggingFiles, setIsDraggingFiles] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [message, setMessage] = useState('');
   const quickFileRef = useRef<HTMLInputElement>(null);
@@ -164,21 +163,7 @@ export default function TicketAndBooking() {
     }, settings)));
   };
 
-  const addFiles = (incomingFiles: File[]) => {
-    if (incomingFiles.length === 0) return;
-    setFiles((currentFiles) => [...currentFiles, ...incomingFiles]);
-    setMessage(`${incomingFiles.length} file(s) ready to upload. Drop more files or click Upload Files when ready.`);
-  };
-
-  const handleFiles = (event: ChangeEvent<HTMLInputElement>) => addFiles(Array.from(event.target.files || []));
-
-  const handleDropFiles = (event: DragEvent<HTMLLabelElement>) => {
-    event.preventDefault();
-    setIsDraggingFiles(false);
-    addFiles(Array.from(event.dataTransfer.files || []));
-  };
-
-  const removeSelectedFile = (index: number) => setFiles((currentFiles) => currentFiles.filter((_, fileIndex) => fileIndex !== index));
+  const handleFiles = (event: ChangeEvent<HTMLInputElement>) => setFiles(Array.from(event.target.files || []));
 
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
@@ -302,7 +287,7 @@ export default function TicketAndBooking() {
         {!upcomingShows.length && <p className="text-sm text-slate-500">No shows found in the next three months.</p>}
       </CardContent></Card>
 
-      <Card><CardHeader><CardTitle className="flex items-center gap-2"><UploadCloud className="h-5 w-5" />Upload attachments</CardTitle></CardHeader><CardContent><form onSubmit={handleSubmit} className="grid gap-4"><select value={selectedShowId} onChange={(e) => setSelectedShowId(e.target.value)} className="rounded border px-3 py-2"><option value="">Select show</option>{shows.map((show) => <option key={show.id} value={show.id}>{show.name}</option>)}</select><select value={selectedMemberId} onChange={(e) => setSelectedMemberId(e.target.value)} className="rounded border px-3 py-2"><option value="">Select team member</option>{teamMembers.map((member) => <option key={member.memberId} value={member.memberId}>{member.memberName}</option>)}</select><Input value={displayName} onChange={(e) => setDisplayName(e.target.value)} placeholder="Attachment display name (optional)" /><label onDragEnter={(event) => { event.preventDefault(); setIsDraggingFiles(true); }} onDragOver={(event) => event.preventDefault()} onDragLeave={() => setIsDraggingFiles(false)} onDrop={handleDropFiles} className={`flex cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed p-8 text-center transition ${isDraggingFiles ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-300 bg-slate-50 text-slate-600 hover:border-blue-400 hover:bg-blue-50'}`}><UploadCloud className="mb-3 h-10 w-10" /><span className="text-base font-bold text-slate-900">Drag files here from desktop or email</span><span className="mt-1 text-sm">You can also click this area to choose multiple files.</span><Input type="file" multiple onChange={handleFiles} className="sr-only" /></label>{files.length > 0 && <div className="rounded-xl border bg-white p-3"><p className="mb-2 text-sm font-bold text-slate-700">Selected files ({files.length})</p><div className="space-y-2">{files.map((file, index) => <div key={`${file.name}-${file.lastModified}-${index}`} className="flex items-center justify-between gap-3 rounded-lg bg-slate-50 px-3 py-2 text-sm"><span className="truncate font-medium text-slate-700">{file.name}</span><Button type="button" size="sm" variant="outline" onClick={() => removeSelectedFile(index)} disabled={uploading}>Remove</Button></div>)}</div></div>}<Button type="submit" disabled={uploading}>{uploading ? 'Uploading…' : 'Upload Files'}</Button></form></CardContent></Card>
+      <Card><CardHeader><CardTitle className="flex items-center gap-2"><UploadCloud className="h-5 w-5" />Upload attachments (existing method)</CardTitle></CardHeader><CardContent><form onSubmit={handleSubmit} className="grid gap-4"><select value={selectedShowId} onChange={(e) => setSelectedShowId(e.target.value)} className="rounded border px-3 py-2"><option value="">Select show</option>{shows.map((show) => <option key={show.id} value={show.id}>{show.name}</option>)}</select><select value={selectedMemberId} onChange={(e) => setSelectedMemberId(e.target.value)} className="rounded border px-3 py-2"><option value="">Select team member</option>{teamMembers.map((member) => <option key={member.memberId} value={member.memberId}>{member.memberName}</option>)}</select><Input value={displayName} onChange={(e) => setDisplayName(e.target.value)} placeholder="Attachment display name (optional)" /><Input type="file" multiple onChange={handleFiles} /><Button type="submit" disabled={uploading}>{uploading ? 'Uploading…' : 'Upload Files'}</Button></form></CardContent></Card>
     </div>
   );
 }
