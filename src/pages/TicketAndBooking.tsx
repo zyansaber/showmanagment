@@ -1,4 +1,4 @@
-import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { ChangeEvent, DragEvent, FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { CheckCircle2, History, Mail, UploadCloud } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -95,6 +95,7 @@ export default function TicketAndBooking() {
   const [selectedMemberId, setSelectedMemberId] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [files, setFiles] = useState<File[]>([]);
+  const [draggingQuickTarget, setDraggingQuickTarget] = useState('');
   const [uploading, setUploading] = useState(false);
   const [message, setMessage] = useState('');
   const quickFileRef = useRef<HTMLInputElement>(null);
@@ -165,6 +166,33 @@ export default function TicketAndBooking() {
 
   const handleFiles = (event: ChangeEvent<HTMLInputElement>) => setFiles(Array.from(event.target.files || []));
 
+  const uploadQuickFiles = async (showId: string, memberId: string, incomingFiles: File[], name: string, replaceId?: string) => {
+    if (incomingFiles.length === 0) return;
+    const filesToUpload = replaceId ? incomingFiles.slice(0, 1) : incomingFiles;
+    setUploading(true);
+    try {
+      for (const file of filesToUpload) {
+        const record = await uploadOne(showId, memberId, file, name, replaceId);
+        try {
+          await notifyAttachmentUpdate(record, Boolean(replaceId));
+        } catch (emailErr) {
+          console.error('Attachment notification email failed:', emailErr);
+        }
+      }
+      setMessage(replaceId ? 'Upload record replaced.' : `${filesToUpload.length} file(s) uploaded.`);
+    } catch (err) {
+      console.error('Ticket and booking quick upload failed:', err);
+      setMessage(`Upload failed: ${err instanceof Error ? err.message : 'Please check Firebase Storage permissions and network.'}`);
+    } finally { setUploading(false); setDraggingQuickTarget(''); }
+  };
+
+  const handleQuickDrop = async (event: DragEvent<HTMLButtonElement>, showId: string, memberId: string, name: string, replaceId?: string) => {
+    event.preventDefault();
+    await uploadQuickFiles(showId, memberId, Array.from(event.dataTransfer.files || []), name, replaceId);
+  };
+
+  const quickUploadClass = (target: string) => draggingQuickTarget === target ? 'border-blue-500 bg-blue-50 text-blue-700' : '';
+
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
     if (!selectedShowId || !selectedMemberId || files.length === 0) return setMessage('Please choose a show, team member, and at least one file.');
@@ -195,19 +223,8 @@ export default function TicketAndBooking() {
     const file = event.target.files?.[0];
     event.target.value = '';
     if (!file || !quickUpload) return;
-    setUploading(true);
-    try {
-      const record = await uploadOne(quickUpload.showId, quickUpload.memberId, file, quickUpload.displayName, quickUpload.replaceId);
-      try {
-        await notifyAttachmentUpdate(record, Boolean(quickUpload.replaceId));
-      } catch (emailErr) {
-        console.error('Attachment notification email failed:', emailErr);
-      }
-      setMessage(quickUpload.replaceId ? 'Upload record replaced.' : 'File uploaded.');
-    } catch (err) {
-      console.error('Ticket and booking quick upload failed:', err);
-      setMessage(`Upload failed: ${err instanceof Error ? err.message : 'Please check Firebase Storage permissions and network.'}`);
-    } finally { setUploading(false); setQuickUpload(null); }
+    await uploadQuickFiles(quickUpload.showId, quickUpload.memberId, [file], quickUpload.displayName, quickUpload.replaceId);
+    setQuickUpload(null);
   };
 
   const askForConfirm = async (show: ShowRecord) => {
@@ -278,7 +295,9 @@ export default function TicketAndBooking() {
                 const isNewSinceConfirm = Boolean(confirmation) && !isConfirmed;
                 const isApproved = approvedIds.has(member.memberId || '');
                 const flightFile = memberFiles.find((file) => (file.displayName || '').toLowerCase() === 'flight ticket');
-                return <div key={member.memberId} className="rounded-xl bg-slate-50 p-3 text-sm"><div className="flex flex-wrap items-center gap-2"><span className="font-bold text-slate-900">{member.memberName || member.memberId}</span>{isConfirmed && <span className="rounded-full bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-700">Confirmed</span>}{isApproved && <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs font-semibold text-blue-700">Ticket approved</span>}{isNewSinceConfirm && <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-700">New after last confirm</span>}</div>{isNewSinceConfirm && <Button size="sm" variant="secondary" className="mt-2" onClick={() => askForConfirm(show)} disabled={uploading}>Confirm for new added member</Button>}<div className="mt-2 flex flex-wrap gap-2"><Button size="sm" onClick={() => openQuickUpload(show.id || '', member.memberId || '', 'Flight ticket', flightFile?.id)} disabled={uploading}>{flightFile ? 'Update file' : 'Upload flight ticket'}</Button><Button size="sm" variant="outline" onClick={() => openQuickUpload(show.id || '', member.memberId || '', 'Other')} disabled={uploading}>Upload other</Button></div>{memberFiles.length > 0 && <div className="mt-3 space-y-2">{memberFiles.map((file) => <div key={file.id} className="flex items-center justify-between gap-2 rounded-lg bg-white p-2"><a href={file.url} target="_blank" rel="noreferrer" className="font-semibold text-blue-700 underline">{file.displayName}</a><Button size="sm" variant="outline" className="gap-1" onClick={() => openQuickUpload(show.id || '', member.memberId || '', file.displayName, file.id)}><History className="h-3 w-3" />Replace</Button></div>)}</div>}</div>;
+                const flightTarget = `${show.id}-${member.memberId}-flight`;
+                const otherTarget = `${show.id}-${member.memberId}-other`;
+                return <div key={member.memberId} className="rounded-xl bg-slate-50 p-3 text-sm"><div className="flex flex-wrap items-center gap-2"><span className="font-bold text-slate-900">{member.memberName || member.memberId}</span>{isConfirmed && <span className="rounded-full bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-700">Confirmed</span>}{isApproved && <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs font-semibold text-blue-700">Ticket approved</span>}{isNewSinceConfirm && <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-700">New after last confirm</span>}</div>{isNewSinceConfirm && <Button size="sm" variant="secondary" className="mt-2" onClick={() => askForConfirm(show)} disabled={uploading}>Confirm for new added member</Button>}<div className="mt-2 flex flex-wrap gap-2"><Button size="sm" onClick={() => openQuickUpload(show.id || '', member.memberId || '', 'Flight ticket', flightFile?.id)} onDragEnter={(event) => { event.preventDefault(); setDraggingQuickTarget(flightTarget); }} onDragOver={(event) => event.preventDefault()} onDragLeave={() => setDraggingQuickTarget('')} onDrop={(event) => handleQuickDrop(event, show.id || '', member.memberId || '', 'Flight ticket', flightFile?.id)} disabled={uploading} className={`border border-dashed ${quickUploadClass(flightTarget)}`}>{flightFile ? 'Update file' : 'Upload flight ticket'}</Button><Button size="sm" variant="outline" onClick={() => openQuickUpload(show.id || '', member.memberId || '', 'Other')} onDragEnter={(event) => { event.preventDefault(); setDraggingQuickTarget(otherTarget); }} onDragOver={(event) => event.preventDefault()} onDragLeave={() => setDraggingQuickTarget('')} onDrop={(event) => handleQuickDrop(event, show.id || '', member.memberId || '', 'Other')} disabled={uploading} className={`border-dashed ${quickUploadClass(otherTarget)}`}>Upload other</Button></div><p className="mt-1 text-xs text-slate-500">Drag a file onto either upload button.</p>{memberFiles.length > 0 && <div className="mt-3 space-y-2">{memberFiles.map((file) => <div key={file.id} className="flex items-center justify-between gap-2 rounded-lg bg-white p-2"><a href={file.url} target="_blank" rel="noreferrer" className="font-semibold text-blue-700 underline">{file.displayName}</a><Button size="sm" variant="outline" className="gap-1" onClick={() => openQuickUpload(show.id || '', member.memberId || '', file.displayName, file.id)}><History className="h-3 w-3" />Replace</Button></div>)}</div>}</div>;
               })}
             </div>
             {removedConfirmedIds.length > 0 && <div className="mt-4 rounded-xl border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-700">{removedConfirmedIds.map((id) => memberById[id]?.memberName || id).join(', ')}: confirmed employee no longer here</div>}
