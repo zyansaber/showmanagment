@@ -20,6 +20,7 @@ import {
   Calculator,
   ListTree,
   Mail,
+  FilePlus2,
 } from 'lucide-react';
 import Dashboard from './pages/Dashboard';
 import ShowCalendar from './pages/ShowCalendar';
@@ -44,6 +45,9 @@ import TicketBookingConfirm from './pages/TicketBookingConfirm';
 import TicketApproval from './pages/TicketApproval';
 import EmailJsSettings from './pages/EmailJsSettings';
 import MessageCenter from './pages/MessageCenter';
+import ShowApplication from './pages/ShowApplication';
+import ShowApplicationConfirm from './pages/ShowApplicationConfirm';
+import ShowApplicationFinance from './pages/ShowApplicationFinance';
 import ProtectedRoute from './components/ProtectedRoute';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { Navigate } from 'react-router-dom';
@@ -59,6 +63,7 @@ function Sidebar({ isOpen, setIsOpen }: { isOpen: boolean; setIsOpen: (open: boo
     {
       title: 'Basic Show Info.',
       items: [
+        { icon: FilePlus2, label: 'Show Application', path: '/show-application', featured: true },
         { icon: LayoutDashboard, label: 'Dashboard', path: '/' },
         { icon: Calendar, label: 'Show Calendar', path: '/calendar' },
         { icon: Briefcase, label: 'Show Management', path: '/shows' },
@@ -146,8 +151,10 @@ function Sidebar({ isOpen, setIsOpen }: { isOpen: boolean; setIsOpen: (open: boo
                   return (
                     <Button
                       key={item.path}
-                      variant="ghost"
-                      className={`
+                      variant={item.featured ? 'default' : 'ghost'}
+                      className={item.featured
+                        ? `w-full justify-start gap-3 rounded-2xl border border-cyan-200 bg-gradient-to-r from-cyan-400 via-blue-500 to-indigo-600 font-black text-white shadow-lg shadow-cyan-500/30 ring-2 ring-cyan-200/40 hover:scale-[1.02] hover:from-cyan-300 hover:to-indigo-500 ${!isOpen ? 'lg:justify-center' : ''}`
+                        : `
                         w-full justify-start gap-3 text-white hover:bg-slate-700
                         ${isActive ? 'bg-slate-700' : ''}
                         ${!isOpen ? 'lg:justify-center' : ''}
@@ -218,12 +225,14 @@ function AppLayout() {
   const isStandaloneTeamMemberPage = location.pathname.startsWith('/team/');
   const isStandaloneTicketConfirmPage = location.pathname.startsWith('/ticket-confirm/');
   const isStandaloneTicketApprovalPage = location.pathname.startsWith('/ticket-approval/');
+  const isStandaloneShowApplicationConfirmPage = location.pathname.startsWith('/show-application-confirm/');
+  const isStandaloneShowApplicationFinancePage = location.pathname.startsWith('/show-application-finance/');
 
   if (loading) {
     return <div className="min-h-screen flex items-center justify-center text-slate-500">Loading…</div>;
   }
 
-  if (!user && !isLoginPage && !isStandaloneTeamMemberPage && !isStandaloneTicketConfirmPage && !isStandaloneTicketApprovalPage) {
+  if (!user && !isLoginPage && !isStandaloneTeamMemberPage && !isStandaloneTicketConfirmPage && !isStandaloneTicketApprovalPage && !isStandaloneShowApplicationConfirmPage && !isStandaloneShowApplicationFinancePage) {
     return <Navigate to="/login" replace />;
   }
 
@@ -235,7 +244,7 @@ function AppLayout() {
     );
   }
 
-  if (isStandaloneShowExcelPage || isStandaloneTeamMemberPage || isStandaloneTicketConfirmPage || isStandaloneTicketApprovalPage) {
+  if (isStandaloneShowExcelPage || isStandaloneTeamMemberPage || isStandaloneTicketConfirmPage || isStandaloneTicketApprovalPage || isStandaloneShowApplicationConfirmPage || isStandaloneShowApplicationFinancePage) {
     return (
       <Routes>
         <Route
@@ -249,6 +258,8 @@ function AppLayout() {
         <Route path="/team/:memberSlug/:sectionSlug?" element={<TeamMemberProfile />} />
         <Route path="/ticket-confirm/:token" element={<TicketBookingConfirm />} />
         <Route path="/ticket-approval/:token" element={<TicketApproval />} />
+        <Route path="/show-application-confirm/:token" element={<ShowApplicationConfirm />} />
+        <Route path="/show-application-finance/:token" element={<ShowApplicationFinance />} />
       </Routes>
     );
   }
@@ -305,6 +316,14 @@ function AppLayout() {
               element={
                 <ProtectedRoute>
                   <ShowManagement />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/show-application"
+              element={
+                <ProtectedRoute>
+                  <ShowApplication />
                 </ProtectedRoute>
               }
             />
