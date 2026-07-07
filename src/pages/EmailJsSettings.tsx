@@ -17,6 +17,8 @@ type EmailTemplateSettings = {
   serviceId: string;
   publicKey: string;
   privateKey: string;
+  showApplicationApproverEmail: string;
+  showApplicationFinanceEmail: string;
 };
 
 const TICKET_BOOKING_TEMPLATE_ID = 'template_1qpfll8';
@@ -33,6 +35,8 @@ const defaults: EmailTemplateSettings = {
   serviceId: 'service_d39k2lv',
   publicKey: 'Ox1_IwykSClDMOhqz',
   privateKey: 'Dg7xyuMhc-xtKQbROJT7H',
+  showApplicationApproverEmail: '',
+  showApplicationFinanceEmail: '',
 };
 
 export default function EmailJsSettings() {
@@ -42,8 +46,17 @@ export default function EmailJsSettings() {
 
   useEffect(() => {
     const loadSettings = async () => {
-      const data = await dbGet('settings/emailjsTicketBooking');
-      if (data) setSettings({ ...defaults, ...(data as Partial<EmailTemplateSettings>) });
+      const [data, showApplicationData] = await Promise.all([
+        dbGet('settings/emailjsTicketBooking'),
+        dbGet('settings/showApplication'),
+      ]);
+      const showApplicationSettings = showApplicationData as { approverEmail?: string; financeEmail?: string } | null;
+      setSettings({
+        ...defaults,
+        ...(data as Partial<EmailTemplateSettings> | null),
+        showApplicationApproverEmail: showApplicationSettings?.approverEmail || (data as Partial<EmailTemplateSettings> | null)?.showApplicationApproverEmail || '',
+        showApplicationFinanceEmail: showApplicationSettings?.financeEmail || (data as Partial<EmailTemplateSettings> | null)?.showApplicationFinanceEmail || '',
+      });
     };
     loadSettings();
   }, []);
@@ -51,7 +64,13 @@ export default function EmailJsSettings() {
   const saveSettings = async () => {
     setSaving(true);
     try {
-      await dbSet('settings/emailjsTicketBooking', { ...settings, templateId: TICKET_BOOKING_TEMPLATE_ID } as unknown as Record<string, unknown>);
+      await Promise.all([
+        dbSet('settings/emailjsTicketBooking', { ...settings, templateId: TICKET_BOOKING_TEMPLATE_ID } as unknown as Record<string, unknown>),
+        dbSet('settings/showApplication', {
+          approverEmail: settings.showApplicationApproverEmail,
+          financeEmail: settings.showApplicationFinanceEmail,
+        } as Record<string, unknown>),
+      ]);
       setMessage('EmailJS settings saved.');
     } catch (err) {
       console.error('Failed to save EmailJS settings:', err);
@@ -96,6 +115,13 @@ export default function EmailJsSettings() {
             <Input className="mt-4" value={settings.ticketApprovalSubject} onChange={(e) => setSettings({ ...settings, ticketApprovalSubject: e.target.value })} placeholder="Ticket approval title" />
             <textarea value={settings.ticketApprovalBody} onChange={(e) => setSettings({ ...settings, ticketApprovalBody: e.target.value })} className="mt-4 min-h-40 w-full rounded border px-3 py-2 text-sm" />
             <p className="mt-2 text-xs text-slate-500">Variables: {'{{show_name}}'}, {'{{participants}}'}, {'{{approval_url}}'}.</p>
+          </div>
+
+          <div className="rounded-lg border bg-cyan-50 p-4">
+            <h3 className="mb-3 font-semibold text-slate-900">4. Show Application recipients</h3>
+            <Input value={settings.showApplicationApproverEmail} onChange={(e) => setSettings({ ...settings, showApplicationApproverEmail: e.target.value })} placeholder="Reviewer email for new show submissions" />
+            <Input className="mt-4" value={settings.showApplicationFinanceEmail} onChange={(e) => setSettings({ ...settings, showApplicationFinanceEmail: e.target.value })} placeholder="Finance email for Internal Sales Order Number assignment" />
+            <p className="mt-2 text-xs text-slate-500">Show Application uses these recipients for the reviewer confirmation email and the finance code assignment email.</p>
           </div>
           <Button onClick={saveSettings} disabled={saving}>{saving ? 'Saving…' : 'Save Settings'}</Button>
           {message && <p className="text-sm text-slate-600">{message}</p>}
