@@ -20,6 +20,7 @@ import {
   Calculator,
   ListTree,
   Mail,
+  FilePlus2,
 } from 'lucide-react';
 import Dashboard from './pages/Dashboard';
 import ShowCalendar from './pages/ShowCalendar';
@@ -44,6 +45,9 @@ import TicketBookingConfirm from './pages/TicketBookingConfirm';
 import TicketApproval from './pages/TicketApproval';
 import EmailJsSettings from './pages/EmailJsSettings';
 import MessageCenter from './pages/MessageCenter';
+import ShowApplication from './pages/ShowApplication';
+import ShowApplicationConfirm from './pages/ShowApplicationConfirm';
+import ShowApplicationFinance from './pages/ShowApplicationFinance';
 import ProtectedRoute from './components/ProtectedRoute';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { Navigate } from 'react-router-dom';
@@ -62,6 +66,7 @@ function Sidebar({ isOpen, setIsOpen }: { isOpen: boolean; setIsOpen: (open: boo
         { icon: LayoutDashboard, label: 'Dashboard', path: '/' },
         { icon: Calendar, label: 'Show Calendar', path: '/calendar' },
         { icon: Briefcase, label: 'Show Management', path: '/shows' },
+        { icon: FilePlus2, label: 'Show Application', path: '/show-application' },
         { icon: FileSpreadsheet, label: 'Orders & Sales', path: '/orders' },
         { icon: Users, label: 'Show Team', path: '/show-team' },
         { icon: FileSpreadsheet, label: 'Ticket & Booking', path: '/ticket_and_booking' },
@@ -218,12 +223,14 @@ function AppLayout() {
   const isStandaloneTeamMemberPage = location.pathname.startsWith('/team/');
   const isStandaloneTicketConfirmPage = location.pathname.startsWith('/ticket-confirm/');
   const isStandaloneTicketApprovalPage = location.pathname.startsWith('/ticket-approval/');
+  const isStandaloneShowApplicationConfirmPage = location.pathname.startsWith('/show-application-confirm/');
+  const isStandaloneShowApplicationFinancePage = location.pathname.startsWith('/show-application-finance/');
 
   if (loading) {
     return <div className="min-h-screen flex items-center justify-center text-slate-500">Loading…</div>;
   }
 
-  if (!user && !isLoginPage && !isStandaloneTeamMemberPage && !isStandaloneTicketConfirmPage && !isStandaloneTicketApprovalPage) {
+  if (!user && !isLoginPage && !isStandaloneTeamMemberPage && !isStandaloneTicketConfirmPage && !isStandaloneTicketApprovalPage && !isStandaloneShowApplicationConfirmPage && !isStandaloneShowApplicationFinancePage) {
     return <Navigate to="/login" replace />;
   }
 
@@ -235,7 +242,7 @@ function AppLayout() {
     );
   }
 
-  if (isStandaloneShowExcelPage || isStandaloneTeamMemberPage || isStandaloneTicketConfirmPage || isStandaloneTicketApprovalPage) {
+  if (isStandaloneShowExcelPage || isStandaloneTeamMemberPage || isStandaloneTicketConfirmPage || isStandaloneTicketApprovalPage || isStandaloneShowApplicationConfirmPage || isStandaloneShowApplicationFinancePage) {
     return (
       <Routes>
         <Route
@@ -249,6 +256,8 @@ function AppLayout() {
         <Route path="/team/:memberSlug/:sectionSlug?" element={<TeamMemberProfile />} />
         <Route path="/ticket-confirm/:token" element={<TicketBookingConfirm />} />
         <Route path="/ticket-approval/:token" element={<TicketApproval />} />
+        <Route path="/show-application-confirm/:token" element={<ShowApplicationConfirm />} />
+        <Route path="/show-application-finance/:token" element={<ShowApplicationFinance />} />
       </Routes>
     );
   }
@@ -305,6 +314,14 @@ function AppLayout() {
               element={
                 <ProtectedRoute>
                   <ShowManagement />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/show-application"
+              element={
+                <ProtectedRoute>
+                  <ShowApplication />
                 </ProtectedRoute>
               }
             />
