@@ -460,7 +460,6 @@ export default function ShowExcelList() {
     if (!editModeEnabled || !show.id || !memberId || isSaving) return;
     if (isShowTeamChangeLocked(show.id)) {
       window.alert(TEAM_MEMBER_CHANGE_LOCK_MESSAGE);
-      return;
     }
 
     setIsSaving(true);
