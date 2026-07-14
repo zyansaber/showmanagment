@@ -366,7 +366,6 @@ export default function ShowTeamAssignments() {
     const teamChanged = currentTeamMembers.length !== selectedTeamMembers.length || currentTeamMembers.some((id) => !selectedTeamMembers.includes(id));
     if (teamChanged && isShowTeamChangeLocked(selectedShow.id)) {
       window.alert(TEAM_MEMBER_CHANGE_LOCK_MESSAGE);
-      return;
     }
 
     const key = showKeyMap[selectedShow.id] || selectedShow.id;
