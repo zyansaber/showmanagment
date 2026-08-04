@@ -48,6 +48,7 @@ import MessageCenter from './pages/MessageCenter';
 import ShowApplication from './pages/ShowApplication';
 import ShowApplicationConfirm from './pages/ShowApplicationConfirm';
 import ShowApplicationFinance from './pages/ShowApplicationFinance';
+import ScheduleDealerMappingPage from './pages/ScheduleDealerMapping';
 import ProtectedRoute from './components/ProtectedRoute';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { Navigate } from 'react-router-dom';
@@ -444,6 +445,14 @@ function AppLayout() {
               element={
                 <ProtectedRoute requiredRole="admin">
                   <EmailJsSettings />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/schedule-dealer-mapping"
+              element={
+                <ProtectedRoute requiredRole="admin">
+                  <ScheduleDealerMappingPage />
                 </ProtectedRoute>
               }
             />
