@@ -21,6 +21,7 @@ import {
   ListTree,
   Mail,
   FilePlus2,
+  BarChart3,
 } from 'lucide-react';
 import Dashboard from './pages/Dashboard';
 import ShowCalendar from './pages/ShowCalendar';
@@ -49,6 +50,7 @@ import ShowApplication from './pages/ShowApplication';
 import ShowApplicationConfirm from './pages/ShowApplicationConfirm';
 import ShowApplicationFinance from './pages/ShowApplicationFinance';
 import ScheduleDealerMappingPage from './pages/ScheduleDealerMapping';
+import DealerProductDashboard from './pages/DealerProductDashboard';
 import ProtectedRoute from './components/ProtectedRoute';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { Navigate } from 'react-router-dom';
@@ -66,6 +68,7 @@ function Sidebar({ isOpen, setIsOpen }: { isOpen: boolean; setIsOpen: (open: boo
       items: [
         { icon: FilePlus2, label: 'Show Application', path: '/show-application', featured: true },
         { icon: LayoutDashboard, label: 'Dashboard', path: '/' },
+        { icon: BarChart3, label: 'Dealer Product', path: '/dealer-product' },
         { icon: Calendar, label: 'Show Calendar', path: '/calendar' },
         { icon: Briefcase, label: 'Show Management', path: '/shows' },
         { icon: FileSpreadsheet, label: 'Orders & Sales', path: '/orders' },
@@ -301,6 +304,14 @@ function AppLayout() {
               element={
                 <ProtectedRoute>
                   <Dashboard />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/dealer-product"
+              element={
+                <ProtectedRoute>
+                  <DealerProductDashboard />
                 </ProtectedRoute>
               }
             />
