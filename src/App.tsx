@@ -223,6 +223,7 @@ function AppLayout() {
   }, []);
   const isLoginPage = location.pathname === '/login';
   const isStandaloneShowExcelPage = location.pathname === '/shows-excel';
+  const isStandaloneBudgetActualsPage = location.pathname === '/budget-actuals-editor';
   const isStandaloneTeamMemberPage = location.pathname.startsWith('/team/');
   const isStandaloneTicketConfirmPage = location.pathname.startsWith('/ticket-confirm/');
   const isStandaloneTicketApprovalPage = location.pathname.startsWith('/ticket-approval/');
@@ -245,7 +246,7 @@ function AppLayout() {
     );
   }
 
-  if (isStandaloneShowExcelPage || isStandaloneTeamMemberPage || isStandaloneTicketConfirmPage || isStandaloneTicketApprovalPage || isStandaloneShowApplicationConfirmPage || isStandaloneShowApplicationFinancePage) {
+  if (isStandaloneShowExcelPage || isStandaloneBudgetActualsPage || isStandaloneTeamMemberPage || isStandaloneTicketConfirmPage || isStandaloneTicketApprovalPage || isStandaloneShowApplicationConfirmPage || isStandaloneShowApplicationFinancePage) {
     return (
       <Routes>
         <Route
@@ -256,6 +257,7 @@ function AppLayout() {
             </ProtectedRoute>
           }
         />
+        <Route path="/budget-actuals-editor" element={<ProtectedRoute><ShowBudgetExpense editableActuals /></ProtectedRoute>} />
         <Route path="/team/:memberSlug/:sectionSlug?" element={<TeamMemberProfile />} />
         <Route path="/ticket-confirm/:token" element={<TicketBookingConfirm />} />
         <Route path="/ticket-approval/:token" element={<TicketApproval />} />
