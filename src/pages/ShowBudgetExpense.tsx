@@ -2,11 +2,12 @@ import { useEffect, useMemo, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
-import { dbGet } from '@/lib/firebase';
-import { Loader2, RefreshCw } from 'lucide-react';
+import { dbGet, dbSet } from '@/lib/firebase';
+import { Eye, Loader2, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { toast } from 'sonner';
+import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuLabel, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 
 type Show = {
   id: string;
@@ -43,6 +44,7 @@ type BudgetRow = {
   showId: string;
   showName: string;
   dealership: string;
+  internalSalesOrderNumber: string;
   showYear: number | null;
   startDate?: string;
   finishDate?: string;
@@ -63,6 +65,7 @@ type BudgetRow = {
   contractNumber: string;
   totalContractValue: number;
   clawBack: number;
+  actualOverridden: boolean;
 };
 
 const formatNumber = (value: number) =>
@@ -206,7 +209,6 @@ const getShowYear = (show: Show): number | null => {
 
 const isRelevantShow = (show: Show) => {
   const year = getShowYear(show);
-  if (show.name === SPECIAL_SHOW_NAME) return true;
   return year === TARGET_YEAR;
 };
 
@@ -258,16 +260,27 @@ const compareShows = (a: Show, b: Show) => {
   return a.name.localeCompare(b.name);
 };
 
-export default function ShowBudgetExpense() {
+const OPTIONAL_COLUMNS = [
+  'dealerBudget', 'factoryBudget', 'dealerActual', 'factoryActual', 'chargeBack', 'salesOffice', 'clawBack',
+] as const;
+type OptionalColumn = (typeof OPTIONAL_COLUMNS)[number];
+const COLUMN_LABELS: Record<OptionalColumn, string> = {
+  dealerBudget: 'Dealer Budget', factoryBudget: 'Factory Budget', dealerActual: 'Dealer Actual',
+  factoryActual: 'Factory Actual', chargeBack: 'Charge Back', salesOffice: 'Sales Office', clawBack: 'Claw Back',
+};
+const SELF_OWNED_DEALERS = ['Frankston', 'Geelong', 'Launceston', 'ST James', 'Traralgon'];
+
+export default function ShowBudgetExpense({ editableActuals = false }: { editableActuals?: boolean }) {
   const [rows, setRows] = useState<BudgetRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const [visibleOptionalColumns, setVisibleOptionalColumns] = useState<Set<OptionalColumn>>(new Set());
 
   useEffect(() => {
     const loadData = async () => {
       try {
         setLoading(true);
-        const [showsData, budgetsData, ordersData, financeData, internalOrdersData, teamData, expensesData] =
+        const [showsData, budgetsData, ordersData, financeData, internalOrdersData, teamData, expensesData, mappingData, overridesData] =
           await Promise.all([
             dbGet('shows'),
             dbGet('showBudgets'),
@@ -276,6 +289,8 @@ export default function ShowBudgetExpense() {
             dbGet('finance/internalSalesOrders'),
             dbGet('teamMembers'),
             dbGet('finance/expenses'),
+            dbGet('scheduleDealerMappings'),
+            dbGet('showActualOverrides'),
           ]);
         const showList: Show[] = showsData ? Object.values(showsData) : [];
         const budgetMap = budgetsData ?? {};
@@ -296,6 +311,19 @@ export default function ShowBudgetExpense() {
           return acc;
         }, {});
         const aufnrShowMap = buildAufnrShowMap(internalOrdersData, showsById);
+        const internalOrderByShow = Object.values((internalOrdersData || {}) as Record<string, Record<string, unknown>>).reduce<Record<string, string>>((acc, order) => {
+          if (typeof order.showId === 'string') acc[order.showId] = typeof order.internalSalesOrderNumber === 'string' ? order.internalSalesOrderNumber : '';
+          return acc;
+        }, {});
+        const mappedDealerLookup = Object.entries((mappingData || {}) as Record<string, string[]>).reduce<Record<string, string>>((acc, [scheduleDealer, dealers]) => {
+          acc[scheduleDealer.trim().toLowerCase()] = scheduleDealer;
+          (dealers || []).forEach((dealer) => { acc[dealer.trim().toLowerCase()] = scheduleDealer; });
+          return acc;
+        }, {});
+        const displayDealership = (dealership?: string) => {
+          const mapped = (dealership || '').split(/[,&/\n]/).map((dealer) => mappedDealerLookup[dealer.trim().toLowerCase()]).find(Boolean);
+          return mapped || dealership || '';
+        };
 
         const roleLookup = teamMembers.reduce<Record<string, string>>((acc, member) => {
           const name = member.memberName?.trim();
@@ -369,7 +397,10 @@ export default function ShowBudgetExpense() {
           const financeActual = actualsByShow[show.id] || { dealer: 0, factory: 0 };
           const dealerActual = financeActual.dealer;
           const factoryActual = financeActual.factory;
-          const actual = dealerActual + factoryActual;
+          const calculatedActual = dealerActual + factoryActual;
+          const override = (overridesData as Record<string, { actual?: unknown }> | null)?.[show.id];
+          const actualOverridden = override?.actual !== undefined && override?.actual !== null;
+          const actual = actualOverridden ? parseNumber(override.actual) : calculatedActual;
           const chargeBack = parseNumber(budget.chargeBack);
           const diff = Number.isFinite(actual - totalBudget) ? actual - totalBudget : 0;
           const sales = salesCounts[show.id] || { total: 0, showTeam: 0, network: 0, office: 0 };
@@ -377,7 +408,8 @@ export default function ShowBudgetExpense() {
           return {
             showId: show.id,
             showName: show.name,
-            dealership: show.dealership || '',
+            dealership: displayDealership(show.dealership),
+            internalSalesOrderNumber: internalOrderByShow[show.id] || '',
             showYear: year,
             startDate: show.startDate,
             finishDate: show.finishDate,
@@ -402,6 +434,7 @@ export default function ShowBudgetExpense() {
             totalContractValue:
               contractSummary.total > 0 ? contractSummary.total : Number(budget.totalContractValue ?? 0),
             clawBack: Number(budget.clawBack ?? 0),
+            actualOverridden,
           };
         });
 
@@ -437,10 +470,13 @@ export default function ShowBudgetExpense() {
 
     const ytdTotalActual = sum(completedRows, 'actual');
     const ytdTotalBudget = sum(completedRows, 'totalBudget');
-    const ytdDealerActual = sum(completedRows, 'dealerActual');
-    const ytdDealerBudget = sum(completedRows, 'dealerBudget');
-    const ytdFactoryActual = sum(completedRows, 'factoryActual');
-    const ytdFactoryBudget = sum(completedRows, 'factoryBudget');
+    const selfOwned = rows2026.filter((row) => SELF_OWNED_DEALERS.includes(row.dealership));
+    const independent = rows2026.filter((row) => !SELF_OWNED_DEALERS.includes(row.dealership));
+    const dealerSummary = (source: BudgetRow[]) => {
+      const actual = sum(source, 'actual');
+      const contractValue = sum(source, 'totalContractValue');
+      return { actual, sales: sum(source, 'showSales'), contractValue, returnOnActual: actual ? contractValue / actual : 0 };
+    };
 
     return {
       completedRows,
@@ -448,20 +484,26 @@ export default function ShowBudgetExpense() {
       ytd: {
         totalActual: ytdTotalActual,
         totalBudget: ytdTotalBudget,
-        dealerActual: ytdDealerActual,
-        dealerBudget: ytdDealerBudget,
-        factoryActual: ytdFactoryActual,
-        factoryBudget: ytdFactoryBudget,
         pctTotal: pct(ytdTotalActual, ytdTotalBudget),
-        pctDealer: pct(ytdDealerActual, ytdDealerBudget),
-        pctFactory: pct(ytdFactoryActual, ytdFactoryBudget),
       },
-      overall: {
-        totalSales: sum(rows2026, 'showSales'),
-        totalContractValue: sum(rows2026, 'totalContractValue'),
-      },
+      selfOwned: dealerSummary(selfOwned),
+      independent: dealerSummary(independent),
     };
   }, [filteredRows]);
+
+  const optionalVisible = (column: OptionalColumn) => visibleOptionalColumns.has(column);
+  const optionalColumnCount = OPTIONAL_COLUMNS.filter(optionalVisible).length;
+  const updateActual = async (showId: string, value: string) => {
+    const actual = parseNumber(value);
+    setRows((current) => current.map((row) => row.showId === showId ? { ...row, actual, diff: actual - row.totalBudget, actualOverridden: true } : row));
+    try {
+      await dbSet(`showActualOverrides/${showId}`, { actual, updatedAt: new Date().toISOString() });
+      toast.success('Actual cost updated');
+    } catch (error) {
+      console.error('Unable to update actual cost', error);
+      toast.error('Failed to update actual cost');
+    }
+  };
 
   const varianceBadge = (pct: number) => {
     const tone =
@@ -506,6 +548,12 @@ export default function ShowBudgetExpense() {
               <RefreshCw className="mr-2 h-4 w-4" />
               Refresh
             </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild><Button variant="outline" size="sm"><Eye className="mr-2 h-4 w-4" /> Columns</Button></DropdownMenuTrigger>
+              <DropdownMenuContent align="end"><DropdownMenuLabel>Show optional columns</DropdownMenuLabel>
+                {OPTIONAL_COLUMNS.map((column) => <DropdownMenuCheckboxItem key={column} checked={optionalVisible(column)} onCheckedChange={(checked) => setVisibleOptionalColumns((current) => { const next = new Set(current); if (checked) next.add(column); else next.delete(column); return next; })}>{COLUMN_LABELS[column]}</DropdownMenuCheckboxItem>)}
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </CardHeader>
         <CardContent>
@@ -516,7 +564,7 @@ export default function ShowBudgetExpense() {
             </div>
           ) : (
             <div className="space-y-4">
-              <div className="grid gap-4 md:grid-cols-5">
+              <div className="grid gap-4 lg:grid-cols-3">
                 <Card className="border-slate-200">
                   <CardContent className="pt-4 space-y-1">
                     <p className="text-xs uppercase tracking-wide text-slate-500">Total Actual Cost (2026)</p>
@@ -532,44 +580,7 @@ export default function ShowBudgetExpense() {
                     </p>
                   </CardContent>
                 </Card>
-                <Card className="border-slate-200">
-                  <CardContent className="pt-4 space-y-1">
-                    <p className="text-xs uppercase tracking-wide text-slate-500">Total Dealer Actual (2026)</p>
-                    <p className="text-xl font-semibold text-blue-700">{formatCurrency(aggregates.ytd.dealerActual)}</p>
-                    <div className="flex items-center justify-between text-xs text-slate-600">
-                      <span>Target {formatCurrency(aggregates.ytd.dealerBudget)}</span>
-                      {varianceBadge(aggregates.ytd.pctDealer)}
-                    </div>
-                    <p className="text-[11px] text-slate-500">2026 YTD dealer actuals vs target</p>
-                  </CardContent>
-                </Card>
-                <Card className="border-slate-200">
-                  <CardContent className="pt-4 space-y-1">
-                    <p className="text-xs uppercase tracking-wide text-slate-500">Total Factory Actual (2026)</p>
-                    <p className="text-xl font-semibold text-emerald-700">
-                      {formatCurrency(aggregates.ytd.factoryActual)}
-                    </p>
-                    <div className="flex items-center justify-between text-xs text-slate-600">
-                      <span>Target {formatCurrency(aggregates.ytd.factoryBudget)}</span>
-                      {varianceBadge(aggregates.ytd.pctFactory)}
-                    </div>
-                    <p className="text-[11px] text-slate-500">2026 YTD factory actuals vs target</p>
-                  </CardContent>
-                </Card>
-                <Card className="border-slate-200">
-                  <CardContent className="pt-4">
-                    <p className="text-xs uppercase tracking-wide text-slate-500">Total Sales 2026</p>
-                    <p className="text-xl font-semibold text-slate-900">{formatNumber(aggregates.overall.totalSales)}</p>
-                  </CardContent>
-                </Card>
-                <Card className="border-slate-200">
-                  <CardContent className="pt-4">
-                    <p className="text-xs uppercase tracking-wide text-slate-500">Total Contract Value</p>
-                    <p className="text-xl font-semibold text-slate-900">
-                      {formatCurrency(aggregates.overall.totalContractValue)}
-                    </p>
-                  </CardContent>
-                </Card>
+                {(['selfOwned', 'independent'] as const).map((group) => <Card key={group} className="border-slate-200"><CardContent className="pt-4 space-y-3"><p className="text-xs font-bold uppercase tracking-wide text-slate-500">{group === 'selfOwned' ? 'Self-owned' : 'Independent Dealer'}</p><div className="grid grid-cols-2 gap-2 text-sm"><div><span className="text-slate-500">Actual</span><p className="font-semibold">{formatCurrency(aggregates[group].actual)}</p></div><div><span className="text-slate-500">Show Sales</span><p className="font-semibold">{formatNumber(aggregates[group].sales)}</p></div><div><span className="text-slate-500">Contract Value</span><p className="font-semibold">{formatCurrency(aggregates[group].contractValue)}</p></div><div><span className="text-slate-500">Contract / Actual</span><p className="font-semibold">{aggregates[group].returnOnActual.toFixed(2)}×</p></div></div></CardContent></Card>)}
               </div>
               <p className="text-xs text-slate-500">
                 Sales details below reflect only orders that were confirmed in the Orders &amp; Sales dashboard.
@@ -581,45 +592,46 @@ export default function ShowBudgetExpense() {
                       <TableHead rowSpan={2} className="min-w-[160px] align-middle">
                         Show Name
                       </TableHead>
+                      <TableHead rowSpan={2} className="min-w-[150px] align-middle">Internal Sales Order Number</TableHead>
                       <TableHead rowSpan={2} className="min-w-[120px] align-middle">
                         Dealership
                       </TableHead>
                       <TableHead rowSpan={2} className="text-center border-r-2 border-slate-300">
                         Schedule
                       </TableHead>
-                      <TableHead colSpan={3} className="text-center border-r-2 border-slate-300">
+                      <TableHead colSpan={1 + Number(optionalVisible('dealerBudget')) + Number(optionalVisible('factoryBudget'))} className="text-center border-r-2 border-slate-300">
                         Budget
                       </TableHead>
-                      <TableHead colSpan={5} className="text-center bg-slate-100/60 border-r border-slate-200">
+                      <TableHead colSpan={2 + Number(optionalVisible('dealerActual')) + Number(optionalVisible('factoryActual')) + Number(optionalVisible('chargeBack'))} className="text-center bg-slate-100/60 border-r border-slate-200">
                         Actual
                       </TableHead>
-                      <TableHead colSpan={8} className="text-center bg-slate-50">
+                      <TableHead colSpan={6 + Number(optionalVisible('salesOffice')) + Number(optionalVisible('clawBack'))} className="text-center bg-slate-50">
                         Sales Details
                       </TableHead>
                     </TableRow>
                     <TableRow className="bg-slate-50">
                       <TableHead className="text-right">Total Budget</TableHead>
-                      <TableHead className="text-right">Dealer Budget</TableHead>
-                      <TableHead className="border-r-2 border-slate-300 text-right">Factory Budget</TableHead>
+                      {optionalVisible('dealerBudget') && <TableHead className="text-right">Dealer Budget</TableHead>}
+                      {optionalVisible('factoryBudget') && <TableHead className="text-right">Factory Budget</TableHead>}
                       <TableHead className="bg-slate-100/60 text-blue-800 text-right">Actual</TableHead>
-                      <TableHead className="bg-slate-100/60 text-right">Dealer Actual</TableHead>
-                      <TableHead className="bg-slate-100/60 text-right">Factory Actual</TableHead>
-                      <TableHead className="bg-slate-100/60 text-right">Charge Back</TableHead>
+                      {optionalVisible('dealerActual') && <TableHead className="bg-slate-100/60 text-right">Dealer Actual</TableHead>}
+                      {optionalVisible('factoryActual') && <TableHead className="bg-slate-100/60 text-right">Factory Actual</TableHead>}
+                      {optionalVisible('chargeBack') && <TableHead className="bg-slate-100/60 text-right">Charge Back</TableHead>}
                       <TableHead className="bg-slate-100/60 border-r border-slate-200 text-right">Diff</TableHead>
                       <TableHead>Show Target</TableHead>
                       <TableHead>Show Sales</TableHead>
                       <TableHead>Sales by show team</TableHead>
                       <TableHead>Sales by network</TableHead>
-                      <TableHead>Sales Office</TableHead>
+                      {optionalVisible('salesOffice') && <TableHead>Sales Office</TableHead>}
                       <TableHead>Contract Number</TableHead>
                       <TableHead className="text-right">Total contract value</TableHead>
-                      <TableHead className="text-right">Claw Back</TableHead>
+                      {optionalVisible('clawBack') && <TableHead className="text-right">Claw Back</TableHead>}
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {filteredRows.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={19} className="text-center text-sm text-slate-500">
+                        <TableCell colSpan={13 + optionalColumnCount} className="text-center text-sm text-slate-500">
                           No data yet. Connect your data source to populate this table.
                         </TableCell>
                       </TableRow>
@@ -631,6 +643,7 @@ export default function ShowBudgetExpense() {
                         return (
                           <TableRow key={row.showId} className={idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/60'}>
                             <TableCell className="font-medium text-slate-900">{row.showName}</TableCell>
+                            <TableCell>{row.internalSalesOrderNumber || '-'}</TableCell>
                             <TableCell>{row.dealership || '-'}</TableCell>
                             <TableCell className="text-center border-r-2 border-slate-300">
                               {finished ? (
@@ -648,12 +661,12 @@ export default function ShowBudgetExpense() {
                               )}
                             </TableCell>
                             <TableCell className="text-right font-semibold text-slate-900">{formatCurrency(row.totalBudget)}</TableCell>
-                            <TableCell className="text-right">{formatCurrency(row.dealerBudget)}</TableCell>
-                            <TableCell className="border-r-2 border-slate-300 text-right">{formatCurrency(row.factoryBudget)}</TableCell>
-                            <TableCell className="text-right text-blue-700 bg-slate-100/30">{formatCurrency(row.actual)}</TableCell>
-                            <TableCell className="text-right bg-slate-100/30">{formatCurrency(row.dealerActual)}</TableCell>
-                            <TableCell className="text-right bg-slate-100/30">{formatCurrency(row.factoryActual)}</TableCell>
-                            <TableCell className="text-right bg-slate-100/30">{formatCurrency(row.chargeBack)}</TableCell>
+                            {optionalVisible('dealerBudget') && <TableCell className="text-right">{formatCurrency(row.dealerBudget)}</TableCell>}
+                            {optionalVisible('factoryBudget') && <TableCell className="border-r-2 border-slate-300 text-right">{formatCurrency(row.factoryBudget)}</TableCell>}
+                            <TableCell className={`text-right bg-slate-100/30 ${row.actualOverridden ? 'font-bold text-red-600' : 'text-blue-700'}`}>{editableActuals ? <Input className={`h-8 min-w-28 text-right ${row.actualOverridden ? 'font-bold text-red-600' : ''}`} type="number" defaultValue={row.actual} onBlur={(event) => void updateActual(row.showId, event.target.value)} /> : formatCurrency(row.actual)}</TableCell>
+                            {optionalVisible('dealerActual') && <TableCell className="text-right bg-slate-100/30">{formatCurrency(row.dealerActual)}</TableCell>}
+                            {optionalVisible('factoryActual') && <TableCell className="text-right bg-slate-100/30">{formatCurrency(row.factoryActual)}</TableCell>}
+                            {optionalVisible('chargeBack') && <TableCell className="text-right bg-slate-100/30">{formatCurrency(row.chargeBack)}</TableCell>}
                             <TableCell
                               className={`text-right bg-slate-100/30 border-r border-slate-200 ${
                                 row.diff < 0 ? 'text-red-600' : 'text-emerald-700'
@@ -669,10 +682,10 @@ export default function ShowBudgetExpense() {
                             <TableCell>{formatNumber(row.showSales)}</TableCell>
                             <TableCell>{formatNumber(row.salesByShowTeam)}</TableCell>
                             <TableCell>{formatNumber(row.salesByNetwork)}</TableCell>
-                            <TableCell>{formatNumber(row.salesOffice)}</TableCell>
+                            {optionalVisible('salesOffice') && <TableCell>{formatNumber(row.salesOffice)}</TableCell>}
                             <TableCell>{row.contractNumber || '-'}</TableCell>
                             <TableCell className="text-right">{formatCurrency(row.totalContractValue)}</TableCell>
-                            <TableCell className="text-right">{formatCurrency(row.clawBack)}</TableCell>
+                            {optionalVisible('clawBack') && <TableCell className="text-right">{formatCurrency(row.clawBack)}</TableCell>}
                           </TableRow>
                         );
                       })
