@@ -289,7 +289,10 @@ export default function Dashboard() {
   }, [orders, teamMembers, teamMemberDaysMap]);
 
   const salespersonStatsByAvgDaily = useMemo(
-    () => [...salespersonStats].sort((a, b) => b.avgDaily - a.avgDaily || b.sales - a.sales || a.name.localeCompare(b.name)),
+    () =>
+      salespersonStats
+        .filter(({ name }) => name.trim().toLowerCase() !== 'dealership')
+        .sort((a, b) => b.avgDaily - a.avgDaily || b.sales - a.sales || a.name.localeCompare(b.name)),
     [salespersonStats]
   );
 
