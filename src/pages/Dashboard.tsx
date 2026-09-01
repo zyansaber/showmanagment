@@ -330,32 +330,18 @@ export default function Dashboard() {
       value,
     }));
 
-  // Calculate show statistics by state (skip N/A values)
-  const stateStats = shows.reduce((acc, show) => {
-    const state = show.siteLocation?.state?.trim();
-    if (!state) {
-      return acc;
-    }
-    if (!acc[state]) {
-      acc[state] = { shows: 0, totalSales: 0, totalDays: 0 };
-    }
-    acc[state].shows += 1;
-    // Only add sales if not N/A (not 0)
-    if (show.sales2025 > 0) {
-      acc[state].totalSales += show.sales2025;
-    }
-    // Only add days if not N/A (not 0)
-    if (show.showDuration && show.showDuration > 0) {
-      acc[state].totalDays += show.showDuration;
-    }
-    return acc;
-  }, {} as Record<string, { shows: number; totalSales: number; totalDays: number }>);
+  const getShowDurationDays = (show: Show) => {
+    const configuredDuration = parseNumber(show.showDuration);
+    if (configuredDuration > 0) return configuredDuration;
 
-  const stateData = Object.entries(stateStats).map(([state, data]) => ({
-    state,
-    shows: data.shows,
-    dailySales: data.totalDays > 0 ? (data.totalSales / data.totalDays).toFixed(2) : 0
-  }));
+    const start = show.startDate ? new Date(show.startDate) : null;
+    const finish = show.finishDate ? new Date(show.finishDate) : null;
+    if (!start || !finish || Number.isNaN(start.getTime()) || Number.isNaN(finish.getTime())) return 0;
+    start.setHours(0, 0, 0, 0);
+    finish.setHours(0, 0, 0, 0);
+    const duration = Math.floor((finish.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+    return duration > 0 ? duration : 0;
+  };
 
   // Calculate overall statistics (skip N/A values)
   const getYear = (date?: string) => {
@@ -430,6 +416,38 @@ export default function Dashboard() {
   const completedShows = finishedShows2026.length;
   const completedShowIds = new Set(finishedShows2026.map((show) => show.id));
   const completedShowOrders = orders.filter((order) => completedShowIds.has(order.showId) && isConfirmationOrder(order));
+
+  const confirmationOrdersByShow = orders.reduce<Record<string, number>>((acc, order) => {
+    if (!order.showId || !isConfirmationOrder(order)) return acc;
+    acc[order.showId] = (acc[order.showId] || 0) + 1;
+    return acc;
+  }, {});
+
+  // Match Orders & Sales: confirmed orders divided by show days, for completed shows only.
+  const stateStats = shows.filter(isShowFinishedForYtd).reduce((acc, show) => {
+    const rawState = show.siteLocation?.state?.trim().toUpperCase() || '';
+    const state = !rawState || rawState === 'N/A' || rawState === 'NA' ? 'No setting states' : rawState;
+    if (!acc[state]) acc[state] = { shows: 0, totalSales: 0, totalDays: 0 };
+    acc[state].shows += 1;
+    acc[state].totalSales += confirmationOrdersByShow[show.id] || 0;
+    acc[state].totalDays += getShowDurationDays(show);
+    return acc;
+  }, {} as Record<string, { shows: number; totalSales: number; totalDays: number }>);
+
+  const stateData = Object.entries(stateStats)
+    .map(([state, data]) => ({
+      state,
+      shows: data.shows,
+      totalSales: data.totalSales,
+      totalDays: data.totalDays,
+      dailySales: data.totalDays > 0 ? Number((data.totalSales / data.totalDays).toFixed(2)) : 0,
+    }))
+    .sort((a, b) => {
+      if (a.state === 'No setting states') return 1;
+      if (b.state === 'No setting states') return -1;
+      return a.state.localeCompare(b.state);
+    });
+
   const totalSales2026 = orders.reduce((sum, order) => {
     const year = showYearById[order.showId];
     if (year !== 2026 || !isConfirmationOrder(order)) return sum;
@@ -1221,9 +1239,11 @@ export default function Dashboard() {
         {/* Show Analytics Tab */}
         <TabsContent value="shows" className="space-y-6">
           <Card>
-            <CardHeader>
-              <CardTitle>Shows by State</CardTitle>
-              <CardDescription>Show count and daily sales performance by Australian state</CardDescription>
+              <CardHeader>
+                <CardTitle>Shows by State</CardTitle>
+                <CardDescription>
+                  Completed shows only. Avg daily sales = confirmation orders from Orders &amp; Sales ÷ total show days.
+                </CardDescription>
             </CardHeader>
             <CardContent>
               {stateData.length > 0 ? (
@@ -1235,7 +1255,7 @@ export default function Dashboard() {
                     <YAxis yAxisId="right" orientation="right" />
                     <Tooltip />
                     <Legend />
-                    <Bar yAxisId="left" dataKey="shows" fill="#3b82f6" name="Number of Shows" />
+                    <Bar yAxisId="left" dataKey="shows" fill="#3b82f6" name="Completed Shows" />
                     <Bar yAxisId="right" dataKey="dailySales" fill="#10b981" name="Avg Daily Sales" />
                   </BarChart>
                 </ResponsiveContainer>
