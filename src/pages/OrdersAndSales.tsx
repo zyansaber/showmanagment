@@ -19,7 +19,6 @@ import { cn } from '@/lib/utils';
 
 const CONFIRMATION_STATUS_ID = 'confirmation';
 const CANCELLATION_STATUS_ID = 'cancellation';
-const UNSET_STATE_FILTER = '__unset_state__';
 const DEFAULT_STATUS_OPTIONS: OrderStatusOption[] = [
   {
     id: CONFIRMATION_STATUS_ID,
@@ -226,11 +225,6 @@ const getPrimaryShowDateValue = (show: Show) => {
   return Number.MAX_SAFE_INTEGER;
 };
 
-const getShowState = (show: Show | undefined) => {
-  const state = show?.siteLocation?.state;
-  return typeof state === 'string' ? state.trim().toUpperCase() : '';
-};
-
 const showOccursInMonth = (show: Show | undefined, selectedMonth: string) => {
   if (!show || !selectedMonth) return true;
   const [yearText, monthText] = selectedMonth.split('-');
@@ -305,7 +299,6 @@ export default function OrdersAndSales() {
     orderStatusId: '',
   });
   const [statusFilter, setStatusFilter] = useState<'all' | 'unassigned' | string>('all');
-  const [stateFilter, setStateFilter] = useState('all');
   const [showFilter, setShowFilter] = useState('all');
   const [orderingDateFilter, setOrderingDateFilter] = useState('');
   const [showMonthFilter, setShowMonthFilter] = useState('');
@@ -429,34 +422,8 @@ export default function OrdersAndSales() {
     }, {});
   }, [statusOptions]);
 
-  const showMatchesStateFilter = useCallback(
-    (showId: string | undefined) => {
-      if (stateFilter === 'all') return true;
-      const showState = getShowState(showLookup[showId || '']);
-      return stateFilter === UNSET_STATE_FILTER ? !showState : showState === stateFilter;
-    },
-    [showLookup, stateFilter]
-  );
-
-  const stateFilterTabs = useMemo(() => {
-    const counts = new Map<string, number>();
-    orders.forEach((order) => {
-      const state = getShowState(showLookup[order.showId]) || UNSET_STATE_FILTER;
-      counts.set(state, (counts.get(state) || 0) + 1);
-    });
-
-    return Array.from(counts.entries())
-      .map(([id, count]) => ({ id, label: id === UNSET_STATE_FILTER ? 'No setting states' : id, count }))
-      .sort((a, b) => {
-        if (a.id === UNSET_STATE_FILTER) return 1;
-        if (b.id === UNSET_STATE_FILTER) return -1;
-        return a.label.localeCompare(b.label);
-      });
-  }, [orders, showLookup]);
-
   const showFilterTabs = useMemo(() => {
     const countMap = orders.reduce<Record<string, number>>((acc, order) => {
-      if (!showMatchesStateFilter(order.showId)) return acc;
       if (!order.showId) return acc;
       acc[order.showId] = (acc[order.showId] || 0) + 1;
       return acc;
@@ -469,7 +436,7 @@ export default function OrdersAndSales() {
         count,
       }))
       .sort((a, b) => a.label.localeCompare(b.label));
-  }, [orders, showLookup, showMatchesStateFilter]);
+  }, [orders, showLookup]);
 
   useEffect(() => {
     if (showFilter === 'all') return;
@@ -502,7 +469,6 @@ export default function OrdersAndSales() {
           return false;
         }
         if (showFilter !== 'all' && order.showId !== showFilter) return false;
-        if (!showMatchesStateFilter(order.showId)) return false;
         if (selectedDate && String(order.date || '').slice(0, 10) !== selectedDate) return false;
         if (selectedShowMonth && !showOccursInMonth(showLookup[order.showId], selectedShowMonth)) return false;
         if (!term) return true;
@@ -537,7 +503,7 @@ export default function OrdersAndSales() {
         handoverDealer: order.handoverDealer || showLookup[order.showId]?.handoverDealer || 'Not set',
         dealerStatus: deriveDealerStatus(order),
     }));
-  }, [deriveDealerStatus, orderingDateFilter, orders, searchTerm, showFilter, showLookup, showMatchesStateFilter, showMonthFilter, statusFilter, statusLookup]);
+  }, [deriveDealerStatus, orderingDateFilter, orders, searchTerm, showFilter, showLookup, showMonthFilter, statusFilter, statusLookup]);
 
   const handleExportOrdersExcel = useCallback(() => {
     if (!decoratedOrders.length) {
@@ -609,7 +575,6 @@ export default function OrdersAndSales() {
 
     return orders.filter((order) => {
       if (showFilter !== 'all' && order.showId !== showFilter) return false;
-      if (!showMatchesStateFilter(order.showId)) return false;
       if (selectedDate && String(order.date || '').slice(0, 10) !== selectedDate) return false;
       if (selectedShowMonth && !showOccursInMonth(showLookup[order.showId], selectedShowMonth)) return false;
       if (!term) return true;
@@ -640,7 +605,7 @@ export default function OrdersAndSales() {
 
       return haystack.includes(term);
     });
-  }, [orderingDateFilter, orders, searchTerm, showFilter, showLookup, showMatchesStateFilter, showMonthFilter, statusLookup]);
+  }, [orderingDateFilter, orders, searchTerm, showFilter, showLookup, showMonthFilter, statusLookup]);
 
   const orderingDateCount = useMemo(() => {
     const selectedDate = orderingDateFilter.trim();
@@ -651,13 +616,12 @@ export default function OrdersAndSales() {
         return false;
       }
       if (showFilter !== 'all' && order.showId !== showFilter) return false;
-      if (!showMatchesStateFilter(order.showId)) return false;
       if (selectedShowMonth && !showOccursInMonth(showLookup[order.showId], selectedShowMonth)) return false;
       if (!selectedDate) return true;
       if (String(order.date || '').slice(0, 10) !== selectedDate) return false;
       return true;
     }).length;
-  }, [orderingDateFilter, orders, showFilter, showLookup, showMatchesStateFilter, showMonthFilter, statusFilter]);
+  }, [orderingDateFilter, orders, showFilter, showLookup, showMonthFilter, statusFilter]);
 
   const showMonthCount = useMemo(() => {
     const selectedShowMonth = showMonthFilter.trim();
@@ -665,11 +629,10 @@ export default function OrdersAndSales() {
       if (statusFilter === 'unassigned' && order.orderStatusId) return false;
       if (statusFilter !== 'all' && statusFilter !== 'unassigned' && order.orderStatusId !== statusFilter) return false;
       if (showFilter !== 'all' && order.showId !== showFilter) return false;
-      if (!showMatchesStateFilter(order.showId)) return false;
       if (!selectedShowMonth) return true;
       return showOccursInMonth(showLookup[order.showId], selectedShowMonth);
     }).length;
-  }, [orders, showFilter, showLookup, showMatchesStateFilter, showMonthFilter, statusFilter]);
+  }, [orders, showFilter, showLookup, showMonthFilter, statusFilter]);
 
 
 
@@ -684,7 +647,6 @@ export default function OrdersAndSales() {
     const filteredConfirmationOrders = orders.filter((order) => {
       if (order.orderStatusId !== CONFIRMATION_STATUS_ID) return false;
       if (showFilter !== 'all' && order.showId !== showFilter) return false;
-      if (!showMatchesStateFilter(order.showId)) return false;
       if (showMonthFilter && !showOccursInMonth(showLookup[order.showId], showMonthFilter)) return false;
       return true;
     });
@@ -736,7 +698,7 @@ export default function OrdersAndSales() {
       currentMonthLabel: now.toLocaleDateString('en-AU', { month: 'short', year: 'numeric' }),
       previousMonthLabel: previousMonthDate.toLocaleDateString('en-AU', { month: 'short', year: 'numeric' }),
     };
-  }, [orders, showFilter, showLookup, showMatchesStateFilter, showMonthFilter]);
+  }, [orders, showFilter, showLookup, showMonthFilter]);
 
   const statusCounts = useMemo(
     () =>
@@ -1363,56 +1325,7 @@ export default function OrdersAndSales() {
         ))}
       </div>
 
-      <div className="space-y-2">
-        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Filter by state</p>
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={() => {
-              setStateFilter('all');
-              setShowFilter('all');
-            }}
-            className={cn(
-              'inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors',
-              stateFilter === 'all'
-                ? 'border-emerald-600 bg-emerald-600 text-white shadow-sm'
-                : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50'
-            )}
-          >
-            <span>All States</span>
-            <span className={cn('rounded-full px-1.5 py-0.5 text-[10px]', stateFilter === 'all' ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-600')}>
-              {orders.length}
-            </span>
-          </button>
-          {stateFilterTabs.map((state) => {
-            const isActive = stateFilter === state.id;
-            return (
-              <button
-                key={state.id}
-                type="button"
-                onClick={() => {
-                  setStateFilter(state.id);
-                  setShowFilter('all');
-                }}
-                className={cn(
-                  'inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors',
-                  isActive
-                    ? 'border-emerald-700 bg-emerald-700 text-white shadow-sm'
-                    : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50'
-                )}
-              >
-                <span>{state.label}</span>
-                <span className={cn('rounded-full px-1.5 py-0.5 text-[10px]', isActive ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-600')}>
-                  {state.count}
-                </span>
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
       <div className="space-y-3">
-        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Filter by show</p>
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
@@ -1426,7 +1339,7 @@ export default function OrdersAndSales() {
           >
             <span>All Shows</span>
             <span className={cn('rounded-full px-1.5 py-0.5 text-[10px]', showFilter === 'all' ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-600')}>
-              {showFilterTabs.reduce((total, show) => total + show.count, 0)}
+              {orders.length}
             </span>
           </button>
           {showFilterTabs.map((show) => {
