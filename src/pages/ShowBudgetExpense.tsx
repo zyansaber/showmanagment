@@ -19,7 +19,6 @@ type Show = {
   sales2026?: number;
   startDate?: string;
   finishDate?: string;
-  showDuration?: number | string;
   status?: string;
 };
 
@@ -49,7 +48,6 @@ type BudgetRow = {
   showYear: number | null;
   startDate?: string;
   finishDate?: string;
-  showDuration?: number | string;
   status?: string;
   totalBudget: number;
   dealerBudget: number;
@@ -152,19 +150,6 @@ const daysUntilStart = (row: BudgetRow) => {
   if (diffMs < 0) return null;
   const days = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
   return days <= 10 ? days : null;
-};
-
-const getShowDurationDays = (row: Pick<BudgetRow, 'showDuration' | 'startDate' | 'finishDate'>) => {
-  const configuredDuration = Number(row.showDuration);
-  if (Number.isFinite(configuredDuration) && configuredDuration > 0) return configuredDuration;
-
-  const start = parseDateSafe(row.startDate);
-  const finish = parseDateSafe(row.finishDate);
-  if (!start || !finish) return 0;
-  start.setHours(0, 0, 0, 0);
-  finish.setHours(0, 0, 0, 0);
-  const duration = Math.floor((finish.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1;
-  return duration > 0 ? duration : 0;
 };
 
 type FinanceLine = {
@@ -487,7 +472,6 @@ export default function ShowBudgetExpense({ editableActuals = false }: { editabl
           showYear: year,
           startDate: show.startDate,
           finishDate: show.finishDate,
-          showDuration: show.showDuration,
           status: show.status,
           totalBudget,
           dealerBudget,
@@ -577,7 +561,6 @@ export default function ShowBudgetExpense({ editableActuals = false }: { editabl
       chargeBack: add('chargeBack'), diff: add('diff'), showTarget: add('showTarget'), showSales: add('showSales'),
       salesByShowTeam: add('salesByShowTeam'), salesByNetwork: add('salesByNetwork'), salesOffice: add('salesOffice'),
       totalContractValue: add('totalContractValue'), clawBack: add('clawBack'),
-      showDays: filteredRows.reduce((total, row) => total + getShowDurationDays(row), 0),
     };
   }, [filteredRows]);
 
@@ -768,9 +751,6 @@ export default function ShowBudgetExpense({ editableActuals = false }: { editabl
                       <TableHead rowSpan={2} className="sticky top-0 z-20 h-9 bg-slate-50 text-center align-middle font-semibold text-slate-700">
                         Schedule
                       </TableHead>
-                      <TableHead rowSpan={2} className="sticky top-0 z-20 h-9 min-w-[70px] bg-slate-50 text-right align-middle font-semibold text-slate-700">
-                        Days
-                      </TableHead>
                       <TableHead
                         colSpan={1 + Number(optionalVisible('dealerBudget')) + Number(optionalVisible('factoryBudget'))}
                         className={`sticky top-0 z-20 h-9 bg-slate-50 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-500 ${EDGE}`}
@@ -813,7 +793,7 @@ export default function ShowBudgetExpense({ editableActuals = false }: { editabl
                   <TableBody>
                     {filteredRows.length === 0 ? (
                       <TableRow className="hover:bg-transparent">
-                        <TableCell colSpan={14 + optionalColumnCount} className="py-14 text-center">
+                        <TableCell colSpan={13 + optionalColumnCount} className="py-14 text-center">
                           <Inbox className="mx-auto mb-3 h-7 w-7 text-slate-300" />
                           <p className="text-sm font-medium text-slate-700">
                             {search ? 'No show matches that search' : `No ${TARGET_YEAR} shows to report on yet`}
@@ -851,9 +831,6 @@ export default function ShowBudgetExpense({ editableActuals = false }: { editabl
                               ) : (
                                 <span className="text-slate-500">{formatShortDate(row.startDate)}</span>
                               )}
-                            </TableCell>
-                            <TableCell className={`${numeric} font-medium text-slate-700`}>
-                              {getShowDurationDays(row) || <span className="text-slate-300">—</span>}
                             </TableCell>
 
                             <TableCell className={`${numeric} ${BAND.budget} font-medium text-slate-900 ${EDGE}`}>{formatCurrency(row.totalBudget)}</TableCell>
@@ -907,7 +884,6 @@ export default function ShowBudgetExpense({ editableActuals = false }: { editabl
                         <TableCell className="bg-inherit" />
                         <TableCell className="bg-inherit" />
                         <TableCell className="bg-inherit" />
-                        <TableCell className={`${numeric} bg-inherit text-slate-700`}>{formatNumber(totals.showDays)}</TableCell>
                         <TableCell className={`${numeric} bg-inherit text-slate-900 ${EDGE}`}>{formatCurrency(totals.totalBudget)}</TableCell>
                         {optionalVisible('dealerBudget') && <TableCell className={`${numeric} bg-inherit text-slate-700`}>{formatCurrency(totals.dealerBudget)}</TableCell>}
                         {optionalVisible('factoryBudget') && <TableCell className={`${numeric} bg-inherit text-slate-700`}>{formatCurrency(totals.factoryBudget)}</TableCell>}

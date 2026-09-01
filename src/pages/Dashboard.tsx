@@ -330,58 +330,32 @@ export default function Dashboard() {
       value,
     }));
 
-  const getShowDurationDays = (show: Show) => {
-    const configuredDuration = parseNumber(show.showDuration);
-    if (configuredDuration > 0) return configuredDuration;
-
-    const start = show.startDate ? new Date(show.startDate) : null;
-    const finish = show.finishDate ? new Date(show.finishDate) : null;
-    if (!start || !finish || Number.isNaN(start.getTime()) || Number.isNaN(finish.getTime())) return 0;
-    start.setHours(0, 0, 0, 0);
-    finish.setHours(0, 0, 0, 0);
-    const duration = Math.floor((finish.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1;
-    return duration > 0 ? duration : 0;
-  };
-
-  const getShowSales = (show: Show) => {
-    const datedSales = [
-      { year: 2026, value: parseNumber(show.sales2026) },
-      { year: 2025, value: parseNumber(show.sales2025) },
-      { year: 2024, value: parseNumber(show.sales2024) },
-    ];
-    const showYear = [show.startDate, show.finishDate]
-      .map((value) => (value ? new Date(value) : null))
-      .find((date) => date && !Number.isNaN(date.getTime()))
-      ?.getFullYear();
-    const salesForShowYear = datedSales.find((entry) => entry.year === showYear);
-    return salesForShowYear ? salesForShowYear.value : datedSales.find((entry) => entry.value > 0)?.value || 0;
-  };
-
-  // Calculate show statistics by state, keeping unset states visible and state names consistent.
+  // Calculate show statistics by state (skip N/A values)
   const stateStats = shows.reduce((acc, show) => {
-    const rawState = show.siteLocation?.state?.trim().toUpperCase() || '';
-    const state = !rawState || rawState === 'N/A' || rawState === 'NA' ? 'No setting states' : rawState;
+    const state = show.siteLocation?.state?.trim();
+    if (!state) {
+      return acc;
+    }
     if (!acc[state]) {
       acc[state] = { shows: 0, totalSales: 0, totalDays: 0 };
     }
     acc[state].shows += 1;
-    acc[state].totalSales += getShowSales(show);
-    acc[state].totalDays += getShowDurationDays(show);
+    // Only add sales if not N/A (not 0)
+    if (show.sales2025 > 0) {
+      acc[state].totalSales += show.sales2025;
+    }
+    // Only add days if not N/A (not 0)
+    if (show.showDuration && show.showDuration > 0) {
+      acc[state].totalDays += show.showDuration;
+    }
     return acc;
   }, {} as Record<string, { shows: number; totalSales: number; totalDays: number }>);
 
-  const stateData = Object.entries(stateStats)
-    .map(([state, data]) => ({
-      state,
-      shows: data.shows,
-      totalDays: data.totalDays,
-      dailySales: data.totalDays > 0 ? Number((data.totalSales / data.totalDays).toFixed(2)) : 0,
-    }))
-    .sort((a, b) => {
-      if (a.state === 'No setting states') return 1;
-      if (b.state === 'No setting states') return -1;
-      return a.state.localeCompare(b.state);
-    });
+  const stateData = Object.entries(stateStats).map(([state, data]) => ({
+    state,
+    shows: data.shows,
+    dailySales: data.totalDays > 0 ? (data.totalSales / data.totalDays).toFixed(2) : 0
+  }));
 
   // Calculate overall statistics (skip N/A values)
   const getYear = (date?: string) => {
