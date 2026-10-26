@@ -3,6 +3,7 @@ import { getAuth } from "firebase/auth";
 import { getDatabase, ref, set, get, update, remove, push, query, orderByChild, equalTo, onValue, off } from "firebase/database";
 import { getAnalytics } from "firebase/analytics";
 import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
+import { activeYear, yearPath } from './showYear';
 
 // Primary Firebase (Show Management)
 const firebaseConfig = {
@@ -37,32 +38,50 @@ export const analytics = getAnalytics(app);
 export const storage = getStorage(app);
 
 // Database helper functions for primary Firebase
-export const dbRef = (path: string) => ref(database, path);
+export const dbRef = (path: string) => ref(database, yearPath(path));
 
-export const dbSet = (path: string, data: Record<string, unknown>) => set(ref(database, path), data);
+export const dbSet = (path: string, data: Record<string, unknown>) => set(dbRef(path), data);
 
 export const dbGet = async (path: string) => {
-  const snapshot = await get(ref(database, path));
+  const snapshot = await get(dbRef(path));
+  return snapshot.exists() ? snapshot.val() : null;
+};
+
+// Read-only source for the temporary name list in the 2027 Finance Result view.
+export const dbGet2026ShowsForFinanceTemplate = async () => {
+  if (activeYear !== 2027) throw new Error('Name templates are available only for 2027.');
+  const snapshot = await get(ref(database, 'shows'));
   return snapshot.exists() ? snapshot.val() : null;
 };
 
 export const dbSubscribe = (path: string, callback: (value: unknown) => void) => {
-  const reference = ref(database, path);
+  const reference = dbRef(path);
   onValue(reference, (snapshot) => callback(snapshot.exists() ? snapshot.val() : null));
   return () => off(reference);
 };
 
-export const dbUpdate = (path: string, data: Record<string, unknown>) => update(ref(database, path), data);
+export const dbUpdate = (path: string, data: Record<string, unknown>) => update(dbRef(path), data);
 
-export const dbRemove = (path: string) => remove(ref(database, path));
+export const dbRemove = (path: string) => remove(dbRef(path));
 
 export const dbPush = (path: string, data: Record<string, unknown>) => {
-  const newRef = push(ref(database, path));
+  const newRef = push(dbRef(path));
   return set(newRef, data).then(() => newRef.key);
 };
 
 export const dbQuery = (path: string, orderBy: string, equalToValue: string | number | boolean) => {
-  return query(ref(database, path), orderByChild(orderBy), equalTo(equalToValue));
+  return query(dbRef(path), orderByChild(orderBy), equalTo(equalToValue));
+};
+
+// The import is a single atomic update, restricted to the 2027 business tree.
+export const dbImport2027 = (updates: Record<string, unknown>) => {
+  if (activeYear !== 2027) throw new Error('Excel import is available only for 2027.');
+  for (const path of Object.keys(updates)) {
+    if (!/^(shows|showBudgets|showActualOverrides|finance\/internalSalesOrders)\/[A-Za-z0-9_-]+(?:\/[A-Za-z0-9_-]+)*$/.test(path)) {
+      throw new Error('Invalid 2027 import destination.');
+    }
+  }
+  return update(ref(database, 'years/2027'), updates);
 };
 
 // Database helper functions for scheduling Firebase
@@ -85,7 +104,7 @@ export const schedulingDbPush = (path: string, data: Record<string, unknown>) =>
 };
 
 export const uploadStorageFile = async (path: string, file: File) => {
-  const fileRef = storageRef(storage, path);
+  const fileRef = storageRef(storage, activeYear === 2027 ? `years/2027/${path}` : path);
   await uploadBytes(fileRef, file);
   return getDownloadURL(fileRef);
 };

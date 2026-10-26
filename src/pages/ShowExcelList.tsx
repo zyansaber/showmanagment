@@ -1,3 +1,4 @@
+import { activeYear, targetField, salesField, withShowYear } from '@/lib/showYear';
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { FileSpreadsheet, RefreshCw, Search, Eye, EyeOff, Lock, Unlock, Download, Upload, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -27,7 +28,9 @@ type ShowRecord = {
   target2025?: number | string;
   sales2025?: number | string;
   target2026?: number | string;
+  target2027?: number | string;
   sales2026?: number | string;
+  sales2027?: number | string;
   eventOrganiser?: string;
   caravansOnDisplay?: number | string;
   standSize?: string;
@@ -743,7 +746,7 @@ export default function ShowExcelList() {
                         <span title="Dealership member is external and does not open a team portal">{member.memberName || member.memberId}</span>
                       ) : (
                         <a
-                          href={`/team/${makeMemberSlug(member)}`}
+                          href={withShowYear(`/team/${makeMemberSlug(member)}`)}
                           className="underline-offset-2 hover:underline"
                           title={`Open ${member.memberName || member.memberId} profile`}
                         >
@@ -764,7 +767,7 @@ export default function ShowExcelList() {
                     2025 Sales
                   </th>
                   <th className="px-3 py-2 text-left font-semibold border-r-2 border-blue-500 min-w-[100px]">
-                    2026 Target
+                    {activeYear} Target
                   </th>
                   <th className="px-3 py-2 text-left font-semibold border-r-2 border-blue-500 min-w-[200px]">
                     Address
@@ -940,10 +943,10 @@ export default function ShowExcelList() {
                       {/* Target 2026 */}
                       <td className="px-3 py-2 border-r-2 border-slate-200">
                         <EditableCell
-                          value={show.target2026}
+                          value={show[targetField]}
                           showId={show.id || ''}
-                          field="target2026"
-                          isEditing={editingCell?.showId === show.id && editingCell?.field === 'target2026'}
+                          field={targetField}
+                          isEditing={editingCell?.showId === show.id && editingCell?.field === targetField}
                         />
                       </td>
 

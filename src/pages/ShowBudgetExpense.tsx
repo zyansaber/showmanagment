@@ -1,8 +1,12 @@
+import { activeYear, targetField } from '@/lib/showYear';
+import { importedFinance } from '@/lib/financeSummary';
+import FinanceExcelActions from '@/components/FinanceExcelActions';
+import { createFinanceNameTemplates } from '@/lib/financeNameTemplates';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
-import { dbGet, dbSet } from '@/lib/firebase';
+import { dbGet, dbSet, dbGet2026ShowsForFinanceTemplate } from '@/lib/firebase';
 import { Eye, Inbox, Loader2, RefreshCw, Search } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -16,6 +20,7 @@ type Show = {
   target2025?: number;
   sales2025?: number;
   target2026?: number;
+  target2027?: number;
   sales2026?: number;
   startDate?: string;
   finishDate?: string;
@@ -42,6 +47,7 @@ type TeamMember = {
 };
 
 type BudgetRow = {
+  isTemplateRow?: boolean;
   showId: string;
   showName: string;
   dealership: string;
@@ -104,7 +110,7 @@ const computeDealerTotal = (draft: Record<string, unknown>) =>
 const computeFactoryTotal = (draft: Record<string, unknown>) =>
   parseNumber(draft.factoryCommission) + parseNumber(draft.factoryTravelCosts) + parseNumber(draft.standCosts) / 2;
 
-const TARGET_YEAR = 2026;
+const TARGET_YEAR = activeYear;
 const SPECIAL_SHOW_NAME = 'Geelong Caravaning & Adventure Leisurefest - 2025';
 
 const leadingZeroSafe = (value: unknown) => {
@@ -218,12 +224,13 @@ const getYearFromDate = (value: string | undefined | null): number | null => {
   return Number.isNaN(parsed.getTime()) ? null : parsed.getFullYear();
 };
 
-const getShowYear = (show: Show): number | null => {
+const getShowYear = (show: Show, targetYear = TARGET_YEAR): number | null => {
   const startYear = getYearFromDate(show.startDate);
   if (startYear) return startYear;
   const finishYear = getYearFromDate(show.finishDate);
   if (finishYear) return finishYear;
-  if (show.target2026 && show.target2026 > 0) return 2026;
+  const target = targetYear === 2026 ? show.target2026 : show.target2027;
+  if (target && target > 0) return targetYear;
   if (show.target2025 && show.target2025 > 0) return 2025;
   return null;
 };
@@ -345,6 +352,7 @@ function TableSkeleton() {
 export default function ShowBudgetExpense({ editableActuals = false }: { editableActuals?: boolean }) {
   const [rows, setRows] = useState<BudgetRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [search, setSearch] = useState('');
   const [visibleOptionalColumns, setVisibleOptionalColumns] = useState<Set<OptionalColumn>>(new Set());
@@ -354,7 +362,7 @@ export default function ShowBudgetExpense({ editableActuals = false }: { editabl
       if (announce) setRefreshing(true);
       else setLoading(true);
 
-      const [showsData, budgetsData, ordersData, financeData, internalOrdersData, teamData, expensesData, mappingData, overridesData] =
+      const [showsData, budgetsData, ordersData, financeData, internalOrdersData, teamData, expensesData, mappingData, overridesData, legacyShowsData] =
         await Promise.all([
           dbGet('shows'),
           dbGet('showBudgets'),
@@ -365,6 +373,7 @@ export default function ShowBudgetExpense({ editableActuals = false }: { editabl
           dbGet('finance/expenses'),
           dbGet('scheduleDealerMappings'),
           dbGet('showActualOverrides'),
+          activeYear === 2027 ? dbGet2026ShowsForFinanceTemplate() : Promise.resolve(null),
         ]);
       const showList: Show[] = showsData ? Object.values(showsData) : [];
       const budgetMap = budgetsData ?? {};
@@ -467,11 +476,12 @@ export default function ShowBudgetExpense({ editableActuals = false }: { editabl
           parseNumber(budget.totalFactoryCosts ?? budget.totalFactoryCost) ||
           parseNumber(budget.factoryBudget) ||
           computeFactoryTotal(budget);
-        const totalBudget = dealerBudget + factoryBudget;
+        const totalBudget = activeYear === 2027 && budget.totalBudget !== undefined ? parseNumber(budget.totalBudget) : dealerBudget + factoryBudget;
         const financeActual = actualsByShow[show.id] || { dealer: 0, factory: 0 };
-        const dealerActual = financeActual.dealer;
-        const factoryActual = financeActual.factory;
-        const calculatedActual = dealerActual + factoryActual;
+        const imported = importedFinance(show);
+        const dealerActual = imported?.dealerActual ?? financeActual.dealer;
+        const factoryActual = imported?.factoryActual ?? financeActual.factory;
+        const calculatedActual = imported?.actual ?? dealerActual + factoryActual;
         const override = (overridesData as Record<string, { actual?: unknown }> | null)?.[show.id];
         const actualOverridden = override?.actual !== undefined && override?.actual !== null;
         const actual = actualOverridden ? parseNumber(override.actual) : calculatedActual;
@@ -499,23 +509,30 @@ export default function ShowBudgetExpense({ editableActuals = false }: { editabl
           diff,
           showTarget:
             year === TARGET_YEAR
-              ? Number(show.target2026 ?? budget.salesTarget2026 ?? budget.salesTarget ?? 0)
+              ? Number(show[targetField] ?? budget[`salesTarget${activeYear}`] ?? budget.salesTarget ?? 0)
               : Number(show.target2025 ?? show.target2026 ?? 0),
-          showSales: sales.total,
-          salesByShowTeam: sales.showTeam,
-          salesByNetwork: sales.network,
-          salesOffice: sales.office,
-          contractNumber: contractSummary.count > 0 ? String(contractSummary.count) : String(budget.contractNumber ?? ''),
+          showSales: imported?.showSales ?? sales.total,
+          salesByShowTeam: imported?.salesByShowTeam ?? sales.showTeam,
+          salesByNetwork: imported?.salesByNetwork ?? sales.network,
+          salesOffice: imported?.salesOffice ?? sales.office,
+          contractNumber: imported?.contractNumber ?? (contractSummary.count > 0 ? String(contractSummary.count) : String(budget.contractNumber ?? '')),
           totalContractValue:
-            contractSummary.total > 0 ? contractSummary.total : Number(budget.totalContractValue ?? 0),
+            imported?.totalContractValue ?? (contractSummary.total > 0 ? contractSummary.total : Number(budget.totalContractValue ?? 0)),
           clawBack: Number(budget.clawBack ?? 0),
           actualOverridden,
         };
       });
 
-      setRows(mapped);
+      const legacyNames = Object.entries((legacyShowsData || {}) as Record<string, Show>)
+        .map(([key, show]) => ({ ...show, id: show.id || key }))
+        .filter((show) => getShowYear(show, 2026) === 2026)
+        .sort(compareShows)
+        .map(({ id, name }) => ({ id, name }));
+      setRows(activeYear === 2027 ? [...mapped, ...createFinanceNameTemplates(legacyNames, mapped)] : mapped);
+      setLoadFailed(false);
       if (announce) toast.success('Budget data refreshed');
     } catch (err) {
+      setLoadFailed(true);
       console.error('Unable to load budget data', err);
       toast.error('Budget data did not load. Check the connection and try refreshing.');
     } finally {
@@ -636,6 +653,7 @@ export default function ShowBudgetExpense({ editableActuals = false }: { editabl
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            {activeYear === 2027 && <FinanceExcelActions rows={rows} disabled={loading || refreshing || loadFailed} onImported={() => loadData()} />}
             <div className="relative">
               <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
               <Input
@@ -743,7 +761,7 @@ export default function ShowBudgetExpense({ editableActuals = false }: { editabl
               </div>
 
               <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
-                <span>Sales figures count only orders confirmed in the Orders &amp; Sales dashboard.</span>
+                <span>{activeYear === 2027 ? 'Imported shows use their Excel sales totals; other shows use confirmed orders from Orders & Sales.' : 'Sales figures count only orders confirmed in the Orders & Sales dashboard.'}</span>
                 <span className="tabular-nums">
                   {filteredRows.length === rows.length
                     ? `${rows.length} shows`
@@ -819,7 +837,7 @@ export default function ShowBudgetExpense({ editableActuals = false }: { editabl
                             {search ? 'No show matches that search' : `No ${TARGET_YEAR} shows to report on yet`}
                           </p>
                           <p className="mt-1 text-xs text-slate-500">
-                            {search ? 'Try a shorter term, or clear the search box.' : 'Shows appear here once they are scheduled with a budget.'}
+                            {search ? 'Try a shorter term, or clear the search box.' : activeYear === 2027 ? 'Download the Excel template, fill in your 2027 shows, then import it here.' : 'Shows appear here once they are scheduled with a budget.'}
                           </p>
                         </TableCell>
                       </TableRow>
@@ -839,7 +857,9 @@ export default function ShowBudgetExpense({ editableActuals = false }: { editabl
                             <TableCell className="tabular-nums text-slate-600">{row.internalSalesOrderNumber || <span className="text-slate-300">—</span>}</TableCell>
                             <TableCell className="text-slate-600">{row.dealership || <span className="text-slate-300">—</span>}</TableCell>
                             <TableCell className="text-center">
-                              {finished ? (
+                              {row.isTemplateRow ? (
+                                <Badge variant="outline" className="text-slate-500">Awaiting 2027 data</Badge>
+                              ) : finished ? (
                                 <Badge variant="outline" className="border-emerald-200 bg-emerald-50 font-medium text-emerald-700">
                                   Finished
                                 </Badge>
@@ -861,7 +881,7 @@ export default function ShowBudgetExpense({ editableActuals = false }: { editabl
                             {optionalVisible('factoryBudget') && <TableCell className={`${numeric} text-slate-600`}>{formatCurrency(row.factoryBudget)}</TableCell>}
 
                             <TableCell className={`${numeric} ${BAND.actual} ${EDGE} ${row.actualOverridden ? 'font-semibold text-rose-600' : 'font-medium text-sky-800'}`}>
-                              {editableActuals ? (
+                              {editableActuals && !row.isTemplateRow ? (
                                 <Input
                                   type="number"
                                   defaultValue={row.actual}

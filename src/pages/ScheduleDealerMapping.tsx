@@ -1,3 +1,4 @@
+import { yearPath } from '@/lib/showYear';
 import { useEffect, useMemo, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -117,7 +118,7 @@ export default function ScheduleDealerMappingPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
-  const apiUrl = `${FIREBASE_REST_BASE}/${API_PATH}.json`;
+  const apiUrl = `${FIREBASE_REST_BASE}/${yearPath(API_PATH)}.json`;
 
   const mappingText = useMemo(
     () =>

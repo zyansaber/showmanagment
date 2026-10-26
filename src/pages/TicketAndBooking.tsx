@@ -1,3 +1,4 @@
+import { withShowYear } from '@/lib/showYear';
 import { ChangeEvent, DragEvent, FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { CheckCircle2, History, Mail, UploadCloud } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -233,7 +234,7 @@ export default function TicketAndBooking() {
     const emailSettings = await loadEmailSettings();
     if (!show.id || (recipients.length === 0 && !emailSettings.confirmationReceipt)) return setMessage('This show has no participants with email addresses.');
     const token = `${show.id}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-    const confirmUrl = `${window.location.origin}/ticket-confirm/${encodeURIComponent(token)}`;
+    const confirmUrl = withShowYear(`${window.location.origin}/ticket-confirm/${encodeURIComponent(token)}`);
     const participantIds = participants.map((member) => member.memberId || '').filter(Boolean);
     const latestConfirmation = latestConfirmedByShowId[show.id];
     const latestConfirmedIds = latestConfirmation?.confirmedParticipantIds || latestConfirmation?.participantIds || [];

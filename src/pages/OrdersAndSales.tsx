@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { importedFinance } from '@/lib/financeSummary';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -1255,6 +1256,7 @@ export default function OrdersAndSales() {
         <div>
           <h1 className="text-4xl font-extrabold text-gray-900">Orders & Sales</h1>
           <p className="text-sm text-gray-500">Overview of all show orders and sales confirmations</p>
+          {shows.some((show) => importedFinance(show)) && <p className="mt-2 text-sm text-blue-700">2027 imported sales: {shows.reduce((sum, show) => sum + (importedFinance(show)?.showSales || 0), 0)} · Financial summaries are available in Finance Result. The order list below contains individual orders only.</p>}
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Button asChild className="bg-emerald-600 text-white shadow-lg hover:bg-emerald-700">

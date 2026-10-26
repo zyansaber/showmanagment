@@ -1,3 +1,4 @@
+import { withShowYear } from '@/lib/showYear';
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { CalendarDays, CheckCircle2, Clock, FileText, MessageSquare, QrCode, ShoppingCart, Star, TrendingUp, UserCog, Users } from 'lucide-react';
@@ -323,7 +324,7 @@ export default function TeamMemberProfile() {
     return acc;
   }, {} as Record<string, TicketFile[]>);
   const formatShowAddress = (show: ShowRecord) => show.layoutAddress || [show.siteLocation?.number, show.siteLocation?.street, show.siteLocation?.suburb, show.siteLocation?.state, show.siteLocation?.postcode, show.siteLocation?.country].filter(Boolean).join(', ') || 'No address';
-  const publicProfileUrl = `${window.location.origin}/team/${memberSlug}`;
+  const publicProfileUrl = withShowYear(`${window.location.origin}/team/${memberSlug}`);
   const calendarShowsByState = shows.reduce((acc, show) => {
     const state = show.siteLocation?.state || 'No State';
     if (!acc[state]) acc[state] = [];

@@ -1,3 +1,4 @@
+import { activeYear, targetField, salesField } from '@/lib/showYear';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import AustraliaMap from '@/components/AustraliaMap';
@@ -171,7 +172,7 @@ export default function ShowManagement() {
     () =>
       shows.filter((show) => {
         try {
-          return Boolean(show && show.name && normaliseState(show.siteLocation?.state));
+          return Boolean(show && show.name && (activeYear === 2027 || normaliseState(show.siteLocation?.state)));
         } catch {
           return false;
         }
@@ -190,7 +191,7 @@ export default function ShowManagement() {
 
       acc[state].shows += 1;
 
-      const sales = parseMetric(show.sales2025);
+      const sales = parseMetric(activeYear === 2027 ? show[salesField] : show.sales2025);
       if (sales > 0) {
         acc[state].totalSales += sales;
       }
@@ -331,8 +332,8 @@ export default function ShowManagement() {
         sales2024: 0,
         target2025: 0,
         sales2025: 0,
-        target2026: 0,
-        sales2026: 0,
+        [targetField]: 0,
+        [salesField]: 0,
         eventOrganiser: '',
         caravansOnDisplay: 0,
         standSize: '',
@@ -371,8 +372,8 @@ export default function ShowManagement() {
     'Sales 2024',
     'Target 2025',
     'Sales 2025',
-    'Target 2026',
-    'Sales 2026',
+    `Target ${activeYear}`,
+    `Sales ${activeYear}`,
     'Event Organiser',
     'Caravans On Display',
     'Stand Size',
@@ -414,8 +415,8 @@ export default function ShowManagement() {
         show.sales2024,
         show.target2025,
         show.sales2025,
-        show.target2026,
-        show.sales2026,
+        show[targetField],
+        show[salesField],
         show.eventOrganiser,
         show.caravansOnDisplay,
         show.standSize,
@@ -573,8 +574,8 @@ export default function ShowManagement() {
           sales2024: parseNumberCell(getCell('Sales 2024', cells)) ?? existing.sales2024,
           target2025: parseNumberCell(getCell('Target 2025', cells)) ?? existing.target2025,
           sales2025: parseNumberCell(getCell('Sales 2025', cells)) ?? existing.sales2025,
-          target2026: parseNumberCell(getCell('Target 2026', cells)) ?? existing.target2026,
-          sales2026: parseNumberCell(getCell('Sales 2026', cells)) ?? existing.sales2026,
+          [targetField]: parseNumberCell(getCell(`Target ${activeYear}`, cells)) ?? existing[targetField],
+          [salesField]: parseNumberCell(getCell(`Sales ${activeYear}`, cells)) ?? existing[salesField],
           eventOrganiser: getUpdatedText('Event Organiser', cells, existing.eventOrganiser),
           caravansOnDisplay:
             parseNumberCell(getCell('Caravans On Display', cells)) ?? existing.caravansOnDisplay,
@@ -758,7 +759,7 @@ export default function ShowManagement() {
                   <TableHead>Show</TableHead>
                   <TableHead>Location</TableHead>
                   <TableHead>Dates</TableHead>
-                  <TableHead>Sales 2025</TableHead>
+                  <TableHead>Sales {activeYear === 2027 ? activeYear : 2025}</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead className="w-24 text-right">Actions</TableHead>
                 </TableRow>
@@ -770,8 +771,8 @@ export default function ShowManagement() {
                     show.siteLocation?.suburb?.trim(),
                     state || undefined,
                   ].filter(Boolean);
-                  const sales = parseMetric(show.sales2025);
-                  const target = parseMetric(show.target2025);
+                  const sales = parseMetric(activeYear === 2027 ? show[salesField] : show.sales2025);
+                  const target = parseMetric(activeYear === 2027 ? show[targetField] : show.target2025);
                   const duration = parseMetric(show.showDuration);
 
                   const statusVariant =

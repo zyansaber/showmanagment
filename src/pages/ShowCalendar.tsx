@@ -1,3 +1,4 @@
+import { activeYear, targetField, salesField } from '@/lib/showYear';
 import { useState, useEffect, useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -13,7 +14,7 @@ import { Input } from '@/components/ui/input';
 
 export default function ShowCalendar() {
   const navigate = useNavigate();
-  const [currentMonth, setCurrentMonth] = useState<Date>(new Date());
+  const [currentMonth, setCurrentMonth] = useState<Date>(() => activeYear === 2026 ? new Date() : new Date(activeYear, 0, 1));
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [shows, setShows] = useState<Show[]>([]);
   const [tasks, setTasks] = useState<ShowTask[]>([]);
@@ -113,7 +114,7 @@ export default function ShowCalendar() {
              show.name &&
              isValidDate(show.startDate) && 
              isValidDate(show.finishDate) &&
-             isValidLocation(show.siteLocation);
+             (activeYear === 2027 || isValidLocation(show.siteLocation));
     } catch {
       return false;
     }
@@ -261,8 +262,8 @@ export default function ShowCalendar() {
       }
       acc[state].shows += 1;
 
-      if (isValidNumber(show.sales2025)) {
-        acc[state].totalSales += Number(show.sales2025);
+      if (isValidNumber((activeYear === 2027 ? show[salesField] : show.sales2025))) {
+        acc[state].totalSales += Number((activeYear === 2027 ? show[salesField] : show.sales2025));
       }
 
       if (show.showDuration && isValidNumber(show.showDuration)) {
@@ -286,8 +287,8 @@ export default function ShowCalendar() {
 
       acc[state].shows += 1;
 
-      if (isValidNumber(show.sales2025)) {
-        acc[state].totalSales += Number(show.sales2025);
+      if (isValidNumber((activeYear === 2027 ? show[salesField] : show.sales2025))) {
+        acc[state].totalSales += Number((activeYear === 2027 ? show[salesField] : show.sales2025));
       }
 
       if (show.showDuration && isValidNumber(show.showDuration)) {
@@ -538,7 +539,7 @@ export default function ShowCalendar() {
                           </div>
                           <div className="flex flex-wrap items-center gap-3 text-xs">
                             <span className="text-gray-500">
-                              Sales: {formatValue(show.sales2025)}/{formatValue(show.target2025)}
+                              Sales: {formatValue((activeYear === 2027 ? show[salesField] : show.sales2025))}/{formatValue((activeYear === 2027 ? show[targetField] : show.target2025))}
                             </span>
                             <Badge className={statusBadgeStyles[timelineStatus] || 'bg-slate-100 text-slate-700'}>
                               {timelineStatus}

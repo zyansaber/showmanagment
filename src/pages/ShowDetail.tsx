@@ -1,3 +1,5 @@
+import { activeYear, targetField, salesField } from '@/lib/showYear';
+import { importedFinance } from '@/lib/financeSummary';
 import { useState, useEffect, useMemo } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -543,8 +545,8 @@ export default function ShowDetail() {
         sales2024: parseValue(editedShow.sales2024),
         target2025: parseValue(editedShow.target2025),
         sales2025: parseValue(editedShow.sales2025),
-        target2026: parseValue(editedShow.target2026),
-        sales2026: parseValue(editedShow.sales2026),
+        [targetField]: parseValue(editedShow[targetField]),
+        [salesField]: parseValue(editedShow[salesField]),
         eventOrganiser: editedShow.eventOrganiser || '',
         caravansOnDisplay: parseValue(editedShow.caravansOnDisplay),
         standSize: editedShow.standSize || '',
@@ -1061,12 +1063,12 @@ export default function ShowDetail() {
   const showYear = (() => {
     const parsed = show.startDate ? new Date(show.startDate) : null;
     if (parsed && !Number.isNaN(parsed.getTime())) return parsed.getFullYear();
-    if (show.target2026 > 0 || show.sales2026 > 0) return 2026;
+    if (show[targetField] > 0 || show[salesField] > 0) return activeYear;
     if (show.target2025 > 0 || show.sales2025 > 0) return 2025;
     return null;
   })();
-  const is2026Show = showYear === 2026;
-  const showOrderCount = orders.filter((order) => order.showId === show.id).length;
+  const is2026Show = showYear === activeYear;
+  const showOrderCount = importedFinance(show)?.showSales ?? orders.filter((order) => order.showId === show.id).length;
 
   return (
     <div className="space-y-6">
@@ -1099,13 +1101,13 @@ export default function ShowDetail() {
         </Card>
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-gray-600">2026 Sales</CardTitle>
+            <CardTitle className="text-sm font-medium text-gray-600">{activeYear} Sales</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-emerald-600">
               {is2026Show ? showOrderCount : 0}
             </div>
-            <p className="text-xs text-gray-500 mt-1">Orders for this 2026 show</p>
+            <p className="text-xs text-gray-500 mt-1">Orders for this {activeYear} show</p>
           </CardContent>
         </Card>
         <Card>
@@ -1227,8 +1229,8 @@ export default function ShowDetail() {
                       <p className="font-medium">{formatValue(show.target2025)} / {formatValue(show.sales2025)}</p>
                     </div>
                     <div>
-                      <Label className="text-gray-600">2026 Target / Sales</Label>
-                      <p className="font-medium">{formatValue(show.target2026)} / {formatValue(show.sales2026)}</p>
+                      <Label className="text-gray-600">{activeYear} Target / Sales</Label>
+                      <p className="font-medium">{formatValue(show[targetField])} / {formatValue(show[salesField])}</p>
                     </div>
                     <div>
                       <Label className="text-gray-600">Caravans on Display</Label>
@@ -1426,17 +1428,17 @@ export default function ShowDetail() {
                       </div>
                       <div></div>
                       <div>
-                        <Label>2026 Target</Label>
+                        <Label>{activeYear} Target</Label>
                         <Input
-                          value={editedShow.target2026}
-                          onChange={(e) => setEditedShow({ ...editedShow, target2026: e.target.value as unknown as number })}
+                          value={editedShow[targetField]}
+                          onChange={(e) => setEditedShow({ ...editedShow, [targetField]: e.target.value as unknown as number })}
                         />
                       </div>
                       <div>
-                        <Label>2026 Sales</Label>
+                        <Label>{activeYear} Sales</Label>
                         <Input
-                          value={editedShow.sales2026}
-                          onChange={(e) => setEditedShow({ ...editedShow, sales2026: e.target.value as unknown as number })}
+                          value={editedShow[salesField]}
+                          onChange={(e) => setEditedShow({ ...editedShow, [salesField]: e.target.value as unknown as number })}
                         />
                       </div>
                     </div>

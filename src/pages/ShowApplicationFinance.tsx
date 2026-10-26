@@ -1,3 +1,4 @@
+import { activeYear, targetField, salesField } from '@/lib/showYear';
 import { FormEvent, useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { CheckCircle2, Loader2, Save } from 'lucide-react';
@@ -41,7 +42,7 @@ const buildDetailRows = (form: ShowApplicationForm, application: Application): D
   { label: 'Stand Size', value: form.standSize },
   { label: '2025 Target', value: form.target2025 },
   { label: '2025 Sales', value: form.sales2025 },
-  { label: '2026 Target', value: form.target2026 },
+  { label: `${activeYear} Target`, value: form.target2026 },
 ];
 
 export default function ShowApplicationFinance() {
@@ -84,8 +85,8 @@ export default function ShowApplicationFinance() {
       sales2024: 0,
       target2025: Number(form.target2025) || 0,
       sales2025: Number(form.sales2025) || 0,
-      target2026: Number(form.target2026) || 0,
-      sales2026: 0,
+      [targetField]: Number(form.target2026) || 0,
+      [salesField]: 0,
       eventOrganiser: form.eventOrganiser,
       caravansOnDisplay: Number(form.caravansOnDisplay) || 0,
       standSize: form.standSize,

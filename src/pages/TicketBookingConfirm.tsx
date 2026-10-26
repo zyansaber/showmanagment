@@ -1,3 +1,4 @@
+import { withShowYear } from '@/lib/showYear';
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
@@ -49,7 +50,7 @@ export default function TicketBookingConfirm() {
   const confirm = async () => {
     if (!request) return;
     const confirmedAt = new Date().toISOString();
-    const approvalUrl = `${window.location.origin}/ticket-approval/${encodeURIComponent(request.id)}`;
+    const approvalUrl = withShowYear(`${window.location.origin}/ticket-approval/${encodeURIComponent(request.id)}`);
     const nextRequest = { ...request, confirmedAt, confirmedParticipantIds: request.participantIds, approvalUrl };
     await dbSet(`ticketBookingConfirmations/${request.id}`, nextRequest as unknown as Record<string, unknown>);
     setRequest(nextRequest);

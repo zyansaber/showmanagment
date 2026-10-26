@@ -3,6 +3,7 @@
   "type": "module",
   "packageManager": "pnpm@8.10.0",
   "scripts": {
+    "test:finance-year": "node --test --test-isolation=none tests/finance-year.test.mjs",
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint --quiet ./src",
@@ -45,6 +46,7 @@
     "date-fns": "^3.6.0",
     "date-fns-tz": "^3.2.0",
     "embla-carousel-react": "^8.3.0",
+    "exceljs": "4.4.0",
     "firebase": "^12.5.0",
     "framer-motion": "^11.0.0",
     "input-otp": "^1.2.4",

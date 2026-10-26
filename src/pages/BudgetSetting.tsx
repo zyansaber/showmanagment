@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { dbGet, dbUpdate } from '@/lib/firebase';
+import { activeYear } from '@/lib/showYear';
 
 type ShowRecord = {
   id: string;
@@ -310,7 +311,7 @@ export default function BudgetSetting() {
 
     try {
       setSavingId(row.showId);
-      await dbUpdate(`showBudgets/${row.showId}`, payload as unknown as Record<string, unknown>);
+      await dbUpdate(`showBudgets/${row.showId}`, { ...payload, ...(activeYear === 2027 ? { totalBudget: row.totalDealerCost + row.totalFactoryCosts } : {}) } as unknown as Record<string, unknown>);
       setBudgetSnapshot((prev) => ({
         ...prev,
         [row.showId]: { ...(prev[row.showId] ?? {}), ...payload },
@@ -420,7 +421,7 @@ export default function BudgetSetting() {
       }
 
       const payload = Object.entries(updates).reduce((acc, [showId, values]) => {
-        acc[showId] = { ...(budgetSnapshot[showId] ?? {}), ...values };
+        acc[showId] = { ...(budgetSnapshot[showId] ?? {}), ...values, ...(activeYear === 2027 ? { totalBudget: Number(values.totalDealerCost || 0) + Number(values.totalFactoryCosts || 0) } : {}) };
         return acc;
       }, {} as Record<string, Record<string, unknown>>);
 

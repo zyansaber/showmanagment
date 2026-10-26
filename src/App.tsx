@@ -52,6 +52,8 @@ import ScheduleDealerMappingPage from './pages/ScheduleDealerMapping';
 import ProtectedRoute from './components/ProtectedRoute';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { Navigate } from 'react-router-dom';
+import ShowYearSwitch from './components/ShowYearSwitch';
+import { activeYear } from './lib/showYear';
 
 const queryClient = new QueryClient();
 
@@ -213,6 +215,15 @@ function AppLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const { user, loading } = useAuth();
   const location = useLocation();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    if (params.get('year') !== String(activeYear)) {
+      params.set('year', String(activeYear));
+      navigate({ pathname: location.pathname, search: params.toString(), hash: location.hash }, { replace: true });
+    }
+  }, [location, navigate]);
 
   useEffect(() => {
     const suppressInstallPromptOutsideTeam = (event: Event) => {
@@ -289,9 +300,10 @@ function AppLayout() {
             >
               <Menu className="h-5 w-5" />
             </Button>
-            <div className="flex-1 lg:ml-0 ml-4">
-              <h1 className="text-xl font-bold text-gray-900">Caravan Show Management System</h1>
+            <div className="min-w-0 flex-1 lg:ml-0 ml-4">
+              <h1 className="text-base sm:text-xl font-bold text-gray-900">Caravan Show Management System</h1>
             </div>
+            <ShowYearSwitch />
           </div>
         </header>
 

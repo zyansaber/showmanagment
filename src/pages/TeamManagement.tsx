@@ -1,3 +1,4 @@
+import { withShowYear } from '@/lib/showYear';
 import { useState, useEffect, useMemo } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -175,7 +176,7 @@ export default function TeamManagement() {
 
   const getMemberPortalUrl = (member: TeamMember) => {
     const slug = slugifyTeamMember(member.memberName) || slugifyTeamMember(member.memberId);
-    return `${window.location.origin}/team/${encodeURIComponent(slug)}`;
+    return withShowYear(`${window.location.origin}/team/${encodeURIComponent(slug)}`);
   };
 
   const handleSendPortalEmail = async (member: TeamMemberRecord) => {

@@ -1,3 +1,4 @@
+import { activeYear, withShowYear } from '@/lib/showYear';
 import { FormEvent, useMemo, useState } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { ClipboardCheck, Loader2, Send } from 'lucide-react';
@@ -82,7 +83,7 @@ Caravans on Display: ${form.caravansOnDisplay || '-'}
 Stand Size: ${form.standSize || '-'}
 Target 2025: ${form.target2025 || '-'}
 Sales 2025: ${form.sales2025 || '-'}
-Target 2026: ${form.target2026 || '-'}
+Target ${activeYear}: ${form.target2026 || '-'}
 Notes: ${form.notes || '-'}
 `.trim();
 
@@ -130,7 +131,7 @@ export default function ShowApplication() {
       ['standSize', 'Stand Size'],
       ['target2025', '2025 Target'],
       ['sales2025', '2025 Sales'],
-      ['target2026', '2026 Target'],
+      ['target2026', `${activeYear} Target`],
     ];
     const missingField = requiredFields.find(([key]) => !form[key].trim());
     if (missingField) {
@@ -139,7 +140,7 @@ export default function ShowApplication() {
     }
     setSubmitting(true);
     const id = uuidv4();
-    const confirmUrl = `${window.location.origin}/show-application-confirm/${encodeURIComponent(id)}`;
+    const confirmUrl = withShowYear(`${window.location.origin}/show-application-confirm/${encodeURIComponent(id)}`);
     try {
       const applicationSettings = (await dbGet('settings/showApplication')) as { approverEmail?: string; financeEmail?: string } | null;
       const application = {
@@ -203,7 +204,7 @@ export default function ShowApplication() {
             <div><Label>Stand Size *</Label><Input required value={form.standSize} onChange={(e) => updateField('standSize', e.target.value)} /></div>
             <div><Label>2025 Target *</Label><Input required type="number" min="0" value={form.target2025} onChange={(e) => updateField('target2025', e.target.value)} /></div>
             <div><Label>2025 Sales *</Label><Input required type="number" min="0" value={form.sales2025} onChange={(e) => updateField('sales2025', e.target.value)} /></div>
-            <div><Label>2026 Target *</Label><Input required type="number" min="0" value={form.target2026} onChange={(e) => updateField('target2026', e.target.value)} /></div>
+            <div><Label>{activeYear} Target *</Label><Input required type="number" min="0" value={form.target2026} onChange={(e) => updateField('target2026', e.target.value)} /></div>
             <div className="md:col-span-2"><Label>Notes</Label><Textarea value={form.notes} onChange={(e) => updateField('notes', e.target.value)} placeholder="Anything the reviewer or finance team should know" /></div>
             <div className="md:col-span-2 flex justify-end"><Button type="submit" disabled={submitting} className="bg-blue-700 hover:bg-blue-800">{submitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />} Submit show application</Button></div>
           </CardContent>

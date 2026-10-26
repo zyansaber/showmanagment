@@ -1,3 +1,4 @@
+import { activeYear, withShowYear } from '@/lib/showYear';
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { CheckCircle2, Loader2, Send } from 'lucide-react';
@@ -33,7 +34,7 @@ const buildDetailRows = (form: ShowApplicationForm, application: Application): D
   { label: 'Stand Size', value: form.standSize },
   { label: '2025 Target', value: form.target2025 },
   { label: '2025 Sales', value: form.sales2025 },
-  { label: '2026 Target', value: form.target2026 },
+  { label: `${activeYear} Target`, value: form.target2026 },
 ];
 
 export default function ShowApplicationConfirm() {
@@ -54,7 +55,7 @@ export default function ShowApplicationConfirm() {
   const confirm = async () => {
     if (!application) return;
     setConfirming(true);
-    const financeUrl = `${window.location.origin}/show-application-finance/${encodeURIComponent(application.id)}`;
+    const financeUrl = withShowYear(`${window.location.origin}/show-application-finance/${encodeURIComponent(application.id)}`);
     const next = { ...application, status: 'Pending finance code assignment', confirmedAt: new Date().toISOString(), financeUrl };
     try {
       await dbSet(`showApplications/${application.id}`, next as unknown as Record<string, unknown>);

@@ -1,3 +1,5 @@
+import { activeYear, targetField } from '@/lib/showYear';
+import { importedFinance } from '@/lib/financeSummary';
 import { useState, useEffect, useMemo } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -357,7 +359,7 @@ export default function Dashboard() {
     const finishYear = getYear(show.finishDate);
     if (finishYear) return finishYear;
 
-    if (show.target2026 > 0) return 2026;
+    if (show[targetField] > 0) return activeYear;
     if (show.target2025 > 0) return 2025;
     if (show.target2024 > 0) return 2024;
     return null;
@@ -373,7 +375,7 @@ export default function Dashboard() {
     return acc;
   }, {} as Record<number, Show[]>);
 
-  const shows2026 = showsByYear[2026] || [];
+  const shows2026 = showsByYear[activeYear] || [];
   const shows2025 = showsByYear[2025] || [];
 
   const totalShows2026 = shows2026.length;
@@ -397,7 +399,7 @@ export default function Dashboard() {
   };
 
   // Only sum non-zero (non-N/A) values
-  const target2026 = shows2026.reduce((sum, s) => sum + (s.target2026 > 0 ? s.target2026 : 0), 0);
+  const target2026 = shows2026.reduce((sum, s) => sum + (s[targetField] > 0 ? s[targetField] : 0), 0);
   const totalSales2025 = shows.reduce((sum, s) => sum + (s.sales2025 > 0 ? s.sales2025 : 0), 0);
   const target2025 = shows2025.reduce((sum, s) => sum + (s.target2025 > 0 ? s.target2025 : 0), 0);
   const totalSales2024 = shows.reduce((sum, s) => sum + (s.sales2024 > 0 ? s.sales2024 : 0), 0);
@@ -422,6 +424,11 @@ export default function Dashboard() {
     acc[order.showId] = (acc[order.showId] || 0) + 1;
     return acc;
   }, {});
+
+  shows.forEach((show) => {
+    const imported = importedFinance(show);
+    if (imported) confirmationOrdersByShow[show.id] = imported.showSales;
+  });
 
   // Match Orders & Sales: confirmed orders divided by show days, for completed shows only.
   const stateStats = shows.filter(isShowFinishedForYtd).reduce((acc, show) => {
@@ -448,20 +455,20 @@ export default function Dashboard() {
       return a.state.localeCompare(b.state);
     });
 
-  const totalSales2026 = orders.reduce((sum, order) => {
+  const totalSales2026 = activeYear === 2027 ? shows2026.reduce((sum, show) => sum + (confirmationOrdersByShow[show.id] || 0), 0) : orders.reduce((sum, order) => {
     const year = showYearById[order.showId];
-    if (year !== 2026 || !isConfirmationOrder(order)) return sum;
+    if (year !== activeYear || !isConfirmationOrder(order)) return sum;
     return sum + 1;
   }, 0);
   const completedShowTarget2026 = shows2026.reduce(
-    (sum, show) => sum + (isShowFinishedForYtd(show) && show.target2026 > 0 ? show.target2026 : 0),
+    (sum, show) => sum + (isShowFinishedForYtd(show) && show[targetField] > 0 ? show[targetField] : 0),
     0
   );
   const completedAchievement = completedShowTarget2026 > 0
-    ? Math.round((completedShowOrders.length / completedShowTarget2026) * 100)
+    ? Math.round(((activeYear === 2027 ? finishedShows2026.reduce((sum, show) => sum + (confirmationOrdersByShow[show.id] || 0), 0) : completedShowOrders.length) / completedShowTarget2026) * 100)
     : 0;
   const overallAchievement = target2026 > 0 ? Math.round((totalSales2026 / target2026) * 100) : 0;
-  const currentYear = new Date().getFullYear();
+  const currentYear = activeYear === 2027 ? activeYear : new Date().getFullYear();
   const previousYear = currentYear - 1;
 
   const isQ1Date = (value?: string) => {
@@ -526,6 +533,8 @@ export default function Dashboard() {
   };
 
   const resolveShowOrderCount = (show: Show, year: number) => {
+    const imported = importedFinance(show);
+    if (imported && year === activeYear) return imported.showSales;
     const accepted = acceptedOrdersByShow[show.id] || 0;
     if (accepted > 0) return accepted;
     const allOrders = allOrdersByShow[show.id] || 0;
@@ -574,7 +583,7 @@ export default function Dashboard() {
   const yoyDeltaPercent = sales2025SamePeriod > 0 ? ((totalSales2026 - sales2025SamePeriod) / sales2025SamePeriod) * 100 : 0;
   const pendingOrders2026 = orders.reduce((sum, order) => {
     const year = showYearById[order.showId];
-    if (year !== 2026) return sum;
+    if (year !== activeYear) return sum;
     const status = typeof order.status === 'string' ? order.status.trim().toLowerCase() : '';
     const orderStatusId =
       typeof (order as ShowOrder & { orderStatusId?: string }).orderStatusId === 'string'
@@ -590,7 +599,7 @@ export default function Dashboard() {
   }, 0);
   const cancellationOrders2026 = orders.reduce((sum, order) => {
     const year = showYearById[order.showId];
-    if (year !== 2026) return sum;
+    if (year !== activeYear) return sum;
     const status = typeof order.status === 'string' ? order.status.trim().toLowerCase() : '';
     const orderStatusId =
       typeof (order as ShowOrder & { orderStatusId?: string }).orderStatusId === 'string'
@@ -639,7 +648,7 @@ export default function Dashboard() {
   const orderTypes2026 = orders.reduce(
     (acc, order) => {
       const year = showYearById[order.showId];
-      if (year !== 2026 || !isConfirmationOrder(order)) return acc;
+      if (year !== activeYear || !isConfirmationOrder(order)) return acc;
       const type = String(order.orderType || '').trim().toLowerCase();
       if (type === 'transfer from stock') acc.transferFromStock += 1;
       else if (type === 'new order') acc.newOrder += 1;
@@ -658,7 +667,7 @@ export default function Dashboard() {
         .map((show) => ({
           showId: show.id,
           showName: show.name || 'Unnamed Show',
-          sales: orders.reduce((sum, order) => {
+          sales: importedFinance(show)?.showSales ?? orders.reduce((sum, order) => {
             if (order.showId !== show.id) return sum;
             return isConfirmationOrder(order) ? sum + 1 : sum;
           }, 0),
@@ -720,18 +729,18 @@ export default function Dashboard() {
     if (!showEntry) return null;
     const showBudget = (budgets?.[showEntry.id] as Record<string, unknown>) || {};
     const targetSales =
-      showEntry.target2026 ||
+      showEntry[targetField] ||
       showEntry.target2025 ||
       showEntry.target2024 ||
       parseNumber((showBudget as Record<string, unknown>).salesTarget) ||
       0;
-    const salesActual = orders.filter((order) => order.showId === showEntry.id).length;
+    const salesActual = importedFinance(showEntry)?.showSales ?? orders.filter((order) => order.showId === showEntry.id).length;
 
     const dealerTarget = computeDealerBudget(showBudget);
     const factoryTarget = computeFactoryBudget(showBudget);
     const financeActual = financeActuals[showEntry.id];
-    const dealerActual = numberOrZero(financeActual?.dealer ?? showBudget.dealerActual);
-    const factoryActual = numberOrZero(financeActual?.factory ?? showBudget.factoryActual);
+    const dealerActual = importedFinance(showEntry)?.dealerActual ?? numberOrZero(financeActual?.dealer ?? showBudget.dealerActual);
+    const factoryActual = importedFinance(showEntry)?.factoryActual ?? numberOrZero(financeActual?.factory ?? showBudget.factoryActual);
     const internalOrder = internalOrders.find((order) => order.showId === showEntry.id);
     const taskSummary = taskCompletionByShow[showEntry.id];
     const teamMemberCount = Array.isArray(showEntry.teamMembers)
@@ -946,7 +955,7 @@ export default function Dashboard() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <Card className="lg:col-span-2 hover:shadow-lg transition-shadow">
           <CardHeader>
-            <CardTitle>2026 Target Completion</CardTitle>
+            <CardTitle>{activeYear} Target Completion</CardTitle>
             <CardDescription>
               Professional progress view based on confirmation order volume against YTD, YoY, and annual target baselines.
             </CardDescription>
@@ -955,7 +964,7 @@ export default function Dashboard() {
             <div className="space-y-5">
               <div className="grid gap-4 xl:grid-cols-3">
                 <div className="rounded-xl border border-slate-200 bg-gradient-to-r from-slate-50 to-white p-5 shadow-sm">
-                  <p className="text-xs uppercase tracking-wide text-slate-500">Sales to date (confirmation orders)</p>
+                  <p className="text-xs uppercase tracking-wide text-slate-500">{activeYear === 2027 ? 'Sales to date (imported totals / confirmed orders)' : 'Sales to date (confirmation orders)'}</p>
                   <p className="mt-1 text-4xl font-bold text-slate-900">{formatNumber(totalSales2026)}</p>
                   <div className="mt-4 flex items-end justify-between">
                     <div>
@@ -993,7 +1002,7 @@ export default function Dashboard() {
                     </div>
                   </div>
                   <div className="mt-3 flex items-center justify-between text-sm">
-                    <span className="text-slate-500">Total Shows 2026</span>
+                    <span className="text-slate-500">Total Shows {activeYear}</span>
                     <span className="font-semibold text-slate-900">{totalShows2026}</span>
                   </div>
                   <div className="mt-1 flex items-center justify-between text-sm">
@@ -1105,7 +1114,7 @@ export default function Dashboard() {
                       ))}
                     </div>
                   ) : (
-                    <p className="mt-2 text-sm text-slate-500">No confirmation-order sales found for 2026 shows.</p>
+                    <p className="mt-2 text-sm text-slate-500">No confirmation-order sales found for {activeYear} shows.</p>
                   )}
                 </div>
               ) : null}
@@ -1114,7 +1123,7 @@ export default function Dashboard() {
 
           <Card className="hover:shadow-lg transition-shadow">
             <CardHeader className="pb-2">
-              <CardTitle className="text-lg font-semibold text-gray-700">Order Type Mix (2026)</CardTitle>
+              <CardTitle className="text-lg font-semibold text-gray-700">Order Type Mix ({activeYear})</CardTitle>
               <CardDescription>Transfer from Stock : New Order</CardDescription>
             </CardHeader>
             <CardContent>
@@ -1269,7 +1278,7 @@ export default function Dashboard() {
             <CardHeader>
               <CardTitle>Target Achievement (YTD)</CardTitle>
               <CardDescription>
-                Progress based on completed shows in 2026 compared to their targets and the overall annual target
+                Progress based on completed shows in {activeYear} compared to their targets and the overall annual target
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -1277,7 +1286,7 @@ export default function Dashboard() {
                 <div className="p-4 border rounded-lg">
                   <p className="text-sm text-gray-600">Completed Shows</p>
                   <p className="text-2xl font-bold text-gray-900">{completedShows}</p>
-                  <p className="text-xs text-gray-500">Orders received: {completedShowOrders.length}</p>
+                  <p className="text-xs text-gray-500">Orders received: {activeYear === 2027 ? finishedShows2026.reduce((sum, show) => sum + (confirmationOrdersByShow[show.id] || 0), 0) : completedShowOrders.length}</p>
                 </div>
                 <div className="p-4 border rounded-lg">
                   <p className="text-sm text-gray-600">Completed Show Target</p>
@@ -1285,7 +1294,7 @@ export default function Dashboard() {
                   <p className="text-xs text-gray-500">Achievement: {completedAchievement}%</p>
                 </div>
                 <div className="p-4 border rounded-lg">
-                  <p className="text-sm text-gray-600">Overall 2026 Target</p>
+                  <p className="text-sm text-gray-600">Overall {activeYear} Target</p>
                   <p className="text-2xl font-bold text-green-600">{target2026}</p>
                   <p className="text-xs text-gray-500">Current achievement: {overallAchievement}%</p>
                 </div>
