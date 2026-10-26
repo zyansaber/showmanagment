@@ -1,6 +1,7 @@
 import { createRequire } from 'node:module';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
+import ExcelJS from 'exceljs';
 import { exportFinanceWorkbook, parseFinanceWorkbook } from '../src/lib/financeResultExcel.ts';
 
 const require = createRequire(import.meta.url);
@@ -55,14 +56,21 @@ try {
   await waitText('Original 2026 Show');
   assert.equal(await page.getByRole('button', { name: 'Import Excel', exact: true }).count(), 0);
   assert.equal(await page.getByRole('button', { name: 'Export Excel', exact: true }).count(), 0);
+  assert.equal(await page.getByRole('columnheader', { name: 'Month 2027', exact: true }).count(), 0);
   await page.getByRole('button', { name: '2027', exact: true }).click();
   await waitText('Awaiting 2027 data');
+  await page.getByRole('columnheader', { name: 'Month 2027', exact: true }).waitFor();
   assert.equal(await page.getByText('Original 2026 Show', { exact: true }).count(), 1);
   assert.deepEqual(await page.evaluate(() => JSON.parse(localStorage.getItem('test-db')).years[2027]), {});
   const templateDownload = page.waitForEvent('download');
   await page.getByRole('button', { name: 'Download template' }).click();
   const template = await templateDownload;
   await template.saveAs(new URL('template.xlsx', out).pathname.replace(/^\/(\w:)/, '$1'));
+  const templateBook = new ExcelJS.Workbook();
+  await templateBook.xlsx.load(await fs.readFile(await template.path()));
+  assert.equal(templateBook.worksheets[0].getCell('W8').text, '2026-12-10');
+  assert.equal(templateBook.worksheets[0].getCell('X8').text, '2026-12-12');
+  assert.equal(templateBook.worksheets[0].getCell('Z7').text, 'Month 2027');
   await page.screenshot({ path: new URL('2027-empty.png', out).pathname.replace(/^\/(\w:)/, '$1'), fullPage: true });
   const row = { showId: '', showName: 'Imported 2027 Show', dealership: 'Frankston', internalSalesOrderNumber: '000123', startDate: '2027-01-15', finishDate: '2027-01-17', status: 'Not Started', showDuration: 3, totalBudget: 1000, dealerBudget: 600, factoryBudget: 400, actual: 900, dealerActual: 500, factoryActual: 400, chargeBack: 0, diff: -100, showTarget: 20, showSales: 10, salesByShowTeam: 6, salesByNetwork: 3, salesOffice: 1, contractNumber: '10', totalContractValue: 800000, clawBack: 0 };
   const upload = Buffer.from(await exportFinanceWorkbook([row]));
@@ -90,11 +98,16 @@ try {
   assert.deepEqual(stored.showBudgets, fixture.showBudgets);
   assert.equal(await page.getByText('Original 2026 Show', { exact: true }).count(), 1);
   // Fill a retained name: the new 2027 row replaces its placeholder exactly once.
-  await page.locator('input[type=file]').setInputFiles({ name: 'filled-name.xlsx', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', buffer: Buffer.from(await exportFinanceWorkbook([{ ...row, showName: 'Original 2026 Show', internalSalesOrderNumber: '000456' }])) });
+  await page.locator('input[type=file]').setInputFiles({ name: 'filled-name.xlsx', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', buffer: Buffer.from(await exportFinanceWorkbook([{ ...row, showName: 'Original 2026 Show', internalSalesOrderNumber: '000456', startDate: '', finishDate: '', referenceStartDate2026: '2026-12-10', referenceFinishDate2026: '2026-12-12', month2027: 'November' }])) });
   await page.getByRole('button', { name: 'Import into 2027' }).click();
   await page.getByRole('dialog').waitFor({ state: 'hidden' });
   await page.getByText('Awaiting 2027 data', { exact: true }).waitFor({ state: 'hidden' });
   assert.equal(await page.getByText('Original 2026 Show', { exact: true }).count(), 1);
+  await waitText('November');
+  const plannedShow = await page.evaluate(() => Object.values(JSON.parse(localStorage.getItem('test-db')).years[2027].shows).find((show) => show.name === 'Original 2026 Show'));
+  assert.equal(plannedShow.month2027, 'November');
+  assert.equal(plannedShow.startDate, '');
+  assert.equal(plannedShow.referenceStartDate2026, '2026-12-10');
   await page.getByRole('button', { name: 'Dashboard', exact: true }).click();
   await waitText('2027 Target Completion');
   assert.match(await page.locator('main').innerText(), /20/);
@@ -106,6 +119,7 @@ try {
   await waitText('Imported 2027 Show');
   await page.getByRole('button', { name: 'Finance Result', exact: true }).click();
   await waitText('Imported 2027 Show');
+  await waitText('November');
   await page.setViewportSize({ width: 390, height: 844 });
   await page.locator('aside button').first().click();
   await page.waitForFunction(() => document.querySelector('aside').getBoundingClientRect().right <= 1 && parseFloat(getComputedStyle(document.querySelector('main').parentElement).marginLeft) === 0);

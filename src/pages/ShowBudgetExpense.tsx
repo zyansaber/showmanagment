@@ -14,6 +14,10 @@ import { toast } from 'sonner';
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuLabel, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 
 type Show = {
+  year?: number;
+  month2027?: string;
+  referenceStartDate2026?: string;
+  referenceFinishDate2026?: string;
   id: string;
   name: string;
   dealership?: string;
@@ -47,6 +51,9 @@ type TeamMember = {
 };
 
 type BudgetRow = {
+  month2027?: string;
+  referenceStartDate2026?: string;
+  referenceFinishDate2026?: string;
   isTemplateRow?: boolean;
   showId: string;
   showName: string;
@@ -225,6 +232,7 @@ const getYearFromDate = (value: string | undefined | null): number | null => {
 };
 
 const getShowYear = (show: Show, targetYear = TARGET_YEAR): number | null => {
+  if (targetYear === 2027 && show.year === 2027) return 2027;
   const startYear = getYearFromDate(show.startDate);
   if (startYear) return startYear;
   const finishYear = getYearFromDate(show.finishDate);
@@ -492,6 +500,9 @@ export default function ShowBudgetExpense({ editableActuals = false }: { editabl
         return {
           showId: show.id,
           showName: show.name,
+          month2027: show.month2027 || '',
+          referenceStartDate2026: show.referenceStartDate2026,
+          referenceFinishDate2026: show.referenceFinishDate2026,
           dealership: displayDealership(show.dealership),
           internalSalesOrderNumber: internalOrderByShow[show.id] || '',
           showYear: year,
@@ -527,7 +538,7 @@ export default function ShowBudgetExpense({ editableActuals = false }: { editabl
         .map(([key, show]) => ({ ...show, id: show.id || key }))
         .filter((show) => getShowYear(show, 2026) === 2026)
         .sort(compareShows)
-        .map(({ id, name }) => ({ id, name }));
+        .map(({ id, name, startDate, finishDate }) => ({ id, name, startDate, finishDate }));
       setRows(activeYear === 2027 ? [...mapped, ...createFinanceNameTemplates(legacyNames, mapped)] : mapped);
       setLoadFailed(false);
       if (announce) toast.success('Budget data refreshed');
@@ -783,6 +794,7 @@ export default function ShowBudgetExpense({ editableActuals = false }: { editabl
                       <TableHead rowSpan={2} className="sticky top-0 z-20 h-9 min-w-[120px] bg-slate-50 align-middle font-semibold text-slate-700">
                         Dealership
                       </TableHead>
+                      {activeYear === 2027 && <TableHead rowSpan={2} className="sticky top-0 z-20 h-9 min-w-[120px] bg-slate-50 align-middle font-semibold text-slate-700">Month 2027</TableHead>}
                       <TableHead rowSpan={2} className="sticky top-0 z-20 h-9 bg-slate-50 text-center align-middle font-semibold text-slate-700">
                         Schedule
                       </TableHead>
@@ -831,7 +843,7 @@ export default function ShowBudgetExpense({ editableActuals = false }: { editabl
                   <TableBody>
                     {filteredRows.length === 0 ? (
                       <TableRow className="hover:bg-transparent">
-                        <TableCell colSpan={14 + optionalColumnCount} className="py-14 text-center">
+                        <TableCell colSpan={14 + optionalColumnCount + Number(activeYear === 2027)} className="py-14 text-center">
                           <Inbox className="mx-auto mb-3 h-7 w-7 text-slate-300" />
                           <p className="text-sm font-medium text-slate-700">
                             {search ? 'No show matches that search' : `No ${TARGET_YEAR} shows to report on yet`}
@@ -856,6 +868,7 @@ export default function ShowBudgetExpense({ editableActuals = false }: { editabl
                             </TableCell>
                             <TableCell className="tabular-nums text-slate-600">{row.internalSalesOrderNumber || <span className="text-slate-300">—</span>}</TableCell>
                             <TableCell className="text-slate-600">{row.dealership || <span className="text-slate-300">—</span>}</TableCell>
+                            {activeYear === 2027 && <TableCell className="text-slate-600">{row.month2027 || <span className="text-slate-300">—</span>}</TableCell>}
                             <TableCell className="text-center">
                               {row.isTemplateRow ? (
                                 <Badge variant="outline" className="text-slate-500">Awaiting 2027 data</Badge>
@@ -871,6 +884,7 @@ export default function ShowBudgetExpense({ editableActuals = false }: { editabl
                               ) : (
                                 <span className="text-slate-500">{formatShortDate(row.startDate)}</span>
                               )}
+                              {activeYear === 2027 && row.referenceStartDate2026 && <p className="mt-1 whitespace-nowrap text-[10px] text-slate-400">2026: {row.referenceStartDate2026}{row.referenceFinishDate2026 ? ` – ${row.referenceFinishDate2026}` : ''}</p>}
                             </TableCell>
                             <TableCell className={`${numeric} font-medium text-slate-700`}>
                               {getShowDurationDays(row) || <span className="text-slate-300">—</span>}
@@ -924,6 +938,7 @@ export default function ShowBudgetExpense({ editableActuals = false }: { editabl
                     {filteredRows.length > 0 && (
                       <TableRow className="sticky bottom-0 z-10 border-t-2 border-slate-300 bg-slate-50 font-semibold hover:bg-slate-50">
                         <TableCell className="sticky left-0 z-10 bg-inherit text-slate-900">Total</TableCell>
+                        {activeYear === 2027 && <TableCell className="bg-inherit" />}
                         <TableCell className="bg-inherit" />
                         <TableCell className="bg-inherit" />
                         <TableCell className="bg-inherit" />

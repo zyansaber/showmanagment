@@ -6,6 +6,7 @@ import { yearPath, resolveShowYear } from '../src/lib/showYear.ts';
 import { createFinanceNameTemplates } from '../src/lib/financeNameTemplates.ts';
 
 export const sample = {
+  month2027: '',
   showId: '', showName: '2027 Caravan Show', dealership: 'Frankston', internalSalesOrderNumber: '000123',
   startDate: '2027-01-15', finishDate: '2027-01-17', showDuration: 3, status: 'Not Started',
   totalBudget: 1000.25, dealerBudget: 600.25, factoryBudget: 400, actual: 900.75,
@@ -60,7 +61,7 @@ test('empty template is styled and does not import its placeholder row', async (
 
 test('wrong year, invalid date, nonnumeric money and invalid counts are rejected', async () => {
   for (const [cell, value, expected] of [
-    ['V8', 2026, /only 2027/], ['W8', '2026-12-31', /2027 date/], ['W8', '2027-02-30', /valid 2027 date/],
+    ['V8', 2026, /only 2027/], ['W8', '2026-12-31', /same year/], ['W8', '2027-02-30', /valid 2026 reference or 2027 date/],
     ['X8', '2027-01-01', /Finish date must/], ['I8', 'not money', /valid number/],
     ['O8', 1.5, /whole number/], ['O8', -1, /whole number/], ['F8', 900, /Total budget/],
     ['P8', 11, /cannot exceed Sold/], ['Y8', '../2026', /invalid Show ID/], ['A7', 'renamed', /Column 1/],
@@ -115,14 +116,16 @@ test('2026 names remain as blank 2027 templates without overwriting actual 2027 
   assert.equal(names.length, 3);
 });
 
-test('prefilled Excel names have no legacy IDs, dates or amounts; partial imports skip untouched names', async () => {
-  const templates = createFinanceNameTemplates([{ id: 'old-a', name: 'First show' }, { id: 'old-b', name: 'Later show' }], []);
+test('prefilled Excel keeps 2026 reference dates without IDs or amounts; partial imports skip untouched templates', async () => {
+  const templates = createFinanceNameTemplates([{ id: 'old-a', name: 'First show', startDate: '2026-03-01', finishDate: '2026-03-03' }, { id: 'old-b', name: 'Later show', startDate: '2026-05-01', finishDate: '2026-05-03' }], []);
   const book = new ExcelJS.Workbook();
   await book.xlsx.load(await exportFinanceWorkbook(templates));
   const sheet = book.worksheets[0];
   assert.equal(sheet.getCell('A8').value, 'First show');
   assert.equal(sheet.getCell('Y8').text, '');
-  assert.equal(sheet.getCell('W8').text, '');
+  assert.equal(sheet.getCell('W8').text, '2026-03-01');
+  assert.equal(sheet.getCell('X8').text, '2026-03-03');
+  assert.equal(sheet.getCell('Z7').text, 'Month 2027');
   assert.equal(sheet.getCell('I8').value, null);
   await assert.rejects(parseFinanceWorkbook(await book.xlsx.writeBuffer()), /No show data/);
   sheet.getCell('C8').value = 'Frankston';
@@ -135,4 +138,38 @@ test('prefilled Excel names have no legacy IDs, dates or amounts; partial import
   assert.equal(rows[0].showId, '');
   assert.equal(rows[0].actual, 500);
   assert.deepEqual(createFinanceNameTemplates([{ id: 'old-a', name: 'First show' }, { id: 'old-b', name: 'Later show' }], rows).map((row) => row.showName), ['Later show']);
+});
+
+test('Month 2027 can be imported with copied 2026 dates without creating a past 2027 schedule', async () => {
+  const book = new ExcelJS.Workbook();
+  await book.xlsx.load(await exportFinanceWorkbook(createFinanceNameTemplates([
+    { id: 'old', name: 'Planned show', startDate: '2026-03-01', finishDate: '2026-03-03' },
+  ], [])));
+  const sheet = book.worksheets[0];
+  for (const value of ['March', 'mar', 3, '03', '2027-03', '3月']) {
+    sheet.getCell('Z8').value = value;
+    const rows = await parseFinanceWorkbook(await book.xlsx.writeBuffer());
+    assert.equal(rows[0].month2027, 'March');
+    assert.equal(rows[0].startDate, '');
+    assert.equal(rows[0].finishDate, '');
+    assert.equal(rows[0].referenceStartDate2026, '2026-03-01');
+    assert.equal(rows[0].referenceFinishDate2026, '2026-03-03');
+    assert.equal(rows[0].showDuration, 0);
+    const prepared = prepareFinanceImport(rows, {}, {}, () => 'planned');
+    assert.equal(prepared.updates['shows/planned/year'], 2027);
+    assert.equal(prepared.updates['shows/planned/month2027'], 'March');
+    assert.equal(prepared.updates['shows/planned/startDate'], '');
+    assert.deepEqual(await parseFinanceWorkbook(await exportFinanceWorkbook(rows)), rows);
+  }
+  for (const value of [0, 13, '2026-03', 'not a month']) {
+    sheet.getCell('Z8').value = value;
+    await assert.rejects(parseFinanceWorkbook(await book.xlsx.writeBuffer()), /Month 2027/);
+  }
+});
+
+test('older templates without Month 2027 remain importable and do not clear a saved month', async () => {
+  const buffer = await changedWorkbook((sheet) => { sheet.getCell('Z7').value = null; });
+  const rows = await parseFinanceWorkbook(buffer);
+  assert.equal(rows[0].month2027, undefined);
+  assert.equal(prepareFinanceImport(rows, {}, {}, () => 'old-template').updates['shows/old-template/month2027'], undefined);
 });

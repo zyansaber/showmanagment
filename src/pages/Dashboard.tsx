@@ -353,6 +353,7 @@ export default function Dashboard() {
   };
 
   const getShowYear = (show: Show) => {
+    if (activeYear === 2027 && show.year === 2027) return 2027;
     const startYear = getYear(show.startDate);
     if (startYear) return startYear;
 

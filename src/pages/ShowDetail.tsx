@@ -1061,6 +1061,7 @@ export default function ShowDetail() {
   }
 
   const showYear = (() => {
+    if (activeYear === 2027 && show.year === 2027) return 2027;
     const parsed = show.startDate ? new Date(show.startDate) : null;
     if (parsed && !Number.isNaN(parsed.getTime())) return parsed.getFullYear();
     if (show[targetField] > 0 || show[salesField] > 0) return activeYear;

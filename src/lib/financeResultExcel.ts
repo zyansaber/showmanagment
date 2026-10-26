@@ -8,6 +8,7 @@ export type FinanceSummary = {
 
 export type FinanceExportRow = FinanceSummary & {
   isTemplateRow?: boolean;
+  referenceStartDate2026?: string; referenceFinishDate2026?: string; month2027?: string;
   showId: string; showName: string; dealership: string; internalSalesOrderNumber: string;
   startDate?: string; finishDate?: string; showDuration?: number | string; status?: string;
   totalBudget: number; dealerBudget: number; factoryBudget: number;
@@ -20,7 +21,7 @@ const columns = [
   ['Actual', 18], ['Dealer actual', 18], ['Factory actual', 18], ['Charge back', 18], ['Variance', 18],
   ['Target', 12], ['Sold', 12], ['Show team', 12], ['Network', 12], ['Sales office', 14],
   ['Contracts', 12], ['Contract value', 20], ['Claw back', 16],
-  ['Year', 10], ['Start date', 16], ['Finish date', 16], ['Show ID', 38],
+  ['Year', 10], ['Start date', 16], ['Finish date', 16], ['Show ID', 38], ['Month 2027', 18],
 ] as const;
 const moneyColumns = [6, 7, 8, 9, 10, 11, 12, 13, 20, 21];
 const moneyFormat = '$#,##0.00;[Red]-$#,##0.00;"—"';
@@ -33,12 +34,12 @@ export async function exportFinanceWorkbook(rows: FinanceExportRow[]): Promise<A
     pageSetup: { orientation: 'landscape', paperSize: 9, fitToPage: true, fitToWidth: 1, fitToHeight: 0 },
   });
   sheet.columns = columns.map(([, width]) => ({ width }));
-  sheet.mergeCells('A1:Y1');
+  sheet.mergeCells('A1:Z1');
   sheet.getCell('A1').value = '2027 | Show Budget & Expense';
   sheet.getCell('A1').font = { size: 20, bold: true, color: { argb: 'FF0F172A' } };
   sheet.getRow(1).height = 36;
-  sheet.mergeCells('A2:Y2');
-  sheet.getCell('A2').value = '2027 only. Edit rows from row 8. Show names from 2026 are prefilled; untouched name-only rows are skipped. Keep Year and Show ID; leave Show ID blank for new shows. Dates: YYYY-MM-DD. Import updates listed shows without deleting others.';
+  sheet.mergeCells('A2:Z2');
+  sheet.getCell('A2').value = 'Names and original 2026 dates are prefilled for reference. Fill Month 2027 (1–12 or month name); replace dates with confirmed 2027 dates when known. Untouched templates are skipped. Keep Year and Show ID; leave ID blank for new shows. Dates: YYYY-MM-DD.';
   sheet.getCell('A2').alignment = { wrapText: true, vertical: 'middle' };
   sheet.getRow(2).height = 34;
   const finished = rows.filter((r) => /^(finished|completed)$/i.test(r.status || '') || (r.finishDate && new Date(r.finishDate).getTime() <= Date.now()));
@@ -64,7 +65,7 @@ export async function exportFinanceWorkbook(rows: FinanceExportRow[]): Promise<A
       cell.font = { bold: true, size: row === 3 ? 10 : 12, color: { argb: 'FF0F172A' } };
     });
   }
-  for (const [range, title] of [['A6:E6', 'SHOW'], ['F6:H6', 'BUDGET'], ['I6:M6', 'ACTUAL'], ['N6:U6', 'SALES'], ['V6:Y6', 'IMPORT DETAILS']]) {
+  for (const [range, title] of [['A6:E6', 'SHOW'], ['F6:H6', 'BUDGET'], ['I6:M6', 'ACTUAL'], ['N6:U6', 'SALES'], ['V6:Z6', 'IMPORT DETAILS']]) {
     sheet.mergeCells(range); sheet.getCell(range.split(':')[0]).value = title;
   }
   sheet.getRow(7).values = columns.map(([name]) => name);
@@ -78,18 +79,19 @@ export async function exportFinanceWorkbook(rows: FinanceExportRow[]): Promise<A
   }
   rows.forEach((r) => sheet.addRow(r.isTemplateRow ? [
     r.showName, '', '', 'Not Started', null, null, null, null, null, null, null, null, null,
-    null, null, null, null, null, null, null, null, 2027, '', '', '',
+    null, null, null, null, null, null, null, null, 2027, r.referenceStartDate2026 || '', r.referenceFinishDate2026 || '', '', r.month2027 || '',
   ] : [
     r.showName, r.internalSalesOrderNumber, r.dealership, r.status || 'Not Started', r.showDuration || 0,
     r.totalBudget, r.dealerBudget, r.factoryBudget, r.actual, r.dealerActual, r.factoryActual, r.chargeBack, r.diff,
     r.showTarget, r.showSales, r.salesByShowTeam, r.salesByNetwork, r.salesOffice, r.contractNumber,
-    r.totalContractValue, r.clawBack, 2027, r.startDate || '', r.finishDate || '', r.showId,
+    r.totalContractValue, r.clawBack, 2027, r.startDate || r.referenceStartDate2026 || '', r.finishDate || r.referenceFinishDate2026 || '', r.showId, r.month2027 || '',
   ]));
   if (!rows.length) sheet.addRow(['', '', '', 'Not Started', null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, 2027]);
   for (let index = 8; index <= sheet.rowCount; index++) {
     const row = sheet.getRow(index);
     row.height = 25;
     row.getCell(13).value = { formula: `I${index}-F${index}`, result: rows[index - 8]?.diff || 0 };
+    row.getCell(26).dataValidation = { type: 'list', allowBlank: true, formulae: ['"January,February,March,April,May,June,July,August,September,October,November,December"'] };
     for (const col of moneyColumns) row.getCell(col).numFmt = moneyFormat;
     for (const col of [2, 23, 24, 25]) row.getCell(col).numFmt = '@';
     for (let col = 1; col <= columns.length; col++) {
@@ -115,7 +117,7 @@ export async function exportFinanceWorkbook(rows: FinanceExportRow[]): Promise<A
       cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF1F5F9' } };
     }
   }
-  sheet.autoFilter = { from: 'A7', to: `Y${Math.max(8, lastDataRow)}` };
+  sheet.autoFilter = { from: 'A7', to: `Z${Math.max(8, lastDataRow)}` };
   sheet.pageSetup.printTitlesRow = '6:7';
   return await workbook.xlsx.writeBuffer() as ArrayBuffer;
 }
@@ -146,8 +148,19 @@ function readDate(value: unknown, label: string): string {
   if (value instanceof Date) date = value.toISOString().slice(0, 10);
   else if (typeof value === 'number') date = new Date(Date.UTC(1899, 11, 30) + value * 86400000).toISOString().slice(0, 10);
   else date = String(value ?? '').trim();
-  if (!/^2027-\d{2}-\d{2}$/.test(date) || !Number.isFinite(Date.parse(date)) || new Date(date).toISOString().slice(0, 10) !== date) throw new Error(`${label}: use a valid 2027 date (YYYY-MM-DD).`);
+  if (!/^202[67]-\d{2}-\d{2}$/.test(date) || !Number.isFinite(Date.parse(date)) || new Date(date).toISOString().slice(0, 10) !== date) throw new Error(`${label}: use a valid 2026 reference or 2027 date (YYYY-MM-DD).`);
   return date;
+}
+
+const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+function readMonth(value: unknown, label: string): string {
+  const text = String(value ?? '').trim();
+  if (!text) return '';
+  const numeric = text.match(/^(?:2027-)?(0?[1-9]|1[0-2])(?:月)?$/);
+  if (numeric) return monthNames[Number(numeric[1]) - 1];
+  const name = monthNames.find((month) => [month.toLowerCase(), month.slice(0, 3).toLowerCase()].includes(text.toLowerCase()));
+  if (!name) throw new Error(`${label}: use a month name or a number from 1 to 12.`);
+  return name;
 }
 
 export async function parseFinanceWorkbook(data: ArrayBuffer): Promise<FinanceExportRow[]> {
@@ -156,6 +169,7 @@ export async function parseFinanceWorkbook(data: ArrayBuffer): Promise<FinanceEx
   const sheet = workbook.getWorksheet('Finance Result 2027');
   if (!sheet) throw new Error('Use the exported Finance Result 2027 Excel template.');
   columns.forEach(([name], index) => {
+    if (index === 25 && !sheet.getRow(7).getCell(26).text.trim()) return; // Earlier templates have no month column.
     if (sheet.getRow(7).getCell(index + 1).text.trim() !== name) throw new Error(`Column ${index + 1} must be "${name}". Keep the exported headers.`);
   });
   if (sheet.rowCount > 5008) throw new Error('Import at most 5,000 shows per workbook.');
@@ -165,18 +179,25 @@ export async function parseFinanceWorkbook(data: ArrayBuffer): Promise<FinanceEx
     if (rowNumber === sheet.rowCount && row.getCell(1).text === 'Total' && !row.getCell(22).value && row.getCell(6).formula === `SUM(F8:F${rowNumber - 1})`) continue;
     const value = (col: number) => cellValue(row.getCell(col));
     // The empty template contains a Year, Schedule and Variance formula only.
-    if (![1, 2, 3, 5, 6, 7, 8, 9, 10, 11, 12, 14, 15, 16, 17, 18, 19, 20, 21, 23, 24, 25].some((col) => row.getCell(col).value !== null && row.getCell(col).text.trim() !== '')) continue;
+    if (![1, 2, 3, 5, 6, 7, 8, 9, 10, 11, 12, 14, 15, 16, 17, 18, 19, 20, 21, 23, 24, 25, 26].some((col) => row.getCell(col).value !== null && row.getCell(col).text.trim() !== '')) continue;
     const text = (col: number) => String(value(col) ?? '').trim();
     const num = (col: number, integer = false) => readNumber(value(col), `Row ${rowNumber}, ${columns[col - 1][0]}`, integer);
     if (num(22) !== 2027) throw new Error(`Row ${rowNumber}: only 2027 data can be imported.`);
-    // Keep unfilled name templates in the workbook while importing completed rows.
+    const month2027 = readMonth(value(26), `Row ${rowNumber}, Month 2027`);
+    const start = text(23) ? readDate(value(23), `Row ${rowNumber}, Start date`) : '';
+    const finish = text(24) ? readDate(value(24), `Row ${rowNumber}, Finish date`) : '';
+    // Keep untouched templates, including their copied reference dates, out of imports.
     if (text(1) && ['', 'Not Started'].includes(text(4)) &&
-      ![2, 3, 5, 6, 7, 8, 9, 10, 11, 12, 14, 15, 16, 17, 18, 19, 20, 21, 23, 24, 25]
+      !month2027 && (!start || start.startsWith('2026-')) && (!finish || finish.startsWith('2026-')) &&
+      ![2, 3, 5, 6, 7, 8, 9, 10, 11, 12, 14, 15, 16, 17, 18, 19, 20, 21, 25]
         .some((col) => row.getCell(col).value !== null && row.getCell(col).text.trim() !== '')) continue;
-    if (!text(1) || !text(3)) throw new Error(`Row ${rowNumber}: Show and Dealership are required.`);
-    const startDate = readDate(value(23), `Row ${rowNumber}, Start date`);
-    const finishDate = readDate(value(24), `Row ${rowNumber}, Finish date`);
-    if (finishDate < startDate) throw new Error(`Row ${rowNumber}: Finish date must be on or after Start date.`);
+    if (!text(1) || (!text(3) && !month2027)) throw new Error(`Row ${rowNumber}: Show and Dealership are required (or fill Month 2027 for a planned show).`);
+    if (start && finish && start.slice(0, 4) !== finish.slice(0, 4)) throw new Error(`Row ${rowNumber}: both dates must use the same year, either 2026 reference dates or 2027 dates.`);
+    if (start && finish && finish < start) throw new Error(`Row ${rowNumber}: Finish date must be on or after Start date.`);
+    const referenceDates = start.startsWith('2026-') || finish.startsWith('2026-');
+    const startDate = referenceDates ? '' : start;
+    const finishDate = referenceDates ? '' : finish;
+    if (!referenceDates && (!startDate || !finishDate) && !month2027) throw new Error(`Row ${rowNumber}: fill both 2027 dates or Month 2027.`);
     const status = text(4) || 'Not Started';
     if (!['Not Started', 'In Progress', 'Completed', 'Finished', 'Cancelled'].includes(status)) throw new Error(`Row ${rowNumber}: Schedule must be Not Started, In Progress, Completed, Finished or Cancelled.`);
     const totalBudget = num(6), dealerBudget = num(7), factoryBudget = num(8);
@@ -188,7 +209,9 @@ export async function parseFinanceWorkbook(data: ArrayBuffer): Promise<FinanceEx
     if (showId && !/^[A-Za-z0-9_-]+$/.test(showId)) throw new Error(`Row ${rowNumber}: invalid Show ID.`);
     results.push({
       showId, showName: text(1), dealership: text(3), internalSalesOrderNumber: text(2),
-      status, startDate, finishDate, showDuration: num(5, true) || Math.round((Date.parse(finishDate) - Date.parse(startDate)) / 86400000) + 1,
+      status, startDate, finishDate, showDuration: num(5, true) || (startDate && finishDate ? Math.round((Date.parse(finishDate) - Date.parse(startDate)) / 86400000) + 1 : 0),
+      ...(referenceDates ? { referenceStartDate2026: start, referenceFinishDate2026: finish } : {}),
+      ...(sheet.getRow(7).getCell(26).text.trim() ? { month2027 } : {}),
       totalBudget, dealerBudget, factoryBudget, actual, dealerActual, factoryActual, chargeBack: num(12), diff: actual - totalBudget,
       showTarget: num(14, true), showSales, salesByShowTeam, salesByNetwork, salesOffice,
       contractNumber: String(num(19, true)), totalContractValue: num(20), clawBack: num(21),
@@ -199,7 +222,7 @@ export async function parseFinanceWorkbook(data: ArrayBuffer): Promise<FinanceEx
   return results;
 }
 
-type ExistingShow = { id: string; name?: string; dealership?: string; startDate?: string };
+type ExistingShow = { id: string; name?: string; dealership?: string; startDate?: string; referenceStartDate2026?: string };
 type ExistingInternalOrder = { id?: string; showId?: string; internalSalesOrderNumber?: string };
 export function prepareFinanceImport(rows: FinanceExportRow[], shows: Record<string, ExistingShow>, internalOrders: Record<string, ExistingInternalOrder>, newId: () => string) {
   const updates: Record<string, unknown> = {};
@@ -207,13 +230,13 @@ export function prepareFinanceImport(rows: FinanceExportRow[], shows: Record<str
   const identities = new Set<string>();
   let created = 0;
   for (const row of rows) {
-    const identity = [row.showName, row.dealership, row.startDate].join('|').toLowerCase();
+    const identity = [row.showName, row.dealership, row.startDate || row.referenceStartDate2026].join('|').toLowerCase();
     if (identities.has(identity)) throw new Error(`Duplicate show: ${row.showName}.`);
     identities.add(identity);
     let id = row.showId;
     if (id && !shows[id]) throw new Error(`Unknown 2027 Show ID for ${row.showName}. Leave Show ID blank for a new show.`);
     if (!id) {
-      const matches = Object.entries(shows).filter(([, s]) => [s.name, s.dealership, s.startDate].join('|').toLowerCase() === identity);
+      const matches = Object.entries(shows).filter(([, s]) => [s.name, s.dealership, s.startDate || s.referenceStartDate2026].join('|').toLowerCase() === identity);
       const soMatches = row.internalSalesOrderNumber ? Object.values(internalOrders).filter((o) => o.internalSalesOrderNumber === row.internalSalesOrderNumber && o.showId && shows[o.showId]).map((o) => o.showId!) : [];
       const candidates = new Set([...matches.map(([key]) => key), ...soMatches]);
       if (candidates.size > 1) throw new Error(`Ambiguous match for ${row.showName}. Export again and retain the Show ID.`);
@@ -221,6 +244,10 @@ export function prepareFinanceImport(rows: FinanceExportRow[], shows: Record<str
     }
     if (seen.has(id)) throw new Error(`Multiple rows match ${row.showName}.`);
     seen.add(id);
+    updates[`shows/${id}/year`] = 2027;
+    for (const key of ['month2027', 'referenceStartDate2026', 'referenceFinishDate2026'] as const) {
+      if (row[key] !== undefined) updates[`shows/${id}/${key}`] = row[key];
+    }
     updates[`showActualOverrides/${id}`] = null;
     if (!shows[id]) {
       created++;
