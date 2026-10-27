@@ -68,9 +68,9 @@ try {
   await template.saveAs(new URL('template.xlsx', out).pathname.replace(/^\/(\w:)/, '$1'));
   const templateBook = new ExcelJS.Workbook();
   await templateBook.xlsx.load(await fs.readFile(await template.path()));
-  assert.equal(templateBook.worksheets[0].getCell('W8').text, '2026-12-10');
-  assert.equal(templateBook.worksheets[0].getCell('X8').text, '2026-12-12');
-  assert.equal(templateBook.worksheets[0].getCell('Z7').text, 'Month 2027');
+  assert.equal(templateBook.worksheets[0].getCell('B8').text, '2026-12-10');
+  assert.equal(templateBook.worksheets[0].getCell('C8').text, '2026-12-12');
+  assert.equal(templateBook.worksheets[0].getCell('D7').text, 'Month 2027');
   await page.screenshot({ path: new URL('2027-empty.png', out).pathname.replace(/^\/(\w:)/, '$1'), fullPage: true });
   const row = { showId: '', showName: 'Imported 2027 Show', dealership: 'Frankston', internalSalesOrderNumber: '000123', startDate: '2027-01-15', finishDate: '2027-01-17', status: 'Not Started', showDuration: 3, totalBudget: 1000, dealerBudget: 600, factoryBudget: 400, actual: 900, dealerActual: 500, factoryActual: 400, chargeBack: 0, diff: -100, showTarget: 20, showSales: 10, salesByShowTeam: 6, salesByNetwork: 3, salesOffice: 1, contractNumber: '10', totalContractValue: 800000, clawBack: 0 };
   const upload = Buffer.from(await exportFinanceWorkbook([row]));

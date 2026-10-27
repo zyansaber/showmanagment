@@ -42,8 +42,28 @@ test('explicit URLs win, legacy public links always resolve to 2026', () => {
 });
 
 test('Excel round-trip retains every editable metric, dates and leading-zero SO', async () => {
-  const rows = await parseFinanceWorkbook(await exportFinanceWorkbook([sample]));
+  const buffer = await exportFinanceWorkbook([sample]);
+  const book = new ExcelJS.Workbook();
+  await book.xlsx.load(buffer);
+  const sheet = book.worksheets[0];
+  assert.deepEqual([1, 2, 3, 4].map((col) => sheet.getRow(7).getCell(col).text), ['Show', 'Start date', 'Finish date', 'Month 2027']);
+  assert.equal(sheet.getCell('P8').formula, 'L8-I8');
+  assert.equal(sheet.getCell('I9').formula, 'SUM(I8:I8)');
+  const rows = await parseFinanceWorkbook(buffer);
   assert.deepEqual(rows, [sample]);
+});
+
+test('previous Excel column order remains importable after moving dates forward', async () => {
+  const current = new ExcelJS.Workbook();
+  await current.xlsx.load(await exportFinanceWorkbook([sample]));
+  const old = new ExcelJS.Workbook();
+  const sheet = old.addWorksheet('Finance Result 2027');
+  const oldOrder = [1, ...Array.from({ length: 21 }, (_, i) => i + 5), 2, 3, 26, 4];
+  for (const row of [7, 8]) sheet.getRow(row).values = oldOrder.map((col) => current.worksheets[0].getRow(row).getCell(col).value);
+  sheet.getCell('M8').value = { formula: 'I8-F8', result: sample.diff };
+  sheet.getCell('A9').value = 'Total';
+  sheet.getCell('F9').value = { formula: 'SUM(F8:F8)', result: sample.totalBudget };
+  assert.deepEqual(await parseFinanceWorkbook(await old.xlsx.writeBuffer()), [sample]);
 });
 
 test('empty template is styled and does not import its placeholder row', async () => {
@@ -51,29 +71,29 @@ test('empty template is styled and does not import its placeholder row', async (
   const book = new ExcelJS.Workbook();
   await book.xlsx.load(buffer);
   const sheet = book.worksheets[0];
-  assert.equal(sheet.getCell('F6').value, 'BUDGET');
-  assert.equal(sheet.getCell('I6').value, 'ACTUAL');
-  assert.equal(sheet.getCell('N6').value, 'SALES');
+  assert.equal(sheet.getCell('I6').value, 'BUDGET');
+  assert.equal(sheet.getCell('L6').value, 'ACTUAL');
+  assert.equal(sheet.getCell('Q6').value, 'SALES');
   assert.equal(sheet.views[0].state, 'frozen');
-  assert.equal(sheet.getCell('V8').value, 2027);
+  assert.equal(sheet.getCell('Y8').value, 2027);
   await assert.rejects(parseFinanceWorkbook(buffer), /No show data/);
 });
 
 test('wrong year, invalid date, nonnumeric money and invalid counts are rejected', async () => {
   for (const [cell, value, expected] of [
-    ['V8', 2026, /only 2027/], ['W8', '2026-12-31', /same year/], ['W8', '2027-02-30', /valid 2026 reference or 2027 date/],
-    ['X8', '2027-01-01', /Finish date must/], ['I8', 'not money', /valid number/],
-    ['O8', 1.5, /whole number/], ['O8', -1, /whole number/], ['F8', 900, /Total budget/],
-    ['P8', 11, /cannot exceed Sold/], ['Y8', '../2026', /invalid Show ID/], ['A7', 'renamed', /Column 1/],
+    ['Y8', 2026, /only 2027/], ['B8', '2026-12-31', /same year/], ['B8', '2027-02-30', /valid 2026 reference or 2027 date/],
+    ['C8', '2027-01-01', /Finish date must/], ['L8', 'not money', /valid number/],
+    ['R8', 1.5, /whole number/], ['R8', -1, /whole number/], ['I8', 900, /Total budget/],
+    ['S8', 11, /cannot exceed Sold/], ['Z8', '../2026', /invalid Show ID/], ['A7', 'renamed', /Column 1/],
   ]) await assert.rejects(parseFinanceWorkbook(await changedWorkbook((sheet) => { sheet.getCell(cell).value = value; })), expected);
 });
 
 test('Excel date cells, currency text and zero values are supported', async () => {
   const rows = await parseFinanceWorkbook(await changedWorkbook((sheet) => {
-    sheet.getCell('W8').value = new Date('2027-01-15T00:00:00Z');
-    sheet.getCell('I8').value = '$1,200.50';
-    sheet.getCell('U8').value = '(50.25)';
-    for (const col of ['O', 'P', 'Q', 'R', 'S', 'T']) sheet.getCell(`${col}8`).value = 0;
+    sheet.getCell('B8').value = new Date('2027-01-15T00:00:00Z');
+    sheet.getCell('L8').value = '$1,200.50';
+    sheet.getCell('X8').value = '(50.25)';
+    for (const col of ['R', 'S', 'T', 'U', 'V', 'W']) sheet.getCell(`${col}8`).value = 0;
   }));
   assert.equal(rows[0].actual, 1200.5);
   assert.equal(rows[0].clawBack, -50.25);
@@ -122,16 +142,16 @@ test('prefilled Excel keeps 2026 reference dates without IDs or amounts; partial
   await book.xlsx.load(await exportFinanceWorkbook(templates));
   const sheet = book.worksheets[0];
   assert.equal(sheet.getCell('A8').value, 'First show');
-  assert.equal(sheet.getCell('Y8').text, '');
-  assert.equal(sheet.getCell('W8').text, '2026-03-01');
-  assert.equal(sheet.getCell('X8').text, '2026-03-03');
-  assert.equal(sheet.getCell('Z7').text, 'Month 2027');
-  assert.equal(sheet.getCell('I8').value, null);
+  assert.equal(sheet.getCell('Z8').text, '');
+  assert.equal(sheet.getCell('B8').text, '2026-03-01');
+  assert.equal(sheet.getCell('C8').text, '2026-03-03');
+  assert.equal(sheet.getCell('D7').text, 'Month 2027');
+  assert.equal(sheet.getCell('L8').value, null);
   await assert.rejects(parseFinanceWorkbook(await book.xlsx.writeBuffer()), /No show data/);
-  sheet.getCell('C8').value = 'Frankston';
-  sheet.getCell('W8').value = '2027-03-01';
-  sheet.getCell('X8').value = '2027-03-03';
-  sheet.getCell('I8').value = 500;
+  sheet.getCell('F8').value = 'Frankston';
+  sheet.getCell('B8').value = '2027-03-01';
+  sheet.getCell('C8').value = '2027-03-03';
+  sheet.getCell('L8').value = 500;
   const rows = await parseFinanceWorkbook(await book.xlsx.writeBuffer());
   assert.equal(rows.length, 1);
   assert.equal(rows[0].showName, 'First show');
@@ -147,7 +167,7 @@ test('Month 2027 can be imported with copied 2026 dates without creating a past 
   ], [])));
   const sheet = book.worksheets[0];
   for (const value of ['March', 'mar', 3, '03', '2027-03', '3月']) {
-    sheet.getCell('Z8').value = value;
+    sheet.getCell('D8').value = value;
     const rows = await parseFinanceWorkbook(await book.xlsx.writeBuffer());
     assert.equal(rows[0].month2027, 'March');
     assert.equal(rows[0].startDate, '');
@@ -162,13 +182,13 @@ test('Month 2027 can be imported with copied 2026 dates without creating a past 
     assert.deepEqual(await parseFinanceWorkbook(await exportFinanceWorkbook(rows)), rows);
   }
   for (const value of [0, 13, '2026-03', 'not a month']) {
-    sheet.getCell('Z8').value = value;
+    sheet.getCell('D8').value = value;
     await assert.rejects(parseFinanceWorkbook(await book.xlsx.writeBuffer()), /Month 2027/);
   }
 });
 
 test('older templates without Month 2027 remain importable and do not clear a saved month', async () => {
-  const buffer = await changedWorkbook((sheet) => { sheet.getCell('Z7').value = null; });
+  const buffer = await changedWorkbook((sheet) => { sheet.getCell('D7').value = null; });
   const rows = await parseFinanceWorkbook(buffer);
   assert.equal(rows[0].month2027, undefined);
   assert.equal(prepareFinanceImport(rows, {}, {}, () => 'old-template').updates['shows/old-template/month2027'], undefined);
