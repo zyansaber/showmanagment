@@ -538,7 +538,7 @@ export default function ShowBudgetExpense({ editableActuals = false }: { editabl
         .map(([key, show]) => ({ ...show, id: show.id || key }))
         .filter((show) => getShowYear(show, 2026) === 2026)
         .sort(compareShows)
-        .map(({ id, name, startDate, finishDate }) => ({ id, name, startDate, finishDate }));
+        .map(({ id, name, dealership, startDate, finishDate }) => ({ id, name, dealership, startDate, finishDate }));
       setRows(activeYear === 2027 ? [...mapped, ...createFinanceNameTemplates(legacyNames, mapped)] : mapped);
       setLoadFailed(false);
       if (announce) toast.success('Budget data refreshed');

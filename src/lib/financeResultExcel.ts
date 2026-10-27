@@ -43,7 +43,7 @@ export async function exportFinanceWorkbook(rows: FinanceExportRow[]): Promise<A
   sheet.getCell('A1').font = { size: 20, bold: true, color: { argb: 'FF0F172A' } };
   sheet.getRow(1).height = 36;
   sheet.mergeCells('A2:Z2');
-  sheet.getCell('A2').value = 'Names and original 2026 dates are prefilled for reference. Fill Month 2027 (1–12 or month name); replace dates with confirmed 2027 dates when known. Untouched templates are skipped. Keep Year and Show ID; leave ID blank for new shows. Dates: YYYY-MM-DD.';
+  sheet.getCell('A2').value = 'Names, dealerships and original 2026 dates are prefilled. Fill Month 2027 (1–12 or month name); replace dates with confirmed 2027 dates when known. Rows with only prefilled details are skipped. Keep Year and Show ID; leave ID blank for new shows. Dates: YYYY-MM-DD.';
   sheet.getCell('A2').alignment = { wrapText: true, vertical: 'middle' };
   sheet.getRow(2).height = 34;
   const finished = rows.filter((r) => /^(finished|completed)$/i.test(r.status || '') || (r.finishDate && new Date(r.finishDate).getTime() <= Date.now()));
@@ -82,7 +82,7 @@ export async function exportFinanceWorkbook(rows: FinanceExportRow[]): Promise<A
     });
   }
   rows.forEach((r) => sheet.addRow(orderValues(r.isTemplateRow ? [
-    r.showName, '', '', 'Not Started', null, null, null, null, null, null, null, null, null,
+    r.showName, '', r.dealership, 'Not Started', null, null, null, null, null, null, null, null, null,
     null, null, null, null, null, null, null, null, 2027, r.referenceStartDate2026 || '', r.referenceFinishDate2026 || '', '', r.month2027 || '',
   ] : [
     r.showName, r.internalSalesOrderNumber, r.dealership, r.status || 'Not Started', r.showDuration || 0,
@@ -197,10 +197,10 @@ export async function parseFinanceWorkbook(data: ArrayBuffer): Promise<FinanceEx
     const month2027 = readMonth(value(26), `Row ${rowNumber}, Month 2027`);
     const start = text(23) ? readDate(value(23), `Row ${rowNumber}, Start date`) : '';
     const finish = text(24) ? readDate(value(24), `Row ${rowNumber}, Finish date`) : '';
-    // Keep untouched templates, including their copied reference dates, out of imports.
+    // Prefilled names, dealerships and reference dates alone do not create shows.
     if (text(1) && ['', 'Not Started'].includes(text(4)) &&
       !month2027 && (!start || start.startsWith('2026-')) && (!finish || finish.startsWith('2026-')) &&
-      ![2, 3, 5, 6, 7, 8, 9, 10, 11, 12, 14, 15, 16, 17, 18, 19, 20, 21, 25]
+      ![2, 5, 6, 7, 8, 9, 10, 11, 12, 14, 15, 16, 17, 18, 19, 20, 21, 25]
         .some((col) => getCell(row, col).value !== null && getCell(row, col).text.trim() !== '')) continue;
     if (!text(1) || (!text(3) && !month2027)) throw new Error(`Row ${rowNumber}: Show and Dealership are required (or fill Month 2027 for a planned show).`);
     if (start && finish && start.slice(0, 4) !== finish.slice(0, 4)) throw new Error(`Row ${rowNumber}: both dates must use the same year, either 2026 reference dates or 2027 dates.`);

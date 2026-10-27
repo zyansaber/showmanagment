@@ -59,6 +59,7 @@ try {
   assert.equal(await page.getByRole('columnheader', { name: 'Month 2027', exact: true }).count(), 0);
   await page.getByRole('button', { name: '2027', exact: true }).click();
   await waitText('Awaiting 2027 data');
+  await page.getByRole('row').filter({ hasText: 'Original 2026 Show' }).getByText('Geelong', { exact: true }).waitFor();
   await page.getByRole('columnheader', { name: 'Month 2027', exact: true }).waitFor();
   assert.equal(await page.getByText('Original 2026 Show', { exact: true }).count(), 1);
   assert.deepEqual(await page.evaluate(() => JSON.parse(localStorage.getItem('test-db')).years[2027]), {});
@@ -71,6 +72,7 @@ try {
   assert.equal(templateBook.worksheets[0].getCell('B8').text, '2026-12-10');
   assert.equal(templateBook.worksheets[0].getCell('C8').text, '2026-12-12');
   assert.equal(templateBook.worksheets[0].getCell('D7').text, 'Month 2027');
+  assert.equal(templateBook.worksheets[0].getCell('F8').text, 'Geelong');
   await page.screenshot({ path: new URL('2027-empty.png', out).pathname.replace(/^\/(\w:)/, '$1'), fullPage: true });
   const row = { showId: '', showName: 'Imported 2027 Show', dealership: 'Frankston', internalSalesOrderNumber: '000123', startDate: '2027-01-15', finishDate: '2027-01-17', status: 'Not Started', showDuration: 3, totalBudget: 1000, dealerBudget: 600, factoryBudget: 400, actual: 900, dealerActual: 500, factoryActual: 400, chargeBack: 0, diff: -100, showTarget: 20, showSales: 10, salesByShowTeam: 6, salesByNetwork: 3, salesOffice: 1, contractNumber: '10', totalContractValue: 800000, clawBack: 0 };
   const upload = Buffer.from(await exportFinanceWorkbook([row]));

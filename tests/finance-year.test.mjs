@@ -124,7 +124,7 @@ test('duplicate rows and unknown IDs fail before any write', () => {
 });
 
 test('2026 names remain as blank 2027 templates without overwriting actual 2027 rows', () => {
-  const names = [{ id: 'a', name: 'Existing show' }, { id: 'b', name: 'Next show' }, { id: 'c', name: 'Next show' }];
+  const names = [{ id: 'a', name: 'Existing show' }, { id: 'b', name: 'Next show' }, { id: 'c', name: 'Next show', dealership: 'Geelong' }];
   const templates = createFinanceNameTemplates(names, [{ showName: ' Existing SHOW ' }, { showName: 'Next show' }]);
   assert.equal(templates.length, 1);
   assert.equal(templates[0].showName, 'Next show');
@@ -132,12 +132,12 @@ test('2026 names remain as blank 2027 templates without overwriting actual 2027 
   assert.equal(templates[0].actual, 0);
   assert.equal(templates[0].showYear, 2027);
   assert.equal(templates[0].startDate, '');
-  assert.equal(templates[0].dealership, '');
+  assert.equal(templates[0].dealership, 'Geelong');
   assert.equal(names.length, 3);
 });
 
 test('prefilled Excel keeps 2026 reference dates without IDs or amounts; partial imports skip untouched templates', async () => {
-  const templates = createFinanceNameTemplates([{ id: 'old-a', name: 'First show', startDate: '2026-03-01', finishDate: '2026-03-03' }, { id: 'old-b', name: 'Later show', startDate: '2026-05-01', finishDate: '2026-05-03' }], []);
+  const templates = createFinanceNameTemplates([{ id: 'old-a', name: 'First show', dealership: 'Geelong', startDate: '2026-03-01', finishDate: '2026-03-03' }, { id: 'old-b', name: 'Later show', dealership: 'Wangaratta', startDate: '2026-05-01', finishDate: '2026-05-03' }], []);
   const book = new ExcelJS.Workbook();
   await book.xlsx.load(await exportFinanceWorkbook(templates));
   const sheet = book.worksheets[0];
@@ -146,6 +146,8 @@ test('prefilled Excel keeps 2026 reference dates without IDs or amounts; partial
   assert.equal(sheet.getCell('B8').text, '2026-03-01');
   assert.equal(sheet.getCell('C8').text, '2026-03-03');
   assert.equal(sheet.getCell('D7').text, 'Month 2027');
+  assert.equal(sheet.getCell('F8').text, 'Geelong');
+  assert.equal(sheet.getCell('F9').text, 'Wangaratta');
   assert.equal(sheet.getCell('L8').value, null);
   await assert.rejects(parseFinanceWorkbook(await book.xlsx.writeBuffer()), /No show data/);
   sheet.getCell('F8').value = 'Frankston';
@@ -157,19 +159,21 @@ test('prefilled Excel keeps 2026 reference dates without IDs or amounts; partial
   assert.equal(rows[0].showName, 'First show');
   assert.equal(rows[0].showId, '');
   assert.equal(rows[0].actual, 500);
+  assert.equal(rows[0].dealership, 'Frankston');
   assert.deepEqual(createFinanceNameTemplates([{ id: 'old-a', name: 'First show' }, { id: 'old-b', name: 'Later show' }], rows).map((row) => row.showName), ['Later show']);
 });
 
 test('Month 2027 can be imported with copied 2026 dates without creating a past 2027 schedule', async () => {
   const book = new ExcelJS.Workbook();
   await book.xlsx.load(await exportFinanceWorkbook(createFinanceNameTemplates([
-    { id: 'old', name: 'Planned show', startDate: '2026-03-01', finishDate: '2026-03-03' },
+    { id: 'old', name: 'Planned show', dealership: 'Geelong', startDate: '2026-03-01', finishDate: '2026-03-03' },
   ], [])));
   const sheet = book.worksheets[0];
   for (const value of ['March', 'mar', 3, '03', '2027-03', '3月']) {
     sheet.getCell('D8').value = value;
     const rows = await parseFinanceWorkbook(await book.xlsx.writeBuffer());
     assert.equal(rows[0].month2027, 'March');
+    assert.equal(rows[0].dealership, 'Geelong');
     assert.equal(rows[0].startDate, '');
     assert.equal(rows[0].finishDate, '');
     assert.equal(rows[0].referenceStartDate2026, '2026-03-01');
