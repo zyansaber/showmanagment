@@ -447,8 +447,8 @@ export default function Dashboard() {
   };
 
   const dealershipData = buildCompletedShowComparison((show) => {
-    const name = show.dealership?.trim();
-    return name && !['n/a', 'na'].includes(name.toLowerCase()) ? name : 'No dealership set';
+    const name = (show as Show & { handoverDealer?: string }).handoverDealer?.trim();
+    return name && !['n/a', 'na'].includes(name.toLowerCase()) ? name : 'No handover dealer set';
   }).sort((a, b) => a.label.localeCompare(b.label));
 
   const monthlyShowData = buildCompletedShowComparison((show) => {
@@ -1162,7 +1162,7 @@ export default function Dashboard() {
 
           <Card>
             <CardHeader>
-              <CardTitle>Shows by Dealership</CardTitle>
+              <CardTitle>Shows by Handover Dealer</CardTitle>
               <CardDescription>
                 Completed shows only. Avg daily sales = confirmation orders from Orders &amp; Sales ÷ total show days.
               </CardDescription>
@@ -1185,14 +1185,6 @@ export default function Dashboard() {
                         </BarChart>
                       </ResponsiveContainer>
                     </div>
-                  </div>
-                  <div className="overflow-x-auto mt-4">
-                    <table className="w-full text-sm text-left">
-                      <thead><tr className="border-b"><th className="p-2">Dealership</th><th className="p-2">Completed Shows</th><th className="p-2">Confirmation Orders</th><th className="p-2">Total Show Days</th><th className="p-2">Avg Daily Sales</th></tr></thead>
-                      <tbody>{dealershipData.map((row) => (
-                        <tr key={row.label} className="border-b"><td className="p-2">{row.label}</td><td className="p-2">{row.shows}</td><td className="p-2">{row.totalSales}</td><td className="p-2">{row.totalDays}</td><td className="p-2">{row.totalDays > 0 ? row.dailySales?.toFixed(2) : 'N/A'}</td></tr>
-                      ))}</tbody>
-                    </table>
                   </div>
                 </>
               ) : <div className="text-center py-8 text-gray-500">No completed show data available</div>}
@@ -1225,14 +1217,6 @@ export default function Dashboard() {
                         </BarChart>
                       </ResponsiveContainer>
                     </div>
-                  </div>
-                  <div className="overflow-x-auto mt-4">
-                    <table className="w-full text-sm text-left">
-                      <thead><tr className="border-b"><th className="p-2">Month</th><th className="p-2">Completed Shows</th><th className="p-2">Confirmation Orders</th><th className="p-2">Total Show Days</th><th className="p-2">Avg Daily Sales</th></tr></thead>
-                      <tbody>{monthlyShowData.map((row) => (
-                        <tr key={row.label} className="border-b"><td className="p-2">{row.label}</td><td className="p-2">{row.shows}</td><td className="p-2">{row.totalSales}</td><td className="p-2">{row.totalDays}</td><td className="p-2">{row.totalDays > 0 ? row.dailySales?.toFixed(2) : 'N/A'}</td></tr>
-                      ))}</tbody>
-                    </table>
                   </div>
                 </>
               ) : <div className="text-center py-8 text-gray-500">No completed show data available</div>}
