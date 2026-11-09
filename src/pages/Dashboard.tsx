@@ -48,7 +48,6 @@ export default function Dashboard() {
   const [budgets, setBudgets] = useState<Record<string, Record<string, unknown>>>({});
   const [financeActuals, setFinanceActuals] = useState<Record<string, { dealer: number; factory: number }>>({});
   const [loading, setLoading] = useState(true);
-  const [showQ1Results, setShowQ1Results] = useState(false);
   const [showCurrentLastSection, setShowCurrentLastSection] = useState(false);
   const [showTopSalesShows, setShowTopSalesShows] = useState(false);
 
@@ -377,10 +376,8 @@ export default function Dashboard() {
   }, {} as Record<number, Show[]>);
 
   const shows2026 = showsByYear[activeYear] || [];
-  const shows2025 = showsByYear[2025] || [];
 
   const totalShows2026 = shows2026.length;
-  const totalShows = shows.length;
 
   const showYearById = shows.reduce((acc, show) => {
     const year = getShowYear(show);
@@ -401,10 +398,6 @@ export default function Dashboard() {
 
   // Only sum non-zero (non-N/A) values
   const target2026 = shows2026.reduce((sum, s) => sum + (s[targetField] > 0 ? s[targetField] : 0), 0);
-  const totalSales2025 = shows.reduce((sum, s) => sum + (s.sales2025 > 0 ? s.sales2025 : 0), 0);
-  const target2025 = shows2025.reduce((sum, s) => sum + (s.target2025 > 0 ? s.target2025 : 0), 0);
-  const totalSales2024 = shows.reduce((sum, s) => sum + (s.sales2024 > 0 ? s.sales2024 : 0), 0);
-  const target2024 = shows.reduce((sum, s) => sum + (s.target2024 > 0 ? s.target2024 : 0), 0);
 
   const isShowFinishedForYtd = (show: Show) => {
     const status = String(show.status || '').trim().toLowerCase();
@@ -417,8 +410,6 @@ export default function Dashboard() {
 
   const finishedShows2026 = shows2026.filter(isShowFinishedForYtd);
   const completedShows = finishedShows2026.length;
-  const completedShowIds = new Set(finishedShows2026.map((show) => show.id));
-  const completedShowOrders = orders.filter((order) => completedShowIds.has(order.showId) && isConfirmationOrder(order));
 
   const confirmationOrdersByShow = orders.reduce<Record<string, number>>((acc, order) => {
     if (!order.showId || !isConfirmationOrder(order)) return acc;
@@ -430,6 +421,43 @@ export default function Dashboard() {
     const imported = importedFinance(show);
     if (imported) confirmationOrdersByShow[show.id] = imported.showSales;
   });
+
+  // Keep comparison sales strictly sourced from Orders & Sales, without finance overrides.
+  const comparisonOrdersByShow = orders.reduce<Record<string, number>>((acc, order) => {
+    if (order.showId && isConfirmationOrder(order)) {
+      acc[order.showId] = (acc[order.showId] || 0) + 1;
+    }
+    return acc;
+  }, {});
+
+  const buildCompletedShowComparison = (groupBy: (show: Show) => string) => {
+    const groups = shows.filter(isShowFinishedForYtd).reduce((acc, show) => {
+      const label = groupBy(show);
+      if (!acc[label]) acc[label] = { shows: 0, totalSales: 0, totalDays: 0 };
+      acc[label].shows += 1;
+      acc[label].totalSales += comparisonOrdersByShow[show.id] || 0;
+      acc[label].totalDays += getShowDurationDays(show);
+      return acc;
+    }, {} as Record<string, { shows: number; totalSales: number; totalDays: number }>);
+    return Object.entries(groups).map(([label, values]) => ({
+      label,
+      ...values,
+      dailySales: values.totalDays > 0 ? Number((values.totalSales / values.totalDays).toFixed(2)) : null,
+    }));
+  };
+
+  const dealershipData = buildCompletedShowComparison((show) => {
+    const name = show.dealership?.trim();
+    return name && !['n/a', 'na'].includes(name.toLowerCase()) ? name : 'No dealership set';
+  }).sort((a, b) => a.label.localeCompare(b.label));
+
+  const monthlyShowData = buildCompletedShowComparison((show) => {
+    const date = new Date(show.startDate || show.finishDate || '');
+    return Number.isNaN(date.getTime()) ? 'No show date' : formatDate(date, 'yyyy-MM');
+  }).sort((a, b) => a.label.localeCompare(b.label)).map((row) => ({
+    ...row,
+    label: row.label === 'No show date' ? row.label : formatDate(new Date(`${row.label}-01T00:00:00`), 'MMM yyyy'),
+  }));
 
   // Match Orders & Sales: confirmed orders divided by show days, for completed shows only.
   const stateStats = shows.filter(isShowFinishedForYtd).reduce((acc, show) => {
@@ -465,115 +493,6 @@ export default function Dashboard() {
     (sum, show) => sum + (isShowFinishedForYtd(show) && show[targetField] > 0 ? show[targetField] : 0),
     0
   );
-  const completedAchievement = completedShowTarget2026 > 0
-    ? Math.round(((activeYear === 2027 ? finishedShows2026.reduce((sum, show) => sum + (confirmationOrdersByShow[show.id] || 0), 0) : completedShowOrders.length) / completedShowTarget2026) * 100)
-    : 0;
-  const overallAchievement = target2026 > 0 ? Math.round((totalSales2026 / target2026) * 100) : 0;
-  const currentYear = activeYear === 2027 ? activeYear : new Date().getFullYear();
-  const previousYear = currentYear - 1;
-
-  const isQ1Date = (value?: string) => {
-    if (!value) return false;
-    const parsed = new Date(value);
-    if (Number.isNaN(parsed.getTime())) return false;
-    const month = parsed.getMonth();
-    return month >= 0 && month <= 2;
-  };
-
-  const getCompletedShowYear = (show: Show) => {
-    const completedDate = show.finishDate || show.startDate;
-    if (!completedDate) return null;
-    const parsed = new Date(completedDate);
-    if (Number.isNaN(parsed.getTime())) return null;
-    return parsed.getFullYear();
-  };
-
-  const isAcceptedOrder = (order: ShowOrder) => {
-    const status = typeof order.status === 'string' ? order.status.trim().toLowerCase() : '';
-    const orderStatusId =
-      typeof (order as ShowOrder & { orderStatusId?: string }).orderStatusId === 'string'
-        ? (order as ShowOrder & { orderStatusId?: string }).orderStatusId?.trim().toLowerCase()
-        : '';
-    if (orderStatusId === 'confirmation') return true;
-    if (status === 'approved' || status === 'accepted' || status === 'confirmed') return true;
-    return Boolean((order as ShowOrder & { dealerConfirm?: boolean }).dealerConfirm);
-  };
-
-  const allOrdersByShow = orders.reduce<Record<string, number>>((acc, order) => {
-    if (!order.showId) return acc;
-    acc[order.showId] = (acc[order.showId] || 0) + 1;
-    return acc;
-  }, {});
-
-  const acceptedOrdersByShow = orders.reduce<Record<string, number>>((acc, order) => {
-    if (!order.showId || !isAcceptedOrder(order)) return acc;
-    acc[order.showId] = (acc[order.showId] || 0) + 1;
-    return acc;
-  }, {});
-
-  const readBudgetOrderValue = (showId: string, year: number) => {
-    const budget = (budgets?.[showId] as Record<string, unknown>) || {};
-    const yearCandidates = [
-      `orders${year}`,
-      `order${year}`,
-      `acceptedOrders${year}`,
-      `totalSales${year}`,
-      `sales${year}`,
-    ];
-    const genericCandidates = ['orders', 'order', 'acceptedOrders', 'totalOrders', 'totalSales', 'sales', 'showSales'];
-    const values = [...yearCandidates, ...genericCandidates]
-      .map((key) => parseNumber(budget[key]))
-      .filter((value) => value > 0);
-    return values[0] || 0;
-  };
-
-  const showSalesFallbackByYear = (show: Show, year: number) => {
-    if (year === 2025) return parseNumber(show.sales2025);
-    if (year === 2024) return parseNumber(show.sales2024);
-    return 0;
-  };
-
-  const resolveShowOrderCount = (show: Show, year: number) => {
-    const imported = importedFinance(show);
-    if (imported && year === activeYear) return imported.showSales;
-    const accepted = acceptedOrdersByShow[show.id] || 0;
-    if (accepted > 0) return accepted;
-    const allOrders = allOrdersByShow[show.id] || 0;
-    if (allOrders > 0) return allOrders;
-    const budgetOrders = readBudgetOrderValue(show.id, year);
-    if (budgetOrders > 0) return budgetOrders;
-    return showSalesFallbackByYear(show, year);
-  };
-
-  const isShowCompleted = (show: Show) => {
-    const status = String(show.status || '').trim().toLowerCase();
-    if (status === 'completed' || status === 'finished') return true;
-    const completedDate = show.finishDate || show.startDate;
-    if (!completedDate) return false;
-    const parsed = new Date(completedDate);
-    if (Number.isNaN(parsed.getTime())) return false;
-    return parsed.getTime() <= Date.now();
-  };
-
-  const getQ1CompletedShows = (year: number) =>
-    shows.filter((show) => {
-      if (!isShowCompleted(show)) return false;
-      const completedDate = show.finishDate || show.startDate;
-      if (!isQ1Date(completedDate)) return false;
-      return getCompletedShowYear(show) === year;
-    });
-
-  const q1CompletedShowsCurrent = getQ1CompletedShows(currentYear);
-
-  const q1AcceptedOrdersCurrent = q1CompletedShowsCurrent.reduce(
-    (sum, show) => sum + resolveShowOrderCount(show, currentYear),
-    0
-  );
-  const q1AcceptedOrdersPrevious = q1CompletedShowsCurrent.reduce((sum, show) => sum + parseNumber(show.sales2025), 0);
-  const q1YoYGrowth = q1AcceptedOrdersPrevious > 0
-    ? ((q1AcceptedOrdersCurrent - q1AcceptedOrdersPrevious) / q1AcceptedOrdersPrevious) * 100
-    : null;
-
   const gaugePercent = target2026 > 0 ? Math.round((totalSales2026 / target2026) * 100) : 0;
   const ytdPercent = target2026 > 0 ? Math.round((completedShowTarget2026 / target2026) * 100) : 0;
   const sales2025SamePeriod = finishedShows2026.reduce((sum, show) => sum + parseNumber(show.sales2025), 0);
@@ -1155,40 +1074,6 @@ export default function Dashboard() {
         </div>
       </div>
 
-      <Card className="hover:shadow-lg transition-shadow border-slate-200">
-        <CardHeader className="sm:flex-row sm:items-center sm:justify-between gap-3">
-          <div>
-            <CardTitle>Q1 Show Conversion</CardTitle>
-            <CardDescription>
-              Compare Q1 completed-show order results between {currentYear} and {previousYear}.
-            </CardDescription>
-          </div>
-          <Button onClick={() => setShowQ1Results((prev) => !prev)}>
-            {showQ1Results ? 'Hide Results' : 'Show Results'}
-          </Button>
-        </CardHeader>
-        {showQ1Results ? (
-          <CardContent className="space-y-2 text-sm text-slate-700">
-            <p>
-              Q1 {currentYear} Show Orders: {formatNumber(q1AcceptedOrdersCurrent)} units (from {q1CompletedShowsCurrent.length}{' '}
-              completed shows)
-            </p>
-            <p>
-              Q1 {previousYear} Same Period: {formatNumber(q1AcceptedOrdersPrevious)} units
-            </p>
-            <p>
-              YoY Growth:
-              {q1YoYGrowth === null ? ' N/A (previous year is 0)' : ` ${q1YoYGrowth >= 0 ? '+' : ''}${q1YoYGrowth.toFixed(1)}%`}
-            </p>
-            <p className="text-xs text-slate-500">
-              Data source priority: confirmed/accepted show orders → all show orders → budget order fields → show sales
-              fallback. Q1 {previousYear} comparison is calculated from the same completed Q1 shows using each show&apos;s
-              Total Sales {previousYear}.
-            </p>
-          </CardContent>
-        ) : null}
-      </Card>
-
       {/* Main Content Tabs */}
       <Tabs defaultValue="employees" className="space-y-6">
         <TabsList className="bg-white">
@@ -1277,99 +1162,83 @@ export default function Dashboard() {
 
           <Card>
             <CardHeader>
-              <CardTitle>Target Achievement (YTD)</CardTitle>
+              <CardTitle>Shows by Dealership</CardTitle>
               <CardDescription>
-                Progress based on completed shows in {activeYear} compared to their targets and the overall annual target
+                Completed shows only. Avg daily sales = confirmation orders from Orders &amp; Sales ÷ total show days.
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="p-4 border rounded-lg">
-                  <p className="text-sm text-gray-600">Completed Shows</p>
-                  <p className="text-2xl font-bold text-gray-900">{completedShows}</p>
-                  <p className="text-xs text-gray-500">Orders received: {activeYear === 2027 ? finishedShows2026.reduce((sum, show) => sum + (confirmationOrdersByShow[show.id] || 0), 0) : completedShowOrders.length}</p>
-                </div>
-                <div className="p-4 border rounded-lg">
-                  <p className="text-sm text-gray-600">Completed Show Target</p>
-                  <p className="text-2xl font-bold text-blue-600">{completedShowTarget2026}</p>
-                  <p className="text-xs text-gray-500">Achievement: {completedAchievement}%</p>
-                </div>
-                <div className="p-4 border rounded-lg">
-                  <p className="text-sm text-gray-600">Overall {activeYear} Target</p>
-                  <p className="text-2xl font-bold text-green-600">{target2026}</p>
-                  <p className="text-xs text-gray-500">Current achievement: {overallAchievement}%</p>
-                </div>
-              </div>
+              {dealershipData.length > 0 ? (
+                <>
+                  <div className="overflow-x-auto">
+                    <div style={{ minWidth: Math.max(600, dealershipData.length * 100) }}>
+                      <ResponsiveContainer width="100%" height={400}>
+                        <BarChart data={dealershipData} margin={{ bottom: 60 }}>
+                          <CartesianGrid strokeDasharray="3 3" />
+                          <XAxis dataKey="label" interval={0} angle={-30} textAnchor="end" height={90} />
+                          <YAxis allowDecimals={false} yAxisId="shows" />
+                          <YAxis yAxisId="sales" orientation="right" />
+                          <Tooltip />
+                          <Legend />
+                          <Bar yAxisId="shows" dataKey="shows" fill="#3b82f6" name="Completed Shows" />
+                          <Bar yAxisId="sales" dataKey="dailySales" fill="#10b981" name="Avg Daily Sales" />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+                  <div className="overflow-x-auto mt-4">
+                    <table className="w-full text-sm text-left">
+                      <thead><tr className="border-b"><th className="p-2">Dealership</th><th className="p-2">Completed Shows</th><th className="p-2">Confirmation Orders</th><th className="p-2">Total Show Days</th><th className="p-2">Avg Daily Sales</th></tr></thead>
+                      <tbody>{dealershipData.map((row) => (
+                        <tr key={row.label} className="border-b"><td className="p-2">{row.label}</td><td className="p-2">{row.shows}</td><td className="p-2">{row.totalSales}</td><td className="p-2">{row.totalDays}</td><td className="p-2">{row.totalDays > 0 ? row.dailySales?.toFixed(2) : 'N/A'}</td></tr>
+                      ))}</tbody>
+                    </table>
+                  </div>
+                </>
+              ) : <div className="text-center py-8 text-gray-500">No completed show data available</div>}
             </CardContent>
           </Card>
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <Card>
-              <CardHeader>
-                <CardTitle>2024 vs 2025 Target Comparison</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-4">
-                  <div className="flex justify-between items-center p-4 bg-blue-50 rounded-lg">
-                    <div>
-                      <p className="text-sm text-gray-600">2024 Target</p>
-                      <p className="text-2xl font-bold text-gray-900">{target2024} units</p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-sm text-gray-600">Achieved</p>
-                      <p className="text-2xl font-bold text-green-600">{totalSales2024} units</p>
-                      <p className="text-xs text-gray-500">
-                        {target2024 > 0 ? `${Math.round((totalSales2024 / target2024) * 100)}%` : '0%'}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex justify-between items-center p-4 bg-green-50 rounded-lg">
-                    <div>
-                      <p className="text-sm text-gray-600">2025 Target</p>
-                      <p className="text-2xl font-bold text-gray-900">{target2025} units</p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-sm text-gray-600">Current</p>
-                      <p className="text-2xl font-bold text-blue-600">{totalSales2025} units</p>
-                      <p className="text-xs text-gray-500">
-                        {target2025 > 0 ? `${Math.round((totalSales2025 / target2025) * 100)}%` : '0%'}
-                      </p>
+          <Card>
+            <CardHeader>
+              <CardTitle>Shows by Month</CardTitle>
+              <CardDescription>
+                Completed shows only. Avg daily sales = confirmation orders from Orders &amp; Sales ÷ total show days.
+                Months are based on the show start date (finish date if no start date is available).
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {monthlyShowData.length > 0 ? (
+                <>
+                  <div className="overflow-x-auto">
+                    <div style={{ minWidth: Math.max(600, monthlyShowData.length * 100) }}>
+                      <ResponsiveContainer width="100%" height={400}>
+                        <BarChart data={monthlyShowData} margin={{ bottom: 60 }}>
+                          <CartesianGrid strokeDasharray="3 3" />
+                          <XAxis dataKey="label" interval={0} angle={-30} textAnchor="end" height={90} />
+                          <YAxis allowDecimals={false} yAxisId="shows" />
+                          <YAxis yAxisId="sales" orientation="right" />
+                          <Tooltip />
+                          <Legend />
+                          <Bar yAxisId="shows" dataKey="shows" fill="#3b82f6" name="Completed Shows" />
+                          <Bar yAxisId="sales" dataKey="dailySales" fill="#10b981" name="Avg Daily Sales" />
+                        </BarChart>
+                      </ResponsiveContainer>
                     </div>
                   </div>
-                </div>
-              </CardContent>
-            </Card>
+                  <div className="overflow-x-auto mt-4">
+                    <table className="w-full text-sm text-left">
+                      <thead><tr className="border-b"><th className="p-2">Month</th><th className="p-2">Completed Shows</th><th className="p-2">Confirmation Orders</th><th className="p-2">Total Show Days</th><th className="p-2">Avg Daily Sales</th></tr></thead>
+                      <tbody>{monthlyShowData.map((row) => (
+                        <tr key={row.label} className="border-b"><td className="p-2">{row.label}</td><td className="p-2">{row.shows}</td><td className="p-2">{row.totalSales}</td><td className="p-2">{row.totalDays}</td><td className="p-2">{row.totalDays > 0 ? row.dailySales?.toFixed(2) : 'N/A'}</td></tr>
+                      ))}</tbody>
+                    </table>
+                  </div>
+                </>
+              ) : <div className="text-center py-8 text-gray-500">No completed show data available</div>}
+            </CardContent>
+          </Card>
 
-            <Card>
-              <CardHeader>
-                <CardTitle>Show Status Overview</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-3">
-                  <div className="flex justify-between items-center p-3 border rounded-lg">
-                    <span className="text-sm font-medium">Completed Shows</span>
-                    <span className="text-lg font-bold text-green-600">{completedShows}</span>
-                  </div>
-                  <div className="flex justify-between items-center p-3 border rounded-lg">
-                    <span className="text-sm font-medium">In Progress</span>
-                    <span className="text-lg font-bold text-blue-600">
-                      {shows.filter(s => s.status === 'In Progress').length}
-                    </span>
-                  </div>
-                  <div className="flex justify-between items-center p-3 border rounded-lg">
-                    <span className="text-sm font-medium">Not Started</span>
-                    <span className="text-lg font-bold text-orange-600">
-                      {shows.filter(s => s.status === 'Not Started').length}
-                    </span>
-                  </div>
-                  <div className="flex justify-between items-center p-3 border rounded-lg">
-                    <span className="text-sm font-medium">Total Registered</span>
-                      <span className="text-lg font-bold text-gray-900">{totalShows}</span>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
         </TabsContent>
 
         {/* Vehicle Distribution Tab */}
@@ -1492,3 +1361,4 @@ export default function Dashboard() {
     </div>
   );
 }
+
