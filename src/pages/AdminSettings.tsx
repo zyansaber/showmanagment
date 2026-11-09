@@ -1,3 +1,4 @@
+import { activeYear } from '@/lib/showYear';
 import { useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
@@ -100,6 +101,9 @@ export default function AdminSettings() {
   const { accounts, createAccount, updateAccount, deleteAccount, user } = useAuth();
   const [formState, setFormState] = useState(emptyAccountForm);
   const [savingAccount, setSavingAccount] = useState(false);
+  const [dealershipFile, setDealershipFile] = useState<File | null>(null);
+  const [dealershipBusy, setDealershipBusy] = useState(false);
+  const [dealershipFileKey, setDealershipFileKey] = useState(0);
   const [shows, setShows] = useState<ShowRecord[]>([]);
   const [showSettings, setShowSettings] = useState<Record<string, ShowSettings>>({});
   const [templates, setTemplates] = useState<ProcessTemplate[]>([]);
@@ -340,6 +344,101 @@ export default function AdminSettings() {
     }
   };
 
+  const downloadDealerships = async () => {
+    setDealershipBusy(true);
+    try {
+      const ExcelJS = await import('exceljs');
+      const workbook = new ExcelJS.Workbook();
+      const sheet = workbook.addWorksheet('Show Dealerships');
+      sheet.addRow(['Year', 'Show Key', 'Show Name', 'Dealership', 'Original Dealership']);
+      shows.slice().sort((a, b) => (a.name || '').localeCompare(b.name || '')).forEach((show) => {
+        sheet.addRow([activeYear, show.firebaseKey, show.name || '', show.dealership || '', show.dealership || '']);
+      });
+      sheet.getRow(1).font = { bold: true };
+      sheet.views = [{ state: 'frozen', ySplit: 1 }];
+      [10, 38, 60, 40, 40].forEach((width, index) => { sheet.getColumn(index + 1).width = width; });
+      const bytes = await workbook.xlsx.writeBuffer();
+      const url = URL.createObjectURL(new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `show-dealerships-${activeYear}.xlsx`;
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (error) {
+      console.error(error);
+      toast.error('Failed to download dealerships');
+    } finally {
+      setDealershipBusy(false);
+    }
+  };
+
+  const uploadDealerships = async () => {
+    if (!dealershipFile) return;
+    setDealershipBusy(true);
+    try {
+      const ExcelJS = await import('exceljs');
+      const workbook = new ExcelJS.Workbook();
+      await workbook.xlsx.load(await dealershipFile.arrayBuffer());
+      const sheet = workbook.getWorksheet('Show Dealerships');
+      if (!sheet) throw new Error('Missing Show Dealerships worksheet. Please use the downloaded file.');
+      const headers = ['Year', 'Show Key', 'Show Name', 'Dealership', 'Original Dealership'];
+      headers.forEach((header, index) => {
+        if (sheet.getRow(1).getCell(index + 1).text.trim() !== header) {
+          throw new Error('Invalid columns. Only edit the Dealership column in the downloaded file.');
+        }
+      });
+      // Validate the entire workbook against fresh records before one atomic update.
+      const current = (await dbGet('shows') || {}) as Record<string, Omit<ShowRecord, 'firebaseKey'>>;
+      const updates: Record<string, unknown> = {};
+      const seen = new Set<string>();
+      let rowCount = 0;
+      sheet.eachRow((row, rowNumber) => {
+        if (rowNumber === 1 || [1, 2, 3, 4, 5].every((column) => !row.getCell(column).text.trim())) return;
+        rowCount += 1;
+        const year = row.getCell(1).text.trim();
+        const key = row.getCell(2).text.trim();
+        const name = row.getCell(3).text;
+        const dealerCell = row.getCell(4);
+        const dealer = dealerCell.text.trim();
+        const original = row.getCell(5).text;
+        if (year !== String(activeYear)) throw new Error(`Row ${rowNumber}: year must be ${activeYear}.`);
+        if (!key || /[.#$[\]\/]/.test(key) || !Object.prototype.hasOwnProperty.call(current, key)) {
+          throw new Error(`Row ${rowNumber}: unknown show key.`);
+        }
+        if (seen.has(key)) throw new Error(`Row ${rowNumber}: duplicate show key.`);
+        seen.add(key);
+        const show = current[key];
+        if ((show.name || '') !== name) throw new Error(`Row ${rowNumber}: show name changed. Download a fresh file.`);
+        if ((show.dealership || '') !== original) throw new Error(`Row ${rowNumber}: dealership changed since download. Download a fresh file.`);
+        if (dealerCell.type === ExcelJS.ValueType.Formula || (dealerCell.value !== null && typeof dealerCell.value !== 'string')) {
+          throw new Error(`Row ${rowNumber}: dealership must be plain text.`);
+        }
+        if (dealer !== original) updates[`${key}/dealership`] = dealer || null;
+      });
+      if (!rowCount) throw new Error('The worksheet contains no show rows.');
+      const count = Object.keys(updates).length;
+      if (!count) { toast.info('No dealership changes found'); return; }
+      await dbUpdate('shows', updates);
+      const applied = new Map(Object.entries(updates).map(([path, value]) => [path.slice(0, -'/dealership'.length), String(value || '')]));
+      setShows((prev) => prev.map((show) => applied.has(show.firebaseKey) ? { ...show, dealership: applied.get(show.firebaseKey)! } : show));
+      setShowSettings((prev) => {
+        const next = { ...prev };
+        shows.forEach((show) => {
+          if (applied.has(show.firebaseKey) && next[show.id]) next[show.id] = { ...next[show.id], dealership: applied.get(show.firebaseKey)! };
+        });
+        return next;
+      });
+      setDealershipFile(null);
+      setDealershipFileKey((value) => value + 1);
+      toast.success(`Updated dealership for ${count} shows`);
+    } catch (error) {
+      console.error(error);
+      toast.error(error instanceof Error ? error.message : 'Failed to upload dealerships');
+    } finally {
+      setDealershipBusy(false);
+    }
+  };
+
   const handleSaveShowSettings = async (show: ShowRecord) => {
     const settings = showSettings[show.id];
     if (!settings) return;
@@ -364,6 +463,26 @@ export default function AdminSettings() {
 
   return (
     <div className="space-y-8">
+      <Card>
+        <CardHeader>
+          <CardTitle>Bulk Dealership Update ({activeYear})</CardTitle>
+          <CardDescription>
+            Download all shows for the selected year. Edit only Dealership, then upload the Excel file to apply changes.
+            Keep Year, Show Key, Show Name and Original Dealership unchanged. A blank Dealership clears its value.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <Button onClick={downloadDealerships} disabled={loadingShows || dealershipBusy || !shows.length}>Download Dealerships Excel</Button>
+          <div className="space-y-2">
+            <Label htmlFor="dealership-upload">Updated dealership file (.xlsx)</Label>
+            <Input key={dealershipFileKey} id="dealership-upload" type="file" accept=".xlsx" disabled={dealershipBusy || loadingShows}
+              onChange={(event) => setDealershipFile(event.target.files?.[0] || null)} />
+          </div>
+          <Button onClick={uploadDealerships} disabled={!dealershipFile || dealershipBusy || loadingShows}>
+            {dealershipBusy ? 'Processing…' : 'Upload & Update Dealerships'}
+          </Button>
+        </CardContent>
+      </Card>
       <section>
         <Card>
           <CardHeader>
@@ -817,3 +936,4 @@ const AccountRow = ({ account, onUpdate, onDelete }: AccountRowProps) => {
     </TableRow>
   );
 };
+
