@@ -400,7 +400,6 @@ export default function AdminSettings() {
         const name = row.getCell(3).text;
         const dealerCell = row.getCell(4);
         const dealer = dealerCell.text.trim();
-        const original = row.getCell(5).text;
         if (year !== String(activeYear)) throw new Error(`Row ${rowNumber}: year must be ${activeYear}.`);
         if (!key || /[.#$[\]\/]/.test(key) || !Object.prototype.hasOwnProperty.call(current, key)) {
           throw new Error(`Row ${rowNumber}: unknown show key.`);
@@ -409,11 +408,10 @@ export default function AdminSettings() {
         seen.add(key);
         const show = current[key];
         if ((show.name || '') !== name) throw new Error(`Row ${rowNumber}: show name changed. Download a fresh file.`);
-        if ((show.dealership || '') !== original) throw new Error(`Row ${rowNumber}: dealership changed since download. Download a fresh file.`);
         if (dealerCell.type === ExcelJS.ValueType.Formula || (dealerCell.value !== null && typeof dealerCell.value !== 'string')) {
           throw new Error(`Row ${rowNumber}: dealership must be plain text.`);
         }
-        if (dealer !== original) updates[`${key}/dealership`] = dealer || null;
+        if (dealer !== (show.dealership || '')) updates[`${key}/dealership`] = dealer || null;
       });
       if (!rowCount) throw new Error('The worksheet contains no show rows.');
       const count = Object.keys(updates).length;
@@ -468,7 +466,7 @@ export default function AdminSettings() {
           <CardTitle>Bulk Dealership Update ({activeYear})</CardTitle>
           <CardDescription>
             Download all shows for the selected year. Edit only Dealership, then upload the Excel file to apply changes.
-            Keep Year, Show Key, Show Name and Original Dealership unchanged. A blank Dealership clears its value.
+            Keep Year, Show Key and Show Name unchanged. Original Dealership is for reference only and is ignored on upload. A blank Dealership clears its value.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
