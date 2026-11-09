@@ -447,14 +447,14 @@ export default function Dashboard() {
   };
 
   const dealershipData = buildCompletedShowComparison((show) => {
-    const name = (show as Show & { handoverDealer?: string }).handoverDealer?.trim();
-    return name && !['n/a', 'na'].includes(name.toLowerCase()) ? name : 'No handover dealer set';
+    const name = show.dealership?.trim();
+    return name && !['n/a', 'na'].includes(name.toLowerCase()) ? name : 'No dealership set';
   }).sort((a, b) => a.label.localeCompare(b.label));
 
   const monthlyShowData = buildCompletedShowComparison((show) => {
     const date = new Date(show.startDate || show.finishDate || '');
     return Number.isNaN(date.getTime()) ? 'No show date' : formatDate(date, 'yyyy-MM');
-  }).sort((a, b) => a.label.localeCompare(b.label)).map((row) => ({
+  }).filter((row) => !row.label.startsWith('2025-')).sort((a, b) => a.label.localeCompare(b.label)).map((row) => ({
     ...row,
     label: row.label === 'No show date' ? row.label : formatDate(new Date(`${row.label}-01T00:00:00`), 'MMM yyyy'),
   }));
@@ -1162,7 +1162,7 @@ export default function Dashboard() {
 
           <Card>
             <CardHeader>
-              <CardTitle>Shows by Handover Dealer</CardTitle>
+              <CardTitle>Shows by Dealership</CardTitle>
               <CardDescription>
                 Completed shows only. Avg daily sales = confirmation orders from Orders &amp; Sales ÷ total show days.
               </CardDescription>
